@@ -1,0 +1,46 @@
+package math;
+
+import org.apache.commons.math3.linear.ArrayRealVector;
+import org.apache.commons.math3.linear.RealVector;
+
+import static math.CommonUtil.QL_REQUIRE;
+
+public class Array {
+    public RealVector realVector;
+
+    public Array(double[] a) {
+        realVector = new ArrayRealVector(a);
+    }
+
+    public Array(Array a) {
+        this.realVector = a.realVector;
+    }
+    public Array(int dim, double value) {
+        realVector = new ArrayRealVector(dim, value);
+    }
+
+    public Array(int dim) {
+        realVector = new ArrayRealVector(dim);
+    }
+
+    public int size() {
+        return realVector.getDimension();
+    }
+
+    public void set(int index, double val) {
+        realVector.setEntry(index, val);
+    }
+
+    public double get(int index) {
+        QL_REQUIRE(index>=0 && index < size(), "index out of bound!");
+        return realVector.getEntry(index);
+    }
+
+    public void addEq(int i, double eps) {
+        realVector.addToEntry(i, eps);
+    }
+
+    public void subtractEq(int i, double eps) {
+        realVector.addToEntry(i, -eps);
+    }
+}
