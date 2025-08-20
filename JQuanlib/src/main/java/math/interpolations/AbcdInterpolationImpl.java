@@ -69,11 +69,26 @@ public class AbcdInterpolationImpl extends templateImpl {
         List<Double> times, blackVols;
         times = new ArrayList<>();
         blackVols = new ArrayList<>();
-        for (int i = 0; i<super.xValue.length; ++i) {
+        for (int i = 0; i < super.xValue.length; ++i) {
             times.add(super.xValue[i]);
             blackVols.add(super.yValue[i]);
         }
-        abcdCalibrator_ = new AbcdCalibration();
+        abcdCalibrator_ = new AbcdCalibration(times, blackVols,
+                a_, b_, c_, d_,
+                aIsFixed_, bIsFixed_,
+                cIsFixed_, dIsFixed_,
+                vegaWeighted_,
+                endCriteria_,
+                optMethod_);
+//        abcdCalibrator_.compute();
+//        a_ = abcdCalibrator_.a();
+//        b_ = abcdCalibrator_.b();
+//        c_ = abcdCalibrator_.c();
+//        d_ = abcdCalibrator_.d();
+//        k_ = abcdCalibrator_.k(times, blackVols);
+//        error_ = abcdCalibrator_.error();
+//        maxError_ = abcdCalibrator_.maxError();
+//        abcdEndCriteria_ = abcdCalibrator_.endCriteria();
     }
 
     @Override

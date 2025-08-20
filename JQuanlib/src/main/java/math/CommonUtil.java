@@ -34,6 +34,14 @@ public class CommonUtil {
         return result;
     }
 
+    public static <T> List<T> ArrayInit(int n, T t) {
+        List<T> result = new ArrayList<>(n);
+        for (int i=0; i<n; i++) {
+            result.add(t);
+        }
+        return result;
+    }
+
     public static <T> List<T> resize(List<T> arr, int n, T t) {
         // 处理边界情况
         if (n < 0) {
