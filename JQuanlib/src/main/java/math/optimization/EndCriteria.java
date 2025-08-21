@@ -1,5 +1,7 @@
 package math.optimization;
 
+import math.ReferencePkg;
+
 import static math.CommonUtil.QL_REQUIRE;
 import static math.MathUtils.NULL_REAL;
 import static math.MathUtils.NULL_SIZE;
@@ -76,16 +78,16 @@ public class EndCriteria {
 
     // !!调用此函数，注意内部变量值变动
     public boolean value(int iteration,
-                         int statStateIterations,
+                         ReferencePkg<Integer> statStateIterations,
                          boolean positiveOptimization,
                          double fold,
                          double fnew,
                          double normgnew,
                          Type ecType) {
         return checkMaxIterations(iteration, ecType) ||
-                        checkStationaryFunctionValue(fold, fnew, statStateIterations, ecType) ||
-                        checkStationaryFunctionAccuracy(fnew, positiveOptimization, ecType) ||
-                        checkZeroGradientNorm(normgnew, ecType);
+                checkStationaryFunctionValue(fold, fnew, statStateIterations, ecType) ||
+                checkStationaryFunctionAccuracy(fnew, positiveOptimization, ecType) ||
+                checkZeroGradientNorm(normgnew, ecType);
     }
 
     /*! Test if the number of iteration is below MaxIterations */
@@ -99,14 +101,14 @@ public class EndCriteria {
 
     public boolean checkStationaryPoint(double xOld,
                                         double xNew,
-                                        int statStateIterations,
+                                        ReferencePkg<Integer> statStateIterations,
                                         Type ecType) {
         if (Math.abs(xNew - xOld) >= rootEpsilon_) {
-            statStateIterations = 0;
+            statStateIterations.setT(0);
             return false;
         }
-        ++statStateIterations;
-        if (statStateIterations <= maxStationaryStateIterations_)
+        statStateIterations.setT(statStateIterations.getT() + 1);
+        if (statStateIterations.getT() <= maxStationaryStateIterations_)
             return false;
         ecType = StationaryPoint;
         return true;
@@ -116,14 +118,14 @@ public class EndCriteria {
     public boolean checkStationaryFunctionValue(
             double fxOld,
             double fxNew,
-            int statStateIterations,
+            ReferencePkg<Integer> statStateIterations,
             Type ecType) {
         if (Math.abs(fxNew - fxOld) >= functionEpsilon_) {
-            statStateIterations = 0;
+            statStateIterations.setT(0);
             return false;
         }
-        ++statStateIterations;
-        if (statStateIterations <= maxStationaryStateIterations_)
+        statStateIterations.setT(statStateIterations.getT() + 1);
+        if (statStateIterations.getT() <= maxStationaryStateIterations_)
             return false;
         ecType = StationaryFunctionValue;
         return true;
@@ -140,17 +142,6 @@ public class EndCriteria {
         ecType = StationaryFunctionAccuracy;
         return true;
     }
-
-    //bool EndCriteria::checkZerGradientNormValue(
-    //                                        const Real gNormOld,
-    //                                        const Real gNormNew,
-    //                                        EndCriteria::Type& ecType) const {
-    //    if (std::fabs(gNormNew-gNormOld) >= gradientNormEpsilon_)
-    //        return false;
-    //    ecType = StationaryGradient;
-    //    return true;
-    //}
-
     public boolean checkZeroGradientNorm(double gradientNorm,
                                          Type ecType) {
         if (gradientNorm >= gradientNormEpsilon_)

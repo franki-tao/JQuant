@@ -43,4 +43,20 @@ public class Array {
     public void subtractEq(int i, double eps) {
         realVector.addToEntry(i, -eps);
     }
+
+    public double max() {
+        return realVector.getMaxValue();
+    }
+
+    public Array add(Array a) {
+        Array result = new Array(this);
+        result.realVector = result.realVector.add(a.realVector);
+        return result;
+    }
+
+    public Array mutiply(double x) {
+        Array result = new Array(this);
+        result.realVector = result.realVector.mapMultiply(x);
+        return result;
+    }
 }
