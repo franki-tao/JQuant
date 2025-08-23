@@ -1,31 +1,16 @@
 package math.optimization;
 
 import math.Array;
+import math.optimization.impl.ConstraintImpl;
 
 import static math.CommonUtil.QL_FAIL;
 import static math.CommonUtil.QL_REQUIRE;
 
 public class Constraint {
 
-    protected static abstract class Impl {
-        //! Tests if params satisfy the constraint
-        public abstract boolean test(Array params);
+    protected ConstraintImpl impl_;
 
-        //! Returns upper bound for given parameters
-        public Array upperBound(Array params) {
-            return new Array(params.size(),
-                    params.max());
-        }
-
-        //! Returns lower bound for given parameters
-        public Array lowerBound(Array params) {
-            return new Array(params.size(), -params.max());
-        }
-    }
-
-    protected Constraint.Impl impl_;
-
-    public Constraint(Constraint.Impl impl) {
+    public Constraint(ConstraintImpl impl) {
         this.impl_ = impl;
     }
 

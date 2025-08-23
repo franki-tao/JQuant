@@ -42,6 +42,15 @@ public class CommonUtil {
         return result;
     }
 
+    public static <T extends Number> boolean All_of(List<T> arr, Compare<T> compare) {
+        for(T t : arr) {
+            if (!compare.call(t)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public static <T> List<T> resize(List<T> arr, int n, T t) {
         // 处理边界情况
         if (n < 0) {

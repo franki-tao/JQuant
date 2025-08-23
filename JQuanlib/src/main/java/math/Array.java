@@ -3,6 +3,10 @@ package math;
 import org.apache.commons.math3.linear.ArrayRealVector;
 import org.apache.commons.math3.linear.RealVector;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 import static math.CommonUtil.QL_REQUIRE;
 
 public class Array {
@@ -15,6 +19,7 @@ public class Array {
     public Array(Array a) {
         this.realVector = a.realVector;
     }
+
     public Array(int dim, double value) {
         realVector = new ArrayRealVector(dim, value);
     }
@@ -32,7 +37,7 @@ public class Array {
     }
 
     public double get(int index) {
-        QL_REQUIRE(index>=0 && index < size(), "index out of bound!");
+        QL_REQUIRE(index >= 0 && index < size(), "index out of bound!");
         return realVector.getEntry(index);
     }
 
@@ -58,5 +63,13 @@ public class Array {
         Array result = new Array(this);
         result.realVector = result.realVector.mapMultiply(x);
         return result;
+    }
+
+    public List<Double> getList() {
+        List<Double> res = new ArrayList<>();
+        for (int i = 0; i < this.size(); i++) {
+            res.add(this.get(i));
+        }
+        return res;
     }
 }
