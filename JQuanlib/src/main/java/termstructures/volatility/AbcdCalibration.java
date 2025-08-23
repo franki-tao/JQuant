@@ -10,6 +10,7 @@ import math.optimization.ParametersTransformation;
 import java.util.List;
 
 import static math.CommonUtil.QL_REQUIRE;
+import static math.MathUtils.abcdBlackVolatility;
 
 public class AbcdCalibration {
     public boolean aIsFixed_;
@@ -80,14 +81,29 @@ public class AbcdCalibration {
             boolean useCostFunctionsJacobian = false;
             optMethod_ = new LevenbergMarquardt(epsfcn, xtol, gtol, useCostFunctionsJacobian);
         }
-        if (endCriteria_==null) {
+        if (endCriteria_ == null) {
             int maxIterations = 10000;
             int maxStationaryStateIterations = 1000;
             double rootEpsilon = 1.0e-8;
             double functionEpsilon = 0.3e-4;     // Why 0.3e-4 ?
             double gradientNormEpsilon = 0.3e-4; // Why 0.3e-4 ?
-            endCriteria_ = new EndCriteria (maxIterations, maxStationaryStateIterations,
+            endCriteria_ = new EndCriteria(maxIterations, maxStationaryStateIterations,
                     rootEpsilon, functionEpsilon, gradientNormEpsilon);
         }
+    }
+
+    public List<Double> k(List<Double> t, List<Double> blackVols) {
+        QL_REQUIRE(blackVols.size()==t.size(),
+                "mismatch between number of times (" + t.size() +
+                        ") and blackVols (" + blackVols.size() + ")");
+        List<Double> k = CommonUtil.ArrayInit(t.size());
+        for (int i=0; i<t.size() ; i++) {
+            k.set(i, blackVols.get(i)/value(t.get(i)));
+        }
+        return k;
+    }
+
+    public double value(double x) {
+        return abcdBlackVolatility(x,a_,b_,c_,d_);
     }
 }

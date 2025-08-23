@@ -1,5 +1,7 @@
 package math;
 
+import termstructures.volatility.AbcdFunction;
+
 import static math.CommonUtil.QL_FAIL;
 import static math.CommonUtil.QL_REQUIRE;
 
@@ -251,5 +253,9 @@ public class MathUtils {
         return 0;
     }
 
+    public static double abcdBlackVolatility(double u, double a, double b, double c, double d) {
+        AbcdFunction model = new AbcdFunction(a,b,c,d);
+        return model.volatility(0.,u,u);
+    }
 
 }
