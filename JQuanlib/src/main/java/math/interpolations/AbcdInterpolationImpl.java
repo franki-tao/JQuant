@@ -9,6 +9,8 @@ import termstructures.volatility.AbcdCalibration;
 import java.util.ArrayList;
 import java.util.List;
 
+import static math.CommonUtil.QL_FAIL;
+import static math.CommonUtil.QL_REQUIRE;
 import static math.MathUtils.NULL_REAL;
 
 public class AbcdInterpolationImpl extends templateImpl {
@@ -80,34 +82,44 @@ public class AbcdInterpolationImpl extends templateImpl {
                 vegaWeighted_,
                 endCriteria_,
                 optMethod_);
-//        abcdCalibrator_.compute();
-//        a_ = abcdCalibrator_.a();
-//        b_ = abcdCalibrator_.b();
-//        c_ = abcdCalibrator_.c();
-//        d_ = abcdCalibrator_.d();
-//        k_ = abcdCalibrator_.k(times, blackVols);
-//        error_ = abcdCalibrator_.error();
-//        maxError_ = abcdCalibrator_.maxError();
-//        abcdEndCriteria_ = abcdCalibrator_.endCriteria();
+        abcdCalibrator_.compute();
+        a_ = abcdCalibrator_.a();
+        b_ = abcdCalibrator_.b();
+        c_ = abcdCalibrator_.c();
+        d_ = abcdCalibrator_.d();
+        k_ = abcdCalibrator_.k(times, blackVols);
+        error_ = abcdCalibrator_.error();
+        maxError_ = abcdCalibrator_.maxError();
+        abcdEndCriteria_ = abcdCalibrator_.endCriteria();
     }
 
     @Override
     public double value(double v) {
-        return 0;
+        QL_REQUIRE(v>=0.0, "time must be non negative: " +
+                v + " not allowed");
+        return abcdCalibrator_.value(v);
     }
 
     @Override
     public double primitive(double v) {
+        QL_FAIL("Abcd primitive not implemented");
         return 0;
     }
 
     @Override
     public double derivative(double v) {
+        QL_FAIL("Abcd derivative not implemented");
         return 0;
     }
 
     @Override
     public double secondDerivative(double v) {
+        QL_FAIL("Abcd secondDerivative not implemented");
         return 0;
+    }
+
+    public final double k(double t) {
+        LinearInterpolation li = new LinearInterpolation(this.xValue, this.yValue);
+        return li.value(t, false);
     }
 }
