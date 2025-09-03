@@ -108,4 +108,8 @@ public class CommonUtil {
             System.out.println(doubles.get(i));
         }
     }
+
+    public static Matrix transpose(Matrix m) {
+        return m.transpose();
+    }
 }

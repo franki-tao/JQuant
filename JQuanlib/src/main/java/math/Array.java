@@ -72,4 +72,18 @@ public class Array {
         }
         return res;
     }
+
+    public void copy(double[] x, int start, int end) {
+        for (int i = start; i < end; i++) {
+            this.set(i, x[i]);
+        }
+    }
+
+    public double[] toArray() {
+        double[] res = new double[this.size()];
+        for (int i = 0; i < res.length; i++) {
+            res[i] = this.get(i);
+        }
+        return res;
+    }
 }

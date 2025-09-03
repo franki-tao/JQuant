@@ -9,6 +9,10 @@ public class Matrix {
         matrix = new Array2DRowRealMatrix(m);
     }
 
+    private Matrix(RealMatrix matrix) {
+        this.matrix = matrix;
+    }
+
     public Matrix(int row, int col, double value) {
         if (row * col == 0) {
             matrix = null;
@@ -32,6 +36,11 @@ public class Matrix {
 
     public void set(int i, int j, double val) {
         matrix.setEntry(i, j, val);
+    }
+
+    public Matrix transpose() {
+        RealMatrix transpose = matrix.transpose();
+        return new Matrix(transpose);
     }
 
     public static void main(String[] args) {
