@@ -1,6 +1,7 @@
-package math.interpolations;
+package math.interpolations.impl;
 
 import math.AbcdMathFunction;
+import math.interpolations.LinearInterpolation;
 import math.optimization.EndCriteria;
 import math.optimization.OptimizationMethod;
 import math.templateImpl;

@@ -1,6 +1,7 @@
-package math.interpolations;
+package math.interpolations.impl;
 
 import math.CommonUtil;
+import math.interpolations.Linear;
 import math.templateImpl;
 
 import java.util.List;

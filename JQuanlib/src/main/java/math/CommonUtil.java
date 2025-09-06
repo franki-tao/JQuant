@@ -112,4 +112,12 @@ public class CommonUtil {
     public static Matrix transpose(Matrix m) {
         return m.transpose();
     }
+
+    public static  double[] toArray(List<Double> list) {
+        double[] res = new double[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            res[i] = list.get(i);
+        }
+        return res;
+    }
 }
