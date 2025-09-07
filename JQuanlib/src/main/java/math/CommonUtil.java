@@ -120,4 +120,12 @@ public class CommonUtil {
         }
         return res;
     }
+
+    public static int lowerBound(double[] x, double bis) {
+        int index = 0;
+        while (x[index] < bis) {
+            index += 1;
+        }
+        return index;
+    }
 }

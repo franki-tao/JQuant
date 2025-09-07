@@ -86,4 +86,12 @@ public class Array {
         }
         return res;
     }
+
+    public Array transform(Function f) {
+        Array res = new Array(this);
+        for (int i = 0; i < res.size(); i++) {
+            res.set(i, f.value(res.get(i)));
+        }
+        return res;
+    }
 }
