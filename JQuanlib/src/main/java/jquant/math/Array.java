@@ -62,6 +62,12 @@ public class Array {
         return result;
     }
 
+    public Array subtract(Array a) {
+        Array result = new Array(this);
+        result.realVector = result.realVector.subtract(a.realVector);
+        return result;
+    }
+
     public Array mutiply(double x) {
         Array result = new Array(this);
         result.realVector = result.realVector.mapMultiply(x);
@@ -102,5 +108,9 @@ public class Array {
         RealVector tp = this.realVector;
         this.realVector = arr.realVector;
         arr.realVector = tp;
+    }
+
+    public boolean empty() {
+        return size() == 0;
     }
 }

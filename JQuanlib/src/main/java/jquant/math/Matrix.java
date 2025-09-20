@@ -59,4 +59,29 @@ public class Matrix {
     public Matrix inverse() {
         return new Matrix(MatrixUtils.inverse(matrix));
     }
+
+    public double[] toArray() {
+        int r = rows();
+        int c = cols();
+        double[] res = new double[r * c];
+        for (int i = 0; i < rows(); i++) {
+            for (int j = 0; j < cols(); j++) {
+                res[i * c + j] = get(i, j);
+            }
+        }
+        return res;
+    }
+
+    public void ArraytoMatrix(double[] arr) {
+        for (int i = 0; i < rows(); i++) {
+            for (int j = 0; j < cols(); j++) {
+                set(i,j, arr[i*cols()+j]);
+            }
+        }
+    }
+
+    //后乘 ， M * V
+    public Array mutiply(Array arr) {
+        return new Array(matrix.transpose().preMultiply(arr.realVector));
+    }
 }
