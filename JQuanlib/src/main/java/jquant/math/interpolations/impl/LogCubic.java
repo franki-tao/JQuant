@@ -2,8 +2,9 @@ package jquant.math.interpolations.impl;
 
 import jquant.math.Interpolation;
 import jquant.math.interpolations.CubicInterpolation;
+import jquant.math.interpolations.LogCubicInterpolation;
 
-public class Cubic extends Interpolator{
+public class LogCubic extends Interpolator {
     public static final boolean global = true;
     public static final int requiredPoints = 2;
     private CubicInterpolation.DerivativeApprox da_;
@@ -12,20 +13,18 @@ public class Cubic extends Interpolator{
     private double leftValue_, rightValue_;
 
     /*
-        默认值
-        da = CubicInterpolation::Kruger
-        monotonic = false
+        monotonic = true
         leftCondition= CubicInterpolation::SecondDerivative
         leftConditionValue = 0.0
-        rightCondition = CubicInterpolation::SecondDerivative
+        rightCondition= CubicInterpolation::SecondDerivative
         rightConditionValue = 0.0
      */
-    public Cubic(CubicInterpolation.DerivativeApprox da,
-                 boolean monotonic,
-                 CubicInterpolation.BoundaryCondition leftCondition,
-                 double leftConditionValue,
-                 CubicInterpolation.BoundaryCondition rightCondition,
-                 double rightConditionValue) {
+    public LogCubic(CubicInterpolation.DerivativeApprox da,
+                    boolean monotonic,
+                    CubicInterpolation.BoundaryCondition leftCondition,
+                    double leftConditionValue,
+                    CubicInterpolation.BoundaryCondition rightCondition,
+                    double rightConditionValue) {
         da_ = (da);
         monotonic_ = (monotonic);
         leftType_ = (leftCondition);
@@ -34,12 +33,13 @@ public class Cubic extends Interpolator{
         rightValue_ = (rightConditionValue);
     }
 
+
+    @Override
     public Interpolation interpolate(double[] x, double[] y) {
-        return new CubicInterpolation(x, y,
+        return new LogCubicInterpolation(x, y,
                 da_, monotonic_,
                 leftType_, leftValue_,
                 rightType_, rightValue_);
-
     }
 
     @Override

@@ -1,7 +1,6 @@
 package jquant.math.interpolations.impl;
 
 import jquant.math.CommonUtil;
-import jquant.math.interpolations.Linear;
 import jquant.math.templateImpl;
 
 import java.util.List;
