@@ -22,6 +22,12 @@ public abstract class Interpolation extends Extrapolator {
         return impl_.value(x);
     }
 
+    //allowExtrapolation = false
+    public double primitive(double x, boolean allowExtrapolation)  {
+        checkRange(x,allowExtrapolation);
+        return impl_.primitive(x);
+    }
+
     // allowExtrapolation 默认false
     public double derivative(double x, boolean allowExtrapolation) {
         checkRange(x, allowExtrapolation);
