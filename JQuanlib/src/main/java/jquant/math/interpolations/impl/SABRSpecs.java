@@ -14,7 +14,7 @@ public class SABRSpecs implements SarbModel {
     }
 
     @Override
-    public void defaultValues(List<Double> params, List<Double> temp, double forward, double expiryTime, List<Double> addParams) {
+    public void defaultValues(List<Double> params, List<Boolean> temp, double forward, double expiryTime, List<Double> addParams) {
         if (params.get(1) == Double.NaN) {
             params.set(1, 0.5);
         }

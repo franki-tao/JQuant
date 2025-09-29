@@ -7,7 +7,7 @@ import java.util.List;
 public interface SarbModel {
     int dimension();
 
-    void defaultValues(List<Double> params, List<Double> temp,
+    void defaultValues(List<Double> params, List<Boolean> temp,
                        final double forward, final double expiryTime,
                        final List<Double> addParams);
 
