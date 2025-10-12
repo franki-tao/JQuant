@@ -13,7 +13,7 @@ import java.util.List;
     \test the correctness of the returned values is tested by
           checking them against known good results.
 */
-public class MersenneTwisterUniformRng implements RngImpl {
+public class MersenneTwisterUniformRng extends RngImpl {
     private static final int N = 624; // state size
     private static final int M = 397; // shift size
     private static final long MATRIX_A = 0x9908b0dfL;

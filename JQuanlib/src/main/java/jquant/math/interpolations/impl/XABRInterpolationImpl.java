@@ -1,17 +1,18 @@
 package jquant.math.interpolations.impl;
 
+import jquant.math.Array;
 import jquant.math.CommonUtil;
-import jquant.math.optimization.EndCriteria;
-import jquant.math.optimization.LevenbergMarquardt;
-import jquant.math.optimization.NoConstraint;
-import jquant.math.optimization.OptimizationMethod;
+import jquant.math.optimization.*;
+import jquant.math.randomnumbers.HaltonRsg;
 import jquant.math.templateImpl;
+import jquant.methods.montecarlo.SampleVector;
 import jquant.termstructures.volatility.Sarb;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
-import static jquant.math.MathUtils.NULL_REAL;
+import static jquant.math.MathUtils.*;
 
 public class XABRInterpolationImpl extends templateImpl {
 
@@ -109,7 +110,96 @@ public class XABRInterpolationImpl extends templateImpl {
 
     @Override
     public void update() {
+        updateModelInstance();
 
+        // we should also check that y contains positive values only
+
+        // we must update weights if it is vegaWeighted
+        if (vegaWeighted_) {
+            double[] x = super.xValue;
+            double[] y = super.yValue;
+            // std::vector<Real>::iterator w = weights_.begin();
+            this.weights_.clear();
+            double weightsSum = 0.0;
+            for (int i = 0; i < x.length; i++) {
+                double stdDev = Math.sqrt(y[i] * y[i] * t_);
+                weights_.add(modelTmp.weight(x[i], forward_, stdDev, addParams_));
+                weightsSum += weights_.get(i);
+            }
+            // weight normalization
+            for (int i = 0; i < weights_.size(); i++) {
+                weights_.set(i, weights_.get(i) / weightsSum);
+            }
+        }
+
+        // there is nothing to optimize
+        if (temp1()) {
+            this.error_ = interpolationError();
+            this.maxError_ = interpolationMaxError();
+            this.XABREndCriteria_ = EndCriteria.Type.None;
+            return;
+        } else {
+            XABRError costFunction = new XABRError(this);
+
+            Array guess = new Array(modelTmp.dimension());
+            for (int i = 0; i < guess.size(); ++i)
+                guess.set(i, this.params_.get(i));
+
+            int iterations = 0;
+            int freeParameters = 0;
+            double bestError = QL_MAX_REAL;
+            Array bestParameters = new Array(0);
+            for (int i = 0; i < modelTmp.dimension(); ++i)
+                if (!this.paramIsFixed_.get(i))
+                    ++freeParameters;
+            HaltonRsg halton = new HaltonRsg(freeParameters, 42, true, false);
+            EndCriteria.Type tmpEndCriteria;
+            double tmpInterpolationError;
+
+            do {
+
+                if (iterations > 0) {
+                    final SampleVector s = halton.nextSequence();
+                    modelTmp.guess(guess, this.paramIsFixed_, this.forward_, this.t_, s.value, this.addParams_);
+                    for (int i = 0; i < this.paramIsFixed_.size(); ++i)
+                        if (this.paramIsFixed_.get(i))
+                            guess.set(i, this.params_.get(i));
+                }
+
+                Array inversedTransformatedGuess = new Array(modelTmp.inverse(guess, this.paramIsFixed_, this.params_, this.forward_));
+
+                ProjectedCostFunction constrainedXABRError = new ProjectedCostFunction(
+                        costFunction, inversedTransformatedGuess,
+                        this.paramIsFixed_);
+
+                Array projectedGuess = new Array(constrainedXABRError.project(inversedTransformatedGuess));
+
+                NoConstraint constraint = new NoConstraint();
+                Problem problem = new Problem(constrainedXABRError, constraint,
+                        projectedGuess);
+                tmpEndCriteria = optMethod_.minimize(problem, endCriteria_);
+                Array projectedResult = new Array(problem.currentValue());
+                Array transfResult = new Array(constrainedXABRError.include(projectedResult));
+
+                Array result = modelTmp.direct(transfResult, this.paramIsFixed_, this.params_, this.forward_);
+                tmpInterpolationError = useMaxError_ ? interpolationMaxError()
+                        : interpolationError();
+
+                if (tmpInterpolationError < bestError) {
+                    bestError = tmpInterpolationError;
+                    bestParameters = result;
+                    this.XABREndCriteria_ = tmpEndCriteria;
+                }
+
+            } while (++iterations < maxGuesses_ &&
+                    tmpInterpolationError > errorAccept_);
+
+            for (int i = 0; i < bestParameters.size(); ++i)
+                this.params_.set(i, bestParameters.get(i));
+
+            this.error_ = interpolationError();
+            this.maxError_ = interpolationMaxError();
+        }
     }
 
     @Override
@@ -131,4 +221,54 @@ public class XABRInterpolationImpl extends templateImpl {
     public double secondDerivative(double v) {
         return 0;
     }
+
+    // calculate total squared weighted difference (L2 norm)
+    public double interpolationSquaredError() {
+        double error, totalError = 0.0;
+        double[] x = xValue;
+        double[] y = yValue;
+        List<Double> w = weights_;
+        for (int i = 0; i < x.length; i++) {
+            error = (value(x[i]) - y[i]);
+            totalError += error * error * w.get(i);
+        }
+        return totalError;
+    }
+
+    public double interpolationError() {
+        int n = xValue.length;
+        double squaredError = interpolationSquaredError();
+        return Math.sqrt(n * squaredError / (n == 1 ? 1 : (n - 1)));
+    }
+
+    public double interpolationMaxError() {
+        double error, maxError = QL_MIN_REAL;
+        double[] i = xValue;
+        double[] j = yValue;
+        for (int k = 0; k < i.length; k++) {
+            error = Math.abs(value(i[k]) - j[k]);
+            maxError = Math.max(maxError, error);
+        }
+        return maxError;
+    }
+
+    // calculate weighted differences
+    public Array interpolationErrors() {
+        Array results = new Array(xValue.length);
+        double[] x = xValue;
+        double[] y = yValue;
+        List<Double> w = this.weights_;
+        for (int i = 0; i < xValue.length; i++) {
+            results.set(i, (value(x[i]) - y[i]) * Math.sqrt(w.get(i)));
+        }
+        return results;
+    }
+
+    private boolean temp1() {
+        for (boolean b : this.paramIsFixed_) {
+            if (!b) return false;
+        }
+        return true;
+    }
+
 }
