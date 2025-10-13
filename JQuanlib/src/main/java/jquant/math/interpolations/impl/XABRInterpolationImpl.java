@@ -11,6 +11,7 @@ import jquant.termstructures.volatility.Sarb;
 import java.util.Arrays;
 import java.util.List;
 
+import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 import static jquant.math.MathUtils.*;
 
@@ -203,22 +204,25 @@ public class XABRInterpolationImpl extends templateImpl {
     }
 
     @Override
-    public double value(double v) {
-        return 0;
+    public double value(double x) {
+        return this.modelInstance_.volatility(x, volatilityType_);
     }
 
     @Override
     public double primitive(double v) {
+        QL_FAIL("XABR primitive not implemented");
         return 0;
     }
 
     @Override
     public double derivative(double v) {
+        QL_FAIL("XABR derivative not implemented");
         return 0;
     }
 
     @Override
     public double secondDerivative(double v) {
+        QL_FAIL("XABR secondDerivative not implemented");
         return 0;
     }
 
