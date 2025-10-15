@@ -100,6 +100,12 @@ public class CommonUtil {
         return result;
     }
 
+    public static <T> List<T> ArrayToList(T[] arr) {
+        List<T> res = new ArrayList<>();
+        Collections.addAll(res, arr);
+        return res;
+    }
+
     public static <T> List<T> clone(List<T> array) {
         return new ArrayList<>(array);
     }
