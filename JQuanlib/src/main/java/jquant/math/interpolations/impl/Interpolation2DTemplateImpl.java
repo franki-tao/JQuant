@@ -110,9 +110,4 @@ public abstract class Interpolation2DTemplateImpl extends Interpolation2DImpl {
         double y1 = yMin(), y2 = yMax();
         return (y >= y1 && y <= y2) || close(y, y1) || close(y, y2);
     }
-
-    @Override
-    public double value(double x, double y) {
-        return 0;
-    }
 }
