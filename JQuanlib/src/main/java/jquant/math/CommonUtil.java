@@ -126,6 +126,21 @@ public class CommonUtil {
         return res;
     }
 
+    public static double Norm2(Array v) {
+        return Math.sqrt(DotProduct(v, v));
+    }
+
+    public static double DotProduct(Array v1, Array v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                "arrays with different sizes (" + v1.size() + ", "
+                        + v2.size() + ") cannot be multiplied");
+        double res = 0;
+        for (int i = 0; i < v1.size(); i++) {
+            res += v1.get(i) * v2.get(i);
+        }
+        return res;
+    }
+
     public static int lowerBound(double[] x, double bis) {
         int index = 0;
         while (x[index] < bis) {
