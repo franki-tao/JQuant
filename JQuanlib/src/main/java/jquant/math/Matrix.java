@@ -75,7 +75,7 @@ public class Matrix {
     public void ArraytoMatrix(double[] arr) {
         for (int i = 0; i < rows(); i++) {
             for (int j = 0; j < cols(); j++) {
-                set(i,j, arr[i*cols()+j]);
+                set(i, j, arr[i * cols() + j]);
             }
         }
     }
@@ -83,5 +83,13 @@ public class Matrix {
     //后乘 ， M * V
     public Array mutiply(Array arr) {
         return new Array(matrix.transpose().preMultiply(arr.realVector));
+    }
+
+    public void substractEq(int i, int j, double val) {
+        set(i, j, get(i, j) - val);
+    }
+
+    public void multipyEq(int i, int j, double val) {
+        set(i, j, get(i, j) * val);
     }
 }
