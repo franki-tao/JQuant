@@ -1,7 +1,12 @@
 package jquant.math.matrixutilities;
 
 import jquant.math.Array;
+import jquant.math.CommonUtil;
 import jquant.math.Matrix;
+import jquant.math.ode.AdaptiveRungeKutta;
+import jquant.math.ode.OdeFct;
+
+import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
 import static jquant.math.MathUtils.close_enough;
@@ -81,23 +86,24 @@ public class MatrixUtil {
 
     //! returns the matrix exponential exp(t*M)
     // default double t=1.0, double tol=QL_EPSILON
-//    public static Matrix Expm(final Matrix M, double t, double tol) {
-//        final int n = M.rows();
-//        QL_REQUIRE(n == M.cols(), "Expm expects a square matrix");
-//
-//        AdaptiveRungeKutta<> rk(tol);
-//        AdaptiveRungeKutta<>::OdeFct odeFct = MatrixVectorProductFct(M);
-//
-//        Matrix result(n, n);
-//        for (Size i=0; i < n; ++i) {
-//            std::vector<Real> x0(n, 0.0);
-//            x0[i] = 1.0;
-//
-//            const std::vector<Real> r = rk(odeFct, x0, 0.0, t);
-//            std::copy(r.begin(), r.end(), result.column_begin(i));
-//        }
-//        return result;
-//    }
+    public static Matrix Expm(final Matrix M, double t, double tol) {
+        final int n = M.rows();
+        QL_REQUIRE(n == M.cols(), "Expm expects a square matrix");
+
+        AdaptiveRungeKutta rk = new AdaptiveRungeKutta(tol, 1e-4, 0);
+        OdeFct odeFct = new MatrixVectorProductFct(M);
+
+        Matrix result = new Matrix(n, n, Double.NaN);
+        for (int i=0; i < n; ++i) {
+            List<Double> x0 = CommonUtil.ArrayInit(n, 0d);
+            x0.set(i, 1d);
+            final List<Double> r = rk.value(odeFct, x0, 0.0, t);
+            for (int j = 0; j < r.size(); j++) {
+                result.set(j, i, r.get(j));
+            }
+        }
+        return result;
+    }
 
     public static void check_symmetric(Matrix S) {
         for (int i = 0; i < S.rows(); i++)
