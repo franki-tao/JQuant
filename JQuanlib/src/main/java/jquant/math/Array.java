@@ -113,4 +113,16 @@ public class Array {
     public boolean empty() {
         return size() == 0;
     }
+
+    public int maxIndex() {
+        int maxIndex = 0;
+        double maxVal = get(0);
+        for (int i = 1; i < size(); i++) {
+            if (this.get(i) > maxVal) {
+                maxIndex = i;
+                maxVal = this.get(i);
+            }
+        }
+        return maxIndex;
+    }
 }

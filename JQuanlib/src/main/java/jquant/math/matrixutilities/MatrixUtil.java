@@ -6,6 +6,7 @@ import jquant.math.Matrix;
 import jquant.math.ode.AdaptiveRungeKutta;
 import jquant.math.ode.OdeFct;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -94,7 +95,7 @@ public class MatrixUtil {
         OdeFct odeFct = new MatrixVectorProductFct(M);
 
         Matrix result = new Matrix(n, n, Double.NaN);
-        for (int i=0; i < n; ++i) {
+        for (int i = 0; i < n; ++i) {
             List<Double> x0 = CommonUtil.ArrayInit(n, 0d);
             x0.set(i, 1d);
             final List<Double> r = rk.value(odeFct, x0, 0.0, t);
@@ -109,5 +110,86 @@ public class MatrixUtil {
         for (int i = 0; i < S.rows(); i++)
             for (int j = 0; j < i; j++)
                 QL_REQUIRE(S.get(i, j) == S.get(j, i), "input matrix is not symmetric");
+    }
+
+    /*! Iterative procedure to compute a correlation matrix reduction to
+        a single factor dependence vector by minimizing the residuals.
+
+        It assumes that such a reduction is possible, notice that if the
+        dependence can not be reduced to one factor the correlation
+        factors might be above 1.
+
+        The matrix passed is destroyed.
+
+        See for instance: "Modern Factor Analysis", Harry H. Harman,
+          University Of Chicago Press, 1976. Chapter 9 is relevant to
+          this context.
+    */
+    // default maxIters = 25
+    public static List<Double> factorReduction(Matrix mtrx, int maxIters) {
+        double tolerance = 1.e-6;
+
+        QL_REQUIRE(mtrx.rows() == mtrx.cols(), "Input matrix is not square");
+
+        final int n = mtrx.cols();
+        // check symmetry
+        for (int iRow = 0; iRow < mtrx.rows(); iRow++)
+            for (int iCol = 0; iCol < iRow; iCol++)
+                QL_REQUIRE(mtrx.get(iRow, iCol) == mtrx.get(iCol, iRow), "input matrix is not symmetric");
+        QL_REQUIRE(mtrx.maxEle() <= 1 && mtrx.minEle() >= -1,
+                "input matrix data is not correlation data");
+
+
+        // Initial guess value
+        List<Double> previousCorrels = CommonUtil.ArrayInit(n, 0d);
+        for (int iCol = 0; iCol < n; iCol++) {
+            for (int iRow = 0; iRow < n; iRow++)
+                previousCorrels.set(iCol, previousCorrels.get(iCol) + mtrx.get(iRow, iCol) * mtrx.get(iRow, iCol));
+            // previousCorrels[iCol] += mtrx[iRow][iCol] * mtrx[iRow][iCol];
+            previousCorrels.set(iCol, Math.sqrt((previousCorrels.get(iCol) - 1.) / (n - 1.)));
+            // previousCorrels[iCol] = std::sqrt((previousCorrels[iCol]-1.)/(n-1.));
+        }
+
+        // iterative solution
+        int iteration = 0;
+        double distance;
+        do {
+            // patch Matrix diagonal
+            for (int iCol = 0; iCol < n; iCol++)
+                mtrx.set(iCol, iCol, previousCorrels.get(iCol));
+            // mtrx[iCol][iCol] = previousCorrels[iCol];
+            // compute eigenvector decomposition
+            SymmetricSchurDecomposition ssDec = new SymmetricSchurDecomposition(mtrx);
+            //const Matrix& eigenVect = ssDec.eigenvectors();
+            Array eigenVals = ssDec.eigenvalues();
+            // We do not need the max value, only the position of the
+            //   corresponding eigenvector
+            int iMax = eigenVals.maxIndex();
+            List<Double> newCorrels = new ArrayList<>();
+            List<Double> distances = new ArrayList<>();
+
+            for (int iCol = 0; iCol < n; iCol++) {
+                double thisCorrel = mtrx.get(iMax, iCol); //[iMax][iCol];
+                newCorrels.add(thisCorrel);
+                // strictly is:
+                // abs(\sqrt{\rho}- \sqrt{\rho_{old}})/\sqrt{\rho_{old}}
+                distances.add(
+                        Math.abs(thisCorrel - previousCorrels.get(iCol)) /
+                                previousCorrels.get(iCol));
+            }
+            previousCorrels = newCorrels;
+            distance = CommonUtil.maxVal(distances);
+        } while (distance > tolerance && ++iteration <= maxIters);
+
+        // test it did not go up to the max iteration and the matrix can
+        //   be reduced to one factor.
+        QL_REQUIRE(iteration < maxIters, "convergence not reached after " +
+                iteration + " iterations");
+
+        QL_REQUIRE(CommonUtil.maxVal(previousCorrels) <= 1 && CommonUtil.minVal(previousCorrels) >= -1,
+                "matrix can not be decomposed to a single factor dependence");
+
+
+        return previousCorrels;
     }
 }

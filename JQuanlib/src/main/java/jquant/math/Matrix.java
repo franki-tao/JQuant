@@ -9,7 +9,7 @@ public class Matrix {
         matrix = new Array2DRowRealMatrix(m);
     }
 
-    private Matrix(RealMatrix matrix) {
+    public Matrix(RealMatrix matrix) {
         this.matrix = matrix;
     }
 
@@ -91,5 +91,29 @@ public class Matrix {
 
     public void multipyEq(int i, int j, double val) {
         set(i, j, get(i, j) * val);
+    }
+
+    public double maxEle() {
+        double maxval =  Double.MIN_VALUE;
+        for (int i = 0; i < rows(); i++) {
+            for (int j = 0; j < cols(); j++) {
+                if (get(i, j) > maxval) {
+                    maxval = get(i, j);
+                }
+            }
+        }
+        return maxval;
+    }
+
+    public double minEle() {
+        double minval =  Double.MAX_VALUE;
+        for (int i = 0; i < rows(); i++) {
+            for (int j = 0; j < cols(); j++) {
+                if (get(i, j) < minval) {
+                    minval = get(i, j);
+                }
+            }
+        }
+        return minval;
     }
 }

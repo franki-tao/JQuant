@@ -126,6 +126,24 @@ public class CommonUtil {
         return res;
     }
 
+    public static double maxVal(List<Double> list) {
+        Optional<Double> max = list.stream().max(Comparator.naturalOrder());
+        if (max.isPresent()) {
+            return max.get();
+        } else {
+            throw new IllegalArgumentException(list.toString());
+        }
+    }
+
+    public static double minVal(List<Double> list) {
+        Optional<Double> min = list.stream().min(Comparator.naturalOrder());
+        if (min.isPresent()) {
+            return min.get();
+        }  else {
+            throw new IllegalArgumentException(list.toString());
+        }
+    }
+
     public static double Norm2(Array v) {
         return Math.sqrt(DotProduct(v, v));
     }
