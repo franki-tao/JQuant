@@ -74,6 +74,17 @@ public class Array {
         return result;
     }
 
+    public Array div(double x) {
+        if (x == 0) {
+            throw new ArithmeticException("Division by zero!");
+        }
+        Array result = new Array(this);
+        for (int i = 0; i < result.size(); i++) {
+            result.set(i, result.get(i)/x);
+        }
+        return result;
+    }
+
     public List<Double> getList() {
         List<Double> res = new ArrayList<>();
         for (int i = 0; i < this.size(); i++) {
