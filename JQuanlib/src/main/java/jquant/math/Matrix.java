@@ -116,4 +116,13 @@ public class Matrix {
         }
         return minval;
     }
+
+    public Array diagonal() {
+        int size = Math.min(rows(), cols());
+        Array res = new Array(size);
+        for (int i = 0; i < size; i++) {
+            res.set(i, get(i, i));
+        }
+        return res;
+    }
 }

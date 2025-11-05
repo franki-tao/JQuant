@@ -192,4 +192,55 @@ public class MatrixUtil {
 
         return previousCorrels;
     }
+
+    //! Calculation of covariance from correlation and standard deviations
+    /*! Combines the correlation matrix and the vector of standard deviations
+        to return the covariance matrix.
+
+        Note that only the symmetric part of the correlation matrix is
+        used. Also it is assumed that the diagonal member of the
+        correlation matrix equals one.
+
+        \pre The correlation matrix must be symmetric with the diagonal
+             members equal to one.
+
+        \test tested on know values and cross checked with
+              CovarianceDecomposition
+    */
+    // default tolerance = 1.0e-12
+    Matrix getCovariance(List<Double> stdDev,
+                         Matrix corr,
+                         double tolerance) {
+        int size = stdDev.size();
+        QL_REQUIRE(corr.rows() == size,
+                "dimension mismatch between volatilities (" + size +
+                        ") and correlation rows (" + corr.rows() + ")");
+        QL_REQUIRE(corr.cols() == size,
+                "correlation matrix is not square: " + size +
+                        " rows and " + corr.cols() + " columns");
+
+        Matrix covariance = new Matrix(size, size, Double.NaN);
+        int i, j;
+        // DataIterator iIt, jIt;
+        for (i = 0; i < size; ++i) {
+            for (j = 0; j < i; ++j) {
+                QL_REQUIRE(Math.abs(corr.get(i, j) - corr.get(j, i)) <= tolerance,
+                        "correlation matrix not symmetric:"
+                                + "\nc[" + i + "," + j + "] = " + corr.get(i, j)
+                                + "\nc[" + j + "," + i + "] = " + corr.get(j, i));
+                covariance.set(i, i, stdDev.get(i) * stdDev.get(i));
+                covariance.set(i, j, stdDev.get(i) * stdDev.get(j) * 0.5 * (corr.get(i, j) + corr.get(j, i)));
+                //covariance[i][j] = (*iIt) * (*jIt) * 0.5 * (corr[i][j] + corr[j][i]);
+                covariance.set(j, i, covariance.get(i, j));
+                // covariance[j][i] = covariance[i][j];
+            }
+            QL_REQUIRE(Math.abs(corr.get(i, i) - 1.0) <= tolerance,
+                    "invalid correlation matrix, "
+                            + "diagonal element of the " +
+                            " row is " + corr.get(i, i) + " instead of 1.0");
+            covariance.set(i, i, stdDev.get(i) * stdDev.get(i));
+            // covariance[i][i] = (*iIt) * (*iIt);
+        }
+        return covariance;
+    }
 }
