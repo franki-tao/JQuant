@@ -48,6 +48,10 @@ public class Array {
         realVector.addToEntry(i, eps);
     }
 
+    public void multiplyEq(int i, double eps) {
+        set(i,get(i)*eps);
+    }
+
     public void subtractEq(int i, double eps) {
         realVector.addToEntry(i, -eps);
     }

@@ -3,13 +3,18 @@ package jquant.math.matrixutilities;
 import jquant.math.Array;
 import jquant.math.CommonUtil;
 import jquant.math.Matrix;
+import jquant.math.matrixutilities.impl.HypersphereCostFunction;
 import jquant.math.ode.AdaptiveRungeKutta;
 import jquant.math.ode.OdeFct;
+import jquant.math.optimization.*;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
+import static jquant.math.CommonUtil.transpose;
+import static jquant.math.MathUtils.close;
 import static jquant.math.MathUtils.close_enough;
 
 public class MatrixUtil {
@@ -242,5 +247,269 @@ public class MatrixUtil {
             // covariance[i][i] = (*iIt) * (*iIt);
         }
         return covariance;
+    }
+
+    public static void checkSymmetry(Matrix matrix) {
+        int size = matrix.rows();
+        QL_REQUIRE(size == matrix.cols(),
+                "non square matrix: " + size + " rows, " +
+                        matrix.cols() + " columns");
+        for (int i = 0; i < size; ++i)
+            for (int j = 0; j < i; ++j)
+                QL_REQUIRE(close(matrix.get(i, j), matrix.get(j, i)),
+                        "non symmetric matrix: " +
+                                "[" + i + "][" + j + "]=" + matrix.get(i, j) +
+                                ", [" + j + "][" + i + "]=" + matrix.get(j, i));
+    }
+
+    public static void normalizePseudoRoot(Matrix matrix, Matrix pseudo) {
+        int size = matrix.rows();
+        QL_REQUIRE(size == pseudo.rows(),
+                "matrix/pseudo mismatch: matrix rows are " + size +
+                        " while pseudo rows are " + pseudo.cols());
+        int pseudoCols = pseudo.cols();
+
+        // row normalization
+        for (int i = 0; i < size; ++i) {
+            double norm = 0.0;
+            for (int j = 0; j < pseudoCols; ++j)
+                norm += pseudo.get(i, j) * pseudo.get(i, j);
+            if (norm > 0.0) {
+                double normAdj = Math.sqrt(matrix.get(i, i) / norm);
+                for (int j = 0; j < pseudoCols; ++j)
+                    pseudo.set(i, j, pseudo.get(i, j) * normAdj);
+            }
+        }
+    }
+
+    // Optimization function for hypersphere and lower-diagonal algorithm
+    public static Matrix hypersphereOptimize(Matrix targetMatrix, Matrix currentRoot,
+                                             boolean lowerDiagonal) {
+        int i, j, k, size = targetMatrix.rows();
+        Matrix result = new Matrix(currentRoot.matrix);
+        Array variance = new Array(size, 0);
+        for (i = 0; i < size; i++) {
+            variance.set(i, Math.sqrt(targetMatrix.get(i, i)));
+            // variance[i]=std::sqrt(targetMatrix[i][i]);
+        }
+        if (lowerDiagonal) {
+            Matrix approxMatrix = new Matrix(result.multipy(transpose(result)).matrix);
+            result = CholeskyDecomposition(approxMatrix, true);
+            for (i = 0; i < size; i++) {
+                for (j = 0; j < size; j++) {
+                    result.multipyEq(i, j, 1d / Math.sqrt(approxMatrix.get(i, i)));
+                    // result[i][j]/=std::sqrt(approxMatrix[i][i]);
+                }
+            }
+        } else {
+            for (i = 0; i < size; i++) {
+                for (j = 0; j < size; j++) {
+                    result.multipyEq(i, j, 1d / Math.sqrt(variance.get(i)));
+                    // result[i][j]/=variance[i];
+                }
+            }
+        }
+
+        ConjugateGradient optimize = new ConjugateGradient(new ArmijoLineSearch());
+        EndCriteria endCriteria = new EndCriteria(100, 10, 1e-8, 1e-8, 1e-8);
+        HypersphereCostFunction costFunction = new HypersphereCostFunction(targetMatrix, variance, lowerDiagonal);
+        NoConstraint constraint = new NoConstraint();
+
+        // hypersphere vector optimization
+
+        if (lowerDiagonal) {
+            Array theta = new Array(size * (size - 1) / 2);
+            double eps = 1e-16;
+            for (i = 1; i < size; i++) {
+                for (j = 0; j < i; j++) {
+                    theta.set(i * (i - 1) / 2 + j, result.get(i, j));
+                    // theta[i*(i-1)/2+j]=result[i][j];
+                    if (theta.get(i * (i - 1) / 2 + j) > 1 - eps)
+                        theta.set(i * (i - 1) / 2 + j, 1 - eps);
+                    // theta[i*(i-1)/2+j]=1-eps;
+                    if (theta.get(i * (i - 1) / 2 + j) < -1 + eps)
+                        theta.set(i * (i - 1) / 2 + j, -1 + eps);
+                    // theta[i*(i-1)/2+j]=-1+eps;
+                    for (k = 0; k < j; k++) {
+                        theta.multiplyEq(i * (i - 1) / 2 + j, 1d / (Math.sin(theta.get(i * (i - 1) / 2 + k))));
+                        // theta[i*(i-1)/2+j] /= std::sin(theta[i*(i-1)/2+k]);
+                        if (theta.get(i * (i - 1) / 2 + j) > 1 - eps)
+                            theta.set(i * (i - 1) / 2 + j, 1 - eps);
+                        // theta[i*(i-1)/2+j]=1-eps;
+                        if (theta.get(i * (i - 1) / 2 + j) < -1 + eps)
+                            theta.set(i * (i - 1) / 2 + j, -1 + eps);
+                        // theta[i*(i-1)/2+j]=-1+eps;
+                    }
+                    theta.set(i * (i - 1) / 2 + j, Math.acos(theta.get(i * (i - 1) / 2 + j)));
+                    // theta[i*(i-1)/2+j] = std::acos(theta[i*(i-1)/2+j]);
+                    if (j == i - 1) {
+                        if (result.get(i, i) < 0)
+                            theta.set(i * (i - 1) / 2 + j, -theta.get(i * (i - 1) / 2 + j));
+                        // theta[i*(i-1)/2+j]=-theta[i*(i-1)/2+j];
+                    }
+                }
+            }
+            Problem p = new Problem(costFunction, constraint, theta);
+            optimize.minimize(p, endCriteria);
+            theta = p.currentValue();
+            result.fill(1.0);
+            // std::fill(result.begin(),result.end(),1.0);
+            for (i = 0; i < size; i++) {
+                for (k = 0; k < size; k++) {
+                    if (k > i) {
+                        result.set(i, k, 0);
+                        // result[i][k]=0;
+                    } else {
+                        for (j = 0; j <= k; j++) {
+                            if (j == k && k != i)
+                                result.multipyEq(i, k, Math.cos(theta.get(i * (i - 1) / 2 + j)));
+                                // result[i][k] *= std::cos(theta[i*(i-1)/2+j]);
+                            else if (j != i)
+                                result.multipyEq(i, k, Math.sin(theta.get(i * (i - 1) / 2 + j)));
+                            // result[i][k] *= std::sin(theta[i*(i-1)/2+j]);
+                        }
+                    }
+                }
+            }
+        } else {
+            Array theta = new Array(size * (size - 1));
+            double eps = 1e-16;
+            for (i = 0; i < size; i++) {
+                for (j = 0; j < size - 1; j++) {
+                    theta.set(j * size + i, result.get(i, j));
+                    // theta[j * size + i] = result[i][j];
+                    if (theta.get(j * size + i) > 1 - eps)
+                        theta.set(j * size + i, 1 - eps);
+                    // theta[j * size + i] = 1 - eps;
+                    if (theta.get(j * size + i) < -1 + eps)
+                        theta.set(j * size + i, -1 + eps);
+                    // theta[j * size + i] = -1 + eps;
+                    for (k = 0; k < j; k++) {
+                        theta.multiplyEq(j * size + i, 1d / (Math.sin(theta.get(k * size + i))));
+                        // theta[j * size + i] /= std::sin (theta[k * size + i]);
+                        if (theta.get(j * size + i) > 1 - eps)
+                            theta.set(j * size + i, 1 - eps);
+                        // theta[j * size + i] = 1 - eps;
+                        if (theta.get(j * size + i) < -1 + eps)
+                            theta.set(j * size + i, -1 + eps);
+                        // theta[j * size + i] = -1 + eps;
+                    }
+                    theta.set(j * size + i, Math.acos(theta.get(j * size + i)));
+                    // theta[j * size + i] = std::acos (theta[j * size + i]);
+                    if (j == size - 2) {
+                        if (result.get(i, j + 1) < 0)
+                            theta.set(j * size + i, -theta.get(j * size + i));
+                        // theta[j * size + i] = -theta[j * size + i];
+                    }
+                }
+            }
+            Problem p = new Problem(costFunction, constraint, theta);
+            optimize.minimize(p, endCriteria);
+            theta = p.currentValue();
+            result.fill(1.0);
+            // std::fill (result.begin(), result.end(), 1.0);
+            for (i = 0; i < size; i++) {
+                for (k = 0; k < size; k++) {
+                    for (j = 0; j <= k; j++) {
+                        if (j == k && k != size - 1)
+                            result.multipyEq(i, k, Math.cos(theta.get(j * size + i)));
+                            // result[i][k] *= std::cos (theta[j * size + i]);
+                        else if (j != size - 1)
+                            result.multipyEq(i, k, Math.sin(theta.get(j * size + i)));
+                        // result[i][k] *= std::sin (theta[j * size + i]);
+                    }
+                }
+            }
+        }
+
+        for (i = 0; i < size; i++) {
+            for (j = 0; j < size; j++) {
+                result.multipyEq(i, j, variance.get(i));
+                // result[i][j] *= variance[i];
+            }
+        }
+        return result;
+    }
+
+    // Matrix infinity norm. See Golub and van Loan (2.3.10) or
+    // <http://en.wikipedia.org/wiki/Matrix_norm>
+    public static double normInf(Matrix M) {
+        int rows = M.rows();
+        int cols = M.cols();
+        double norm = 0.0;
+        for (int i = 0; i < rows; ++i) {
+            double colSum = 0.0;
+            for (int j = 0; j < cols; ++j)
+                colSum += Math.abs(M.get(i, j));
+            norm = Math.max(norm, colSum);
+        }
+        return norm;
+    }
+
+    // Take a matrix and make all the diagonal entries 1.
+    public static Matrix projectToUnitDiagonalMatrix(Matrix M) {
+        int size = M.rows();
+        QL_REQUIRE(size == M.cols(),
+                "matrix not square");
+
+        Matrix result = new Matrix(M.matrix);
+        for (int i = 0; i < size; ++i)
+            result.set(i, i, 1);
+        // result[i][i] = 1.0;
+        return result;
+    }
+
+    public static Matrix projectToPositiveSemidefiniteMatrix(Matrix M) {
+        int size = M.rows();
+        QL_REQUIRE(size == M.cols(),
+                "matrix not square");
+
+        Matrix diagonal = new Matrix(size, size, 0.0);
+        SymmetricSchurDecomposition jd = new SymmetricSchurDecomposition(M);
+        Array eigenvalues = jd.eigenvalues();
+        for (int i = 0; i < size; ++i)
+            diagonal.set(i, i, Math.max(eigenvalues.get(i), 0));
+        // diagonal[i][i] = std::max<Real>(jd.eigenvalues()[i], 0.0);
+
+        // jd.eigenvectors()*diagonal*transpose(jd.eigenvectors());
+        return jd.eigenvectors().multipy(diagonal).multipy(transpose(jd.eigenvectors()));
+    }
+
+    // implementation of the Higham algorithm to find the nearest
+    // correlation matrix.
+    public static Matrix highamImplementation(final Matrix A, final int maxIterations, final double tolerance) {
+
+        int size = A.rows();
+        Matrix R;
+        Matrix Y = new Matrix(A.matrix);
+        Matrix X = new Matrix(A.matrix);
+        Matrix deltaS = new Matrix(size, size, 0.0);
+
+        Matrix lastX = new Matrix(X.matrix);
+        Matrix lastY = new Matrix(Y.matrix);
+
+        for (int i = 0; i < maxIterations; ++i) {
+            R = Y.subtract(deltaS);
+            X = projectToPositiveSemidefiniteMatrix(R);
+            deltaS = X.subtract(R);
+            Y = projectToUnitDiagonalMatrix(X);
+
+            // convergence test
+            if (CommonUtil.maxVal(Arrays.asList(normInf(X.subtract(lastX)) / normInf(X),
+                    normInf(Y.subtract(lastY)) / normInf(Y),
+                    normInf(Y.subtract(X)) / normInf(Y))) <= tolerance) {
+                break;
+            }
+            lastX = X;
+            lastY = Y;
+        }
+
+        // ensure we return a symmetric matrix
+        for (int i = 0; i < size; ++i)
+            for (int j = 0; j < i; ++j)
+                Y.set(i, j, Y.get(j, i));
+        // Y[i][j] = Y[j][i];
+
+        return Y;
     }
 }
