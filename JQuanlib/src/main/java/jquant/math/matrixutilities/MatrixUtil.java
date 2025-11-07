@@ -310,7 +310,7 @@ public class MatrixUtil {
             }
         }
 
-        ConjugateGradient optimize = new ConjugateGradient(new ArmijoLineSearch());
+        ConjugateGradient optimize = new ConjugateGradient(new ArmijoLineSearch(1e-8, 0.05, 0.65));
         EndCriteria endCriteria = new EndCriteria(100, 10, 1e-8, 1e-8, 1e-8);
         HypersphereCostFunction costFunction = new HypersphereCostFunction(targetMatrix, variance, lowerDiagonal);
         NoConstraint constraint = new NoConstraint();
