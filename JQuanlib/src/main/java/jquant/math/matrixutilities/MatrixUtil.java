@@ -4,6 +4,7 @@ import jquant.math.Array;
 import jquant.math.CommonUtil;
 import jquant.math.Matrix;
 import jquant.math.matrixutilities.impl.HypersphereCostFunction;
+import jquant.math.matrixutilities.impl.SalvagingAlgorithm;
 import jquant.math.ode.AdaptiveRungeKutta;
 import jquant.math.ode.OdeFct;
 import jquant.math.optimization.*;
@@ -12,10 +13,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import static jquant.math.CommonUtil.QL_REQUIRE;
-import static jquant.math.CommonUtil.transpose;
-import static jquant.math.MathUtils.close;
-import static jquant.math.MathUtils.close_enough;
+import static jquant.math.CommonUtil.*;
+import static jquant.math.MathUtils.*;
+import static jquant.math.matrixutilities.impl.SalvagingAlgorithm.Type.Higham;
 
 public class MatrixUtil {
     public static Matrix CholeskyDecomposition(final Matrix S, boolean flexible) {
@@ -511,5 +511,222 @@ public class MatrixUtil {
         // Y[i][j] = Y[j][i];
 
         return Y;
+    }
+
+    //! Returns the pseudo square root of a real symmetric matrix
+    /*! Given a matrix \f$ M \f$, the result \f$ S \f$ is defined
+        as the matrix such that \f$ S S^T = M. \f$
+        If the matrix is not positive semi definite, it can
+        return an approximation of the pseudo square root
+        using a (user selected) salvaging algorithm.
+
+        For more information see: R. Rebonato and P. Jäckel, The most
+        general methodology to create a valid correlation matrix for
+        risk management and option pricing purposes, The Journal of
+        Risk, 2(2), Winter 1999/2000.
+        http://www.rebonato.com/correlationmatrix.pdf
+
+        Revised and extended in "Monte Carlo Methods in Finance",
+        by Peter Jäckel, Chapter 6.
+
+        \pre the given matrix must be symmetric.
+
+        \relates Matrix
+
+        \warning Higham algorithm only works for correlation matrices.
+
+        \test
+        - the correctness of the results is tested by reproducing
+          known good data.
+        - the correctness of the results is tested by checking
+          returned values against numerical calculations.
+    */
+    public static Matrix pseudoSqrt(final Matrix matrix,
+                                    SalvagingAlgorithm.Type sa) {
+        if (sa == null) {
+            sa = SalvagingAlgorithm.Type.None;
+        }
+        int size = matrix.rows();
+        checkSymmetry(matrix);
+        QL_REQUIRE(size == matrix.cols(),
+                "non square matrix: " + size + " rows, " +
+                        matrix.cols() + " columns");
+
+        // spectral (a.k.a Principal Component) analysis
+        SymmetricSchurDecomposition jd = new SymmetricSchurDecomposition(matrix);
+        Matrix diagonal = new Matrix(size, size, 0.0);
+
+        // salvaging algorithm
+        Matrix result = new Matrix(size, size, Double.NaN);
+        boolean negative;
+        switch (sa) {
+            case None:
+                // eigenvalues are sorted in decreasing order
+                QL_REQUIRE(jd.eigenvalues().get(size - 1) >= -1e-16,
+                        "negative eigenvalue(s) ("
+                                + jd.eigenvalues().get(size - 1)
+                                + ")");
+                result = CholeskyDecomposition(matrix, true);
+                break;
+            case Spectral:
+                // negative eigenvalues set to zero
+                for (int i = 0; i < size; i++)
+                    diagonal.set(i, i, Math.sqrt(Math.max(jd.eigenvalues().get(i), 0.0)));
+                // diagonal[i][i] = std::sqrt (std::max < Real > (jd.eigenvalues()[i], 0.0));
+
+                result = jd.eigenvectors().multipy(diagonal);
+                normalizePseudoRoot(matrix, result);
+                break;
+            case Hypersphere:
+                // negative eigenvalues set to zero
+                negative = false;
+                for (int i = 0; i < size; ++i) {
+                    diagonal.set(i, i, Math.sqrt(Math.max(jd.eigenvalues().get(i), 0.0)));
+                    // diagonal[i][i] = std::sqrt (std::max < Real > (jd.eigenvalues()[i], 0.0));
+                    if (jd.eigenvalues().get(i) < 0.0) negative = true;
+                }
+                result = jd.eigenvectors().multipy(diagonal);
+                normalizePseudoRoot(matrix, result);
+
+                if (negative)
+                    result = hypersphereOptimize(matrix, result, false);
+                break;
+            case LowerDiagonal:
+                // negative eigenvalues set to zero
+                negative = false;
+                for (int i = 0; i < size; ++i) {
+                    diagonal.set(i, i, Math.sqrt(Math.max(jd.eigenvalues().get(i), 0.0)));
+                    if (jd.eigenvalues().get(i) < 0.0) negative = true;
+                }
+                result = jd.eigenvectors().multipy(diagonal);
+
+                normalizePseudoRoot(matrix, result);
+
+                if (negative)
+                    result = hypersphereOptimize(matrix, result, true);
+                break;
+            case Higham: {
+                int maxIterations = 40;
+                double tol = 1e-6;
+                result = highamImplementation(matrix, maxIterations, tol);
+                result = CholeskyDecomposition(result, true);
+            }
+            break;
+            case Principal: {
+                QL_REQUIRE(jd.eigenvalues().back() >= -10 * QL_EPSILON,
+                        "negative eigenvalue(s) ("
+                                + jd.eigenvalues().back()
+                                + ")");
+
+                Array sqrtEigenvalues = new Array(size);
+                for (int i = 0; i < jd.eigenvalues().size(); i++) {
+                    sqrtEigenvalues.set(i, Math.sqrt(Math.max(jd.eigenvalues().get(i), 0d)));
+                }
+                for (int i = 0; i < size; ++i)
+                    for (int j = 0; j < sqrtEigenvalues.size(); j++) {
+                        diagonal.set(j, i, sqrtEigenvalues.get(j) * jd.eigenvectors().get(i, j));
+                    }
+
+                result = jd.eigenvectors().multipy(diagonal);
+                result = result.add(transpose(result)).multiply(0.5);
+                // result = 0.5 * (result + transpose(result));
+            }
+            break;
+            default:
+                QL_FAIL("unknown salvaging algorithm");
+        }
+        return result;
+    }
+
+    //! Returns the rank-reduced pseudo square root of a real symmetric matrix
+    /*! The result matrix has rank<=maxRank. If maxRank>=size, then the
+        specified percentage of eigenvalues out of the eigenvalues' sum is
+        retained.
+
+        If the input matrix is not positive semi definite, it can return an
+        approximation of the pseudo square root using a (user selected)
+        salvaging algorithm.
+
+        \pre the given matrix must be symmetric.
+
+        \relates Matrix
+    */
+    public static Matrix rankReducedSqrt(final Matrix matrix,
+                                         int maxRank,
+                                         double componentRetainedPercentage,
+                                         SalvagingAlgorithm.Type sa) {
+        int size = matrix.rows();
+
+        checkSymmetry(matrix);
+        QL_REQUIRE(size == matrix.cols(),
+                "non square matrix: " + size + " rows, " +
+                        matrix.cols() + " columns");
+
+        QL_REQUIRE(componentRetainedPercentage > 0.0,
+                "no eigenvalues retained");
+
+        QL_REQUIRE(componentRetainedPercentage <= 1.0,
+                "percentage to be retained > 100%");
+
+        QL_REQUIRE(maxRank >= 1,
+                "max rank required < 1");
+
+        // spectral (a.k.a Principal Component) analysis
+        SymmetricSchurDecomposition jd = new SymmetricSchurDecomposition(matrix);
+        Array eigenValues = jd.eigenvalues();
+
+        // salvaging algorithm
+        switch (sa) {
+            case None:
+                // eigenvalues are sorted in decreasing order
+                QL_REQUIRE(eigenValues.get(size - 1) >= -1e-16,
+                        "negative eigenvalue(s) ("
+                                + eigenValues.get(size - 1)
+                                + ")");
+                break;
+            case Spectral:
+                // negative eigenvalues set to zero
+                for (int i = 0; i < size; ++i)
+                    eigenValues.set(i, Math.max(eigenValues.get(i), 0d));
+                // eigenValues[i] = std::max<Real>(eigenValues[i], 0.0);
+                break;
+            case Higham: {
+                int maxIterations = 40;
+                double tolerance = 1e-6;
+                Matrix adjustedMatrix = highamImplementation(matrix, maxIterations, tolerance);
+                jd = new SymmetricSchurDecomposition(adjustedMatrix);
+                eigenValues = jd.eigenvalues();
+            }
+            break;
+            default:
+                QL_FAIL("unknown or invalid salvaging algorithm");
+        }
+
+        // factor reduction
+        double enough = componentRetainedPercentage * CommonUtil.accumulate(eigenValues, 0, eigenValues.size(), 0d);
+        // std::accumulate(eigenValues.begin(), eigenValues.end(), Real(0.0));
+        if (componentRetainedPercentage == 1.0) {
+            // numerical glitches might cause some factors to be discarded
+            enough *= 1.1;
+        }
+        // retain at least one factor
+        double components = eigenValues.get(0);
+        int retainedFactors = 1;
+        for (int i = 1; components < enough && i < size; ++i) {
+            components += eigenValues.get(i);
+            retainedFactors++;
+        }
+        // output is granted to have a rank<=maxRank
+        retainedFactors = Math.min(retainedFactors, maxRank);
+
+        Matrix diagonal = new Matrix(size, retainedFactors, 0.0);
+        for (int i = 0; i < retainedFactors; ++i)
+            diagonal.set(i, i, Math.sqrt(eigenValues.get(i)));
+        // diagonal[i][i] = std::sqrt(eigenValues[i]);
+        Matrix result = jd.eigenvectors().multipy(diagonal);
+
+        normalizePseudoRoot(matrix, result);
+        return result;
+
     }
 }

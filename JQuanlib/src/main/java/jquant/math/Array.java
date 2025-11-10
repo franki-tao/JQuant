@@ -140,4 +140,7 @@ public class Array {
         }
         return maxIndex;
     }
+    public double back() {
+        return get(size() -1);
+    }
 }

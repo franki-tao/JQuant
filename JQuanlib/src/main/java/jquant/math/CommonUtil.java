@@ -372,6 +372,14 @@ public class CommonUtil {
         return res;
     }
 
+    public static double accumulate(Array arr, int start, int end, double init) {
+        double res = init;
+        for (int i = start; i < end; i++) {
+            res += arr.get(i);
+        }
+        return res;
+    }
+
     public static void main(String[] args) {
         List<Integer> a = Arrays.asList(1, 2, 3);
         List<Integer> c = a;

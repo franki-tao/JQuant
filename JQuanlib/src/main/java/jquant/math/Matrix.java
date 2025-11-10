@@ -52,6 +52,14 @@ public class Matrix {
         return new Matrix(this.matrix.multiply(m.matrix));
     }
 
+    public Matrix multiply(double val) {
+        return new Matrix(this.matrix.scalarMultiply(val));
+    }
+
+    public Matrix add(Matrix m) {
+        return new Matrix(this.matrix.add(m.matrix));
+    }
+
     public Matrix subtract(Matrix m) {
         return new Matrix(this.matrix.subtract(m.matrix));
     }

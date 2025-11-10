@@ -77,4 +77,8 @@ public abstract class LineSearch {
     public Array searchDirection() {
         return searchDirection_;
     }
+
+    public void setSearchDirection_(Array searchDirection_) {
+        this.searchDirection_ = searchDirection_;
+    }
 }
