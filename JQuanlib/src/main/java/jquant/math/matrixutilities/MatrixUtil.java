@@ -2,12 +2,15 @@ package jquant.math.matrixutilities;
 
 import jquant.math.Array;
 import jquant.math.CommonUtil;
+import jquant.math.MathUtils;
 import jquant.math.Matrix;
 import jquant.math.matrixutilities.impl.HypersphereCostFunction;
 import jquant.math.matrixutilities.impl.SalvagingAlgorithm;
 import jquant.math.ode.AdaptiveRungeKutta;
 import jquant.math.ode.OdeFct;
 import jquant.math.optimization.*;
+import jquant.math.optimization.impl.MinPack;
+import jquant.math.optimization.impl.QrFacParams;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -727,6 +730,149 @@ public class MatrixUtil {
 
         normalizePseudoRoot(matrix, result);
         return result;
+    }
 
+    //! QR decompoisition
+    /*! This implementation is based on MINPACK
+        (<http://www.netlib.org/minpack>,
+        <http://www.netlib.org/cephes/linalg.tgz>)
+
+        This subroutine uses householder transformations with column
+        pivoting (optional) to compute a qr factorization of the
+        m by n matrix A. That is, qrfac determines an orthogonal
+        matrix q, a permutation matrix p, and an upper trapezoidal
+        matrix r with diagonal elements of nonincreasing magnitude,
+        such that A*p = q*r.
+
+        Return value ipvt is an integer array of length n, which
+        defines the permutation matrix p such that A*p = q*r.
+        Column j of p is column ipvt(j) of the identity matrix.
+
+        See lmdiff.cpp for further details.
+    */
+    // default pivot = true
+    public static List<Integer> qrDecomposition(final Matrix M,
+                                                Matrix q,
+                                                Matrix r,
+                                                boolean pivot) {
+        Matrix mT = transpose(M);
+        final int m = M.rows();
+        final int n = M.cols();
+
+        int[] lipvt = new int[n];
+        double[] rdiag = new double[n];
+        double[] wa = new double[n];
+        double[] aa = mT.toArray();
+        QrFacParams params = new QrFacParams(m, n, mT.toArray(), 0, (pivot) ? 1 : 0, lipvt, n, rdiag, rdiag, wa);
+        MinPack.qrfac(params);
+        // MinPack.qrfac(m, n, mT.begin(), 0, (pivot)?1:0, lipvt.get(), n, rdiag.get(), rdiag.get(), wa.get());
+        //出箱
+        mT.ArraytoMatrix(params.a);
+        lipvt = params.ipvt;
+        rdiag = params.rdiag;
+        wa = params.wa;
+        if (r.cols() != n || r.rows() != n)
+            r = new Matrix(n, n, Double.NaN);
+
+        for (int i = 0; i < n; ++i) {
+            r.row_fill(i, 0, i, 0);
+            // std::fill(r.row_begin(i), r.row_begin(i)+i, 0.0);
+            r.set(i, i, rdiag[i]);
+            // r[i][i] = rdiag[i];
+            if (i < m) {
+                for (int j = i + 1; j < mT.cols(); j++) {
+                    r.set(i, j, mT.get(j, i));
+                }
+                // std::copy(mT.column_begin(i)+i+1, mT.column_end(i), r.row_begin(i)+i+1);
+            } else {
+                r.row_fill(i, i + 1, r.cols(), 0d);
+                // std::fill(r.row_begin(i)+i+1, r.row_end(i), 0.0);
+            }
+        }
+
+        if (q.rows() != m || q.cols() != n)
+            q = new Matrix(m, n, Double.NaN);
+
+        if (m > n) {
+            q.fill(0);
+            // std::fill(q.begin(), q.end(), 0.0);
+
+            int u = Math.min(n, m);
+            for (int i = 0; i < u; ++i)
+                q.set(i, i, 1d);
+
+            Array v = new Array(m);
+            for (int i = u - 1; i >= 0; --i) {
+                if (Math.abs(mT.get(i, i)) > QL_EPSILON) {
+                    final double tau = 1.0 / mT.get(i, i);
+                    v.fill(0, i, 0d);
+                    // std::fill(v.begin(), v.begin()+i, 0.0);
+                    for (int j = i; j < mT.cols(); ++j) {
+                        v.set(j, mT.get(i, j));
+                    }
+                    // std::copy(mT.row_begin(i)+i, mT.row_end(i), v.begin()+i);
+
+                    Array w = new Array(n, 0.0);
+                    for (int l = 0; l < n; ++l) {
+                        double temp = 0d;
+                        for (int k = i; k < v.size(); ++k) {
+                            temp += v.get(k) * q.get(k, l);
+                        }
+                        w.addEq(l, temp);
+                    }
+                    // w[l] += std::inner_product(v.begin()+i, v.end(), q.column_begin(l)+i, Real(0.0));
+
+                    for (int k = i; k < m; ++k) {
+                        final double a = tau * v.get(k);
+                        for (int l = 0; l < n; ++l)
+                            q.set(k, l, q.get(k, l) - a * w.get(l));
+                        // q[k][l] -= a*w[l];
+                    }
+                }
+            }
+        } else {
+            Array w = new Array(m);
+            for (int k = 0; k < m; ++k) {
+                w.fill(0, w.size(), 0d);
+                // std::fill(w.begin(), w.end(), 0.0);
+                w.set(k, 1d);
+                // w[k] = 1.0;
+
+                for (int j = 0; j < Math.min(n, m); ++j) {
+                    final double t3 = mT.get(j, j);
+                    if (t3 != 0.0) {
+                        double temp = 0d;
+                        for (int i = j; i < mT.cols(); i++) {
+                            temp += mT.get(j, i) * w.get(i);
+                        }
+                        final double t = temp / t3;
+                        // final double t = std::inner_product (mT.row_begin(j) + j, mT.row_end(j), w.begin() + j, Real(0.0))/t3;
+                        for (int i = j; i < m; ++i) {
+                            w.subtractEq(i, mT.get(j, i) * t);
+                            // w[i] -= mT[j][i] * t;
+                        }
+                    }
+                    q.set(k, j, w.get(j));
+                    // q[k][j] = w[j];
+                }
+                q.row_fill(k, Math.min(n, m), q.cols(), 0d);
+                // std::fill (q.row_begin(k) + std::min (n, m),q.row_end(k), 0.0);
+            }
+        }
+        List<Integer> ipvt = CommonUtil.ArrayInit(n);
+        // std::vector < Size > ipvt(n);
+
+        if (pivot) {
+            for (int i = 0; i < n; i++) {
+                ipvt.set(i, lipvt[i]);
+            }
+            // std::copy (lipvt.get(), lipvt.get() + n, ipvt.begin());
+        } else {
+            for (int i = 0; i < n; ++i)
+                ipvt.set(i, i);
+            // ipvt[i] = i;
+        }
+
+        return ipvt;
     }
 }

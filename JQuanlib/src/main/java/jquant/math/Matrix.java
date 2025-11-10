@@ -68,6 +68,12 @@ public class Matrix {
         return new Matrix(MatrixUtils.inverse(matrix));
     }
 
+    public void row_fill(int row, int begin, int end, double val) {
+        for (int i = begin; i < end; i++) {
+            set(row, i, val);
+        }
+    }
+
     public double[] toArray() {
         int r = rows();
         int c = cols();

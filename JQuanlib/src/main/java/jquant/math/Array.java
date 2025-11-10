@@ -143,4 +143,9 @@ public class Array {
     public double back() {
         return get(size() -1);
     }
+    public void fill(int begin, int end, double val) {
+        for (int i = begin; i < end; i++) {
+            set(i, val);
+        }
+    }
 }
