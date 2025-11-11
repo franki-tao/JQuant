@@ -11,6 +11,7 @@ import jquant.math.ode.OdeFct;
 import jquant.math.optimization.*;
 import jquant.math.optimization.impl.MinPack;
 import jquant.math.optimization.impl.QrFacParams;
+import jquant.math.optimization.impl.QrsolvParams;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -875,4 +876,68 @@ public class MatrixUtil {
 
         return ipvt;
     }
+
+    //! QR Solve
+    /*! This implementation is based on MINPACK
+        (<http://www.netlib.org/minpack>,
+        <http://www.netlib.org/cephes/linalg.tgz>)
+
+        Given an m by n matrix A, an n by n diagonal matrix d,
+        and an m-vector b, the problem is to determine an x which
+        solves the system
+
+        A*x = b ,     d*x = 0 ,
+
+        in the least squares sense.
+
+        d is an input array of length n which must contain the
+        diagonal elements of the matrix d.
+
+        See lmdiff.cpp for further details.
+    */
+    // default pivot = true d = Array()
+    public static Array qrSolve(final Matrix a,
+                                final Array b,
+                                boolean pivot,
+                                final Array d) {
+        final int m = a.rows();
+        final int n = a.cols();
+
+        QL_REQUIRE(b.size() == m, "dimensions of A and b don't match");
+        QL_REQUIRE(d.size() == n || d.empty(), "dimensions of A and d don't match");
+
+        Matrix q = new Matrix(m, n, Double.NaN);
+        Matrix r = new Matrix(n, n,  Double.NaN);
+
+        List<Integer> lipvt = qrDecomposition(a, q, r, pivot);
+
+        int[] ipvt = new int[n];
+        for (int i = 0; i < lipvt.size(); i++) {
+            ipvt[i] = lipvt.get(i);
+        }
+        // std::copy(lipvt.begin(), lipvt.end(), ipvt.get());
+
+        Matrix rT = transpose(r);
+
+        double[] sdiag = new double[n];
+        double[] wa = new double[n];
+
+        Array ld = new Array(n, 0.0);
+        if (!d.empty()) {
+            for (int i = 0; i < d.size(); i++) {
+                ld.set(i, d.get(i));
+            }
+            // std::copy(d.begin(), d.end(), ld.begin());
+        }
+
+        Array x = new Array(n);
+        Array qtb = transpose(q).mutiply(b);
+        // 装箱
+        QrsolvParams params = new QrsolvParams(n, rT.toArray(), n, ipvt, ld.toArray(), qtb.toArray(), x.toArray(), sdiag, wa);
+        MinPack.qrsolv(params);
+        // 开箱
+        x = new Array(params.x);
+        return x;
+    }
+
 }
