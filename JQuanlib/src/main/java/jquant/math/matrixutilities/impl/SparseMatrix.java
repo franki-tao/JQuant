@@ -1,5 +1,6 @@
 package jquant.math.matrixutilities.impl;
 
+import jquant.math.Matrix;
 import org.apache.commons.math3.linear.OpenMapRealMatrix;
 
 // 稀疏矩阵
@@ -24,5 +25,9 @@ public class SparseMatrix {
 
     public double get(int row, int col) {
         return matrix.getEntry(row, col);
+    }
+
+    public Matrix multiply(Matrix m) {
+        return new Matrix(matrix.multiply(m.matrix));
     }
 }

@@ -38,15 +38,19 @@ public class Matrix {
         matrix.setEntry(i, j, val);
     }
 
+    public Array getRowArray(int row) {
+        return new Array(matrix.getRowVector(row));
+    }
+
+    public Array getColArray(int col) {
+        return new Array(matrix.getColumnVector(col));
+    }
+
     public Matrix transpose() {
         RealMatrix transpose = matrix.transpose();
         return new Matrix(transpose);
     }
 
-    public static void main(String[] args) {
-        Matrix m = new Matrix(0, 2, 10);
-        System.out.println(m.matrix);
-    }
 
     public Matrix multipy(Matrix m) {
         return new Matrix(this.matrix.multiply(m.matrix));
@@ -147,4 +151,11 @@ public class Matrix {
             }
         }
     }
+
+    public static void main(String[] args) {
+        Matrix m = new Matrix(3, 2, 10);
+        System.out.println(m.matrix);
+        System.out.println(m.getColArray(0));
+    }
+
 }

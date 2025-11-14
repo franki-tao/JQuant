@@ -6,6 +6,7 @@ import jquant.math.MathUtils;
 import jquant.math.Matrix;
 import jquant.math.matrixutilities.impl.HypersphereCostFunction;
 import jquant.math.matrixutilities.impl.SalvagingAlgorithm;
+import jquant.math.matrixutilities.impl.SparseMatrix;
 import jquant.math.ode.AdaptiveRungeKutta;
 import jquant.math.ode.OdeFct;
 import jquant.math.optimization.*;
@@ -938,6 +939,24 @@ public class MatrixUtil {
         // 开箱
         x = new Array(params.x);
         return x;
+    }
+
+    public static Array prod(SparseMatrix A, Array x) {
+        QL_REQUIRE(x.size() == A.size2(),
+                "vectors and sparse matrices with different sizes ("
+                        + x.size() + ", " + A.size1() + "x" + A.size2() + ") cannot be multiplied");
+
+        double[][] data = {x.toArray()};
+        Matrix m = new Matrix(data).transpose();
+        return A.multiply(m).getColArray(0);
+    }
+
+    public static void main(String[] args) {
+        SparseMatrix a = new SparseMatrix(3, 3);
+        a.set(0, 0, 1);
+        Array x = new Array(3,10);
+        Array b = prod(a, x);
+        System.out.println(b);
     }
 
 }

@@ -148,4 +148,11 @@ public class Array {
             set(i, val);
         }
     }
+
+    @Override
+    public String toString() {
+        return "Array{" +
+                "realVector=" + realVector +
+                '}';
+    }
 }
