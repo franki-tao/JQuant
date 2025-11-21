@@ -951,6 +951,20 @@ public class MatrixUtil {
         return A.multiply(m).getColArray(0);
     }
 
+    /*  returns hypotenuse of real (non-complex) scalars a and b by
+        avoiding underflow/overflow
+        using (a * sqrt( 1 + (b/a) * (b/a))), rather than
+        sqrt(a*a + b*b).
+    */
+    public static double hypot(final double a, final double b) {
+        if (a == 0) {
+            return Math.abs(b);
+        } else {
+            double c = b/a;
+            return Math.abs(a) * Math.sqrt(1 + c*c);
+        }
+    }
+
     public static void main(String[] args) {
         SparseMatrix a = new SparseMatrix(3, 3);
         a.set(0, 0, 1);

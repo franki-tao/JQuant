@@ -149,6 +149,12 @@ public class Array {
         }
     }
 
+    public void swap(int i, int j) {
+        double tmp = this.get(i);
+        this.set(i, this.get(j));
+        this.set(j, tmp);
+    }
+
     @Override
     public String toString() {
         return "Array{" +

@@ -107,8 +107,18 @@ public class Matrix {
         set(i, j, get(i, j) - val);
     }
 
+    public void addEq(int i, int j, double val) {
+        substractEq(i, j, -val);
+    }
+
     public void multipyEq(int i, int j, double val) {
         set(i, j, get(i, j) * val);
+    }
+
+    public void swap(int li, int lj, int ri, int rj) {
+        double tmp = get(li, lj);
+        set(li, lj, get(ri, rj));
+        set(ri, rj, tmp);
     }
 
     public double maxEle() {
@@ -150,6 +160,13 @@ public class Matrix {
                 set(i, j, val);
             }
         }
+    }
+
+    @Override
+    public String toString() {
+        return "Matrix{" +
+                "matrix=" + matrix +
+                '}';
     }
 
     public static void main(String[] args) {
