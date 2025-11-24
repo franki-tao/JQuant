@@ -13,6 +13,15 @@ public class Matrix {
         this.matrix = matrix;
     }
 
+    public Matrix(int row, int col) {
+        if (row * col == 0) {
+            matrix = null;
+            return;
+        }
+        matrix = new Array2DRowRealMatrix(row, col);
+        matrix = matrix.scalarAdd(Double.NaN);
+    }
+
     public Matrix(int row, int col, double value) {
         if (row * col == 0) {
             matrix = null;

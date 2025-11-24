@@ -908,7 +908,7 @@ public class MatrixUtil {
         QL_REQUIRE(d.size() == n || d.empty(), "dimensions of A and d don't match");
 
         Matrix q = new Matrix(m, n, Double.NaN);
-        Matrix r = new Matrix(n, n,  Double.NaN);
+        Matrix r = new Matrix(n, n, Double.NaN);
 
         List<Integer> lipvt = qrDecomposition(a, q, r, pivot);
 
@@ -960,15 +960,145 @@ public class MatrixUtil {
         if (a == 0) {
             return Math.abs(b);
         } else {
-            double c = b/a;
-            return Math.abs(a) * Math.sqrt(1 + c*c);
+            double c = b / a;
+            return Math.abs(a) * Math.sqrt(1 + c * c);
         }
     }
+
+    //! Returns the Triangular Angles Parametrized correlation matrix
+    /*! The matrix \f$ m \f$ is filled with values corresponding to angles
+        given in the \f$ angles \f$ vector. See equation (24) in
+        "Parameterizing correlations: a geometric interpretation"
+        by Francesco Rapisarda, Damiano Brigo, Fabio Mercurio
+
+        \test
+        - the correctness of the results is tested by reproducing
+          known good data.
+        - the correctness of the results is tested by checking
+          returned values against numerical calculations.
+    */
+    public static Matrix triangularAnglesParametrization(final Array angles,
+                                                         int matrixSize,
+                                                         int rank) {
+        // what if rank == 1?
+        QL_REQUIRE((rank - 1) * (2 * matrixSize - rank) == 2 * angles.size(),
+                "rank-1) * (matrixSize - rank/2) == angles.size()");
+        Matrix m = new Matrix(matrixSize, matrixSize, Double.NaN);
+
+        // first row filling
+        m.set(0, 0, 1.0);
+        for (int j = 1; j < matrixSize; ++j)
+            m.set(0, j, 0.0);
+
+        // next ones...
+        int k = 0; //angles index
+        for (int i = 1; i < m.rows(); ++i) {
+            double sinProduct = 1.0;
+            int bound = Math.min(i, rank - 1);
+            for (int j = 0; j < bound; ++j) {
+                m.set(i, j, Math.cos(angles.get(k)));
+                m.multipyEq(i, j, sinProduct);
+                sinProduct *= Math.sin(angles.get(k));
+                ++k;
+            }
+            m.set(i, bound, sinProduct);
+            for (int j = bound + 1; j < m.rows(); ++j)
+                m.set(i, j, 0.0);
+        }
+        return m;
+    }
+
+    public static Matrix lmmTriangularAnglesParametrization(final Array angles,
+                                                            int matrixSize,
+                                                            int rank) {
+        Matrix m = new Matrix(matrixSize, matrixSize);
+        for (int i = 0; i < m.rows(); ++i) {
+            double cosPhi, sinPhi;
+            if (i > 0) {
+                cosPhi = Math.cos(angles.get(i - 1));
+                sinPhi = Math.sin(angles.get(i - 1));
+            } else {
+                cosPhi = 1.0;
+                sinPhi = 0.0;
+            }
+
+            for (int j = 0; j < i; ++j)
+                m.set(i, j, sinPhi * m.get(i - 1, j));
+            m.set(i, i, cosPhi);
+
+            for (int j = i + 1; j < m.rows(); ++j)
+                m.set(i, j, 0.0);
+        }
+        return m;
+    }
+
+    // the same function using the angles parameterized by the following
+    // transformation \f[ \teta_i = \frac{\Pi}{2} - arctan(x_i)\f]
+    public static Matrix triangularAnglesParametrizationUnconstrained(final Array x,
+                                                        int matrixSize,
+                                                        int rank) {
+        Array angles = new Array(x.size());
+        //we convert the unconstrained parameters in angles
+        for (int i = 0; i < x.size(); ++i)
+            angles.set(i, M_PI*.5 - Math.atan(x.get(i)));
+        return triangularAnglesParametrization(angles, matrixSize, rank);
+    }
+
+    public static Matrix lmmTriangularAnglesParametrizationUnconstrained(final Array x,
+                                                                         int matrixSize,
+                                                                         int rank) {
+        Array angles = new Array(x.size());
+        //we convert the unconstrained parameters in angles
+        for (int i = 0; i < x.size(); ++i)
+            angles.set(i, M_PI*.5 - Math.atan(x.get(i)));
+        return lmmTriangularAnglesParametrization(angles, matrixSize, rank);
+    }
+
+    //! Returns the rank reduced Triangular Angles Parametrized correlation matrix
+    /*! The matrix \f$ m \f$ is filled with values corresponding to angles
+        corresponding  to the 3D spherical spiral parameterized by
+        \f$ alpha \f$, \f$ t0 \f$, \f$ epsilon \f$ values. See equation (32) in
+        "Parameterizing correlations: a geometric interpretation"
+        by Francesco Rapisarda, Damiano Brigo, Fabio Mercurio
+
+        \test
+        - the correctness of the results is tested by reproducing
+          known good data.
+        - the correctness of the results is tested by checking
+          returned values against numerical calculations.
+    */
+    public static Matrix triangularAnglesParametrizationRankThree(double alpha,
+                                                    double t0,
+                                                    double epsilon,
+                                                    int matrixSize) {
+        Matrix m = new Matrix(matrixSize, 3);
+        for (int i=0; i<m.rows(); ++i) {
+            double t = t0 * (1 - Math.exp(epsilon*i));
+            double phi = Math.atan(alpha * t);
+            m.set(i,0,Math.cos(t) * Math.cos(phi));
+            m.set(i,1,Math.sin(t) * Math.cos(phi));
+            m.set(i,2,-Math.sin(phi));
+        }
+        return m;
+    }
+
+    // the same function with parameters packed in an Array
+    public static Matrix triangularAnglesParametrizationRankThreeVectorial(final Array parameters,
+                                                             int nbRows) {
+        QL_REQUIRE(parameters.size() == 3,
+                "the parameter array must contain exactly 3 values" );
+        return triangularAnglesParametrizationRankThree(parameters.get(0),
+                parameters.get(1),
+                parameters.get(2),
+                nbRows);
+    }
+
+
 
     public static void main(String[] args) {
         SparseMatrix a = new SparseMatrix(3, 3);
         a.set(0, 0, 1);
-        Array x = new Array(3,10);
+        Array x = new Array(3, 10);
         Array b = prod(a, x);
         System.out.println(b);
     }
