@@ -182,6 +182,8 @@ public class Matrix {
         Matrix m = new Matrix(3, 2, 10);
         System.out.println(m.matrix);
         System.out.println(m.getColArray(0));
+        Matrix m1 = new Matrix(0,0);
+        System.out.println(m1.matrix == null);
     }
 
 }

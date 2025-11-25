@@ -3,7 +3,7 @@ package jquant.math.optimization;
 import jquant.math.Array;
 import jquant.math.ArrayFunc;
 
-public class SimpleCostFunction <ValuesFn extends ArrayFunc> extends CostFunction{
+public class SimpleCostFunction extends CostFunction{
     private ArrayFunc values_;
 
     public SimpleCostFunction(ArrayFunc values_) {
