@@ -13,6 +13,7 @@ import jquant.math.optimization.*;
 import jquant.math.optimization.impl.MinPack;
 import jquant.math.optimization.impl.QrFacParams;
 import jquant.math.optimization.impl.QrsolvParams;
+import jquant.math.randomnumbers.MersenneTwisterUniformRng;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -1093,6 +1094,25 @@ public class MatrixUtil {
                 nbRows);
     }
 
+    public static <T> void randomize(List<T> arr,int begin, int end, MersenneTwisterUniformRng rng) {
+        int n = end-begin;
+        for (int i = n-1; i > 0; --i) {
+            int j = (int) (rng.nextInt32() % (i+1));
+            T t = arr.get(i);
+            arr.set(i, arr.get(j));
+            arr.set(j, t);
+        }
+    }
+
+    public static void randomize(Array arr,int begin, int end, MersenneTwisterUniformRng rng) {
+        int n = end-begin;
+        for (int i = n-1; i > 0; --i) {
+            int j = (int) (rng.nextInt32() % (i+1));
+            double t = arr.get(i);
+            arr.set(i, arr.get(j));
+            arr.set(j, t);
+        }
+    }
 
 
     public static void main(String[] args) {
