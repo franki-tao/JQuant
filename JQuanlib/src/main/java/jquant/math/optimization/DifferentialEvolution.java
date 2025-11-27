@@ -25,20 +25,24 @@ package jquant.math.optimization;
 
 import jquant.math.Array;
 import jquant.math.CommonUtil;
+import jquant.math.ReferencePkg;
 import jquant.math.optimization.impl.Candidate;
 import jquant.math.optimization.impl.Configuration;
 import jquant.math.randomnumbers.MersenneTwisterUniformRng;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.PriorityQueue;
 
 import static jquant.math.CommonUtil.QL_FAIL;
+import static jquant.math.CommonUtil.QL_REQUIRE;
 import static jquant.math.MathUtils.QL_MAX_REAL;
 import static jquant.math.matrixutilities.MatrixUtil.randomize;
 
 //! %OptimizationMethod using Differential Evolution algorithm
 /*! \ingroup optimizers */
-public abstract class DifferentialEvolution extends OptimizationMethod {
+public class DifferentialEvolution extends OptimizationMethod {
     public enum Strategy {
         Rand1Standard,
         BestMemberWithJitter,
@@ -352,6 +356,102 @@ public abstract class DifferentialEvolution extends OptimizationMethod {
             if (!Double.isFinite(population.get(popIter).cost))
                 population.get(popIter).cost = QL_MAX_REAL;
 
+        }
+    }
+
+    @Override
+    public EndCriteria.Type minimize(Problem p, EndCriteria endCriteria) {
+        EndCriteria.Type ecType = EndCriteria.Type.None;
+        p.reset();
+
+        if (configuration().upperBound.empty()) {
+            upperBound_ = p.constraint().upperBound(p.currentValue());
+        } else {
+            QL_REQUIRE(configuration().upperBound.size() == p.currentValue().size(),
+                    "wrong upper bound size in differential evolution configuration");
+            upperBound_ = configuration().upperBound;
+        }
+        if (configuration().lowerBound.empty()) {
+            lowerBound_ = p.constraint().lowerBound(p.currentValue());
+        } else {
+            QL_REQUIRE(configuration().lowerBound.size() == p.currentValue().size(),
+                    "wrong lower bound size in differential evolution configuration");
+            lowerBound_ = configuration().lowerBound;
+        }
+        currGenSizeWeights_ =
+                new Array(configuration().populationMembers, configuration().stepsizeWeight);
+        currGenCrossover_ = new Array(configuration().populationMembers,
+                configuration().crossoverProbability);
+
+        List<Candidate> population = new ArrayList<>();
+        if (!configuration().initialPopulation.isEmpty()) {
+            population = CommonUtil.ArrayInit(configuration().initialPopulation.size(), new Candidate(1));
+            for (int i = 0; i < population.size(); ++i) {
+                population.get(i).values = configuration().initialPopulation.get(i);
+                QL_REQUIRE(population.get(i).values.size() == p.currentValue().size(),
+                        "wrong values size in initial population");
+                population.get(i).cost = p.costFunction().value(population.get(i).values);
+            }
+        } else {
+            population = CommonUtil.ArrayInit(configuration().populationMembers,
+                    new Candidate(p.currentValue().size()));
+            fillInitialPopulation(population, p);
+        }
+        partialSort(population, 1);
+        // std::partial_sort (population.begin(), population.begin() + 1, population.end(), sort_by_cost());
+        bestMemberEver_ = population.get(0);
+        double fxOld = population.get(0).cost;
+        int iteration = 0, stationaryPointIteration = 0;
+
+        // main loop - calculate consecutive emerging populations
+        while (!endCriteria.checkMaxIterations(iteration++, ecType)) {
+            calculateNextGeneration(population, p);
+            partialSort(population, 1);
+            // std::partial_sort (population.begin(), population.begin() + 1, population.end(), sort_by_cost());
+            if (population.get(0).cost < bestMemberEver_.cost)
+                bestMemberEver_ = population.get(0);
+            double fxNew = population.get(0).cost;
+            // 装箱
+            ReferencePkg<Integer> spi = new ReferencePkg<>(stationaryPointIteration);
+            if (endCriteria.checkStationaryFunctionValue(fxOld, fxNew, spi,
+                    ecType)) {
+                stationaryPointIteration = spi.getT();
+                break;
+            }
+            stationaryPointIteration = spi.getT();
+            fxOld = fxNew;
+        }
+        p.setCurrentValue(bestMemberEver_.values);
+        p.setFunctionValue(bestMemberEver_.cost);
+        return ecType;
+    }
+
+    private void partialSort(List<Candidate> population, int k) {
+        if (population == null || population.size() <= 1 || k <= 0) {
+            return;
+        }
+        k = Math.min(k, population.size());
+
+        PriorityQueue<Candidate> maxHeap = new PriorityQueue<>(
+                k,
+                Comparator.comparingDouble((Candidate c) -> c.cost).reversed() // 降序排序（大顶堆）
+        );
+
+        for (Candidate candidate : population) {
+            if (maxHeap.size() < k) {
+                maxHeap.offer(candidate);
+            } else {
+                if (candidate.cost < maxHeap.peek().cost) {
+                    maxHeap.poll();
+                    maxHeap.offer(candidate);
+                }
+            }
+        }
+        List<Candidate> topK = new ArrayList<>(maxHeap);
+        topK.sort(Comparator.comparingDouble(c -> c.cost)); // 按 cost 升序
+
+        for (int i = 0; i < k; i++) {
+            population.set(i, topK.get(i));
         }
     }
 }
