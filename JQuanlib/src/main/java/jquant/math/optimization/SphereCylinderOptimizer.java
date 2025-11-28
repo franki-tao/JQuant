@@ -86,31 +86,31 @@ public class SphereCylinderOptimizer {
     }
 
     public boolean findByProjection(
-            ReferencePkg<Double> y1,
-            ReferencePkg<Double> y2,
-            ReferencePkg<Double> y3) {
+            ReferencePkg<Double> x1,
+            ReferencePkg<Double> x2,
+            ReferencePkg<Double> x3) {
         double z1moved = z1_-alpha_;
         double distance = Math.sqrt( z1moved*z1moved + z2_*z2_);
         double scale = s_/distance;
         double y1moved = z1moved*scale;
-        y1.setT(alpha_+ y1moved);
-        y2.setT(scale*z2_);
-        double residual = r_*r_ - y1.getT()*y1.getT() -y2.getT()*y2.getT();
+        x1.setT(alpha_+ y1moved);
+        x2.setT(scale*z2_);
+        double residual = r_*r_ - x1.getT()*x1.getT() -x2.getT()*x2.getT();
         if (residual >=0.0) {
-            y3.setT(Math.sqrt(residual));
+            x3.setT(Math.sqrt(residual));
             return true;
         }
         // we are outside the sphere
         if (!isIntersectionNonEmpty()) {
-            y3.setT(0.0);
+            x3.setT(0.0);
             return false;
         }
 
         // intersection is non-empty but projection point is outside sphere
         // so take rightmost point
-        y3.setT(0.0);
-        y1.setT(topValue_);
-        y2.setT(Math.sqrt(r_*r_ -y1.getT()*y1.getT()));
+        x3.setT(0.0);
+        x1.setT(topValue_);
+        x2.setT(Math.sqrt(r_*r_ -x1.getT()*x1.getT()));
 
         return true;
     }
