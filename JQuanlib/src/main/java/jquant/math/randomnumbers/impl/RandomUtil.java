@@ -9,25 +9,25 @@ public class RandomUtil {
     // number of dimensions in the alternative primitive polynomials
     public static final int maxAltDegree = 52;
 
-    public static final List<List<Integer>> AltPrimitivePolynomials = parseInitializersTxt("AltPrimitivePolynomials.txt");
+    public static final List<List<Integer>> AltPrimitivePolynomials = parseInitializersTxt1("AltPrimitivePolynomials.txt");
 
-    public static final List<List<Integer>> SLinitializers = parseInitializersTxt("SLinitializers.txt");
+    public static final List<List<Integer>> SLinitializers = parseInitializersTxt1("SLinitializers.txt");
 
-    public static final List<List<Integer>> initializers = parseInitializersTxt("initializers.txt");
+    public static final List<List<Integer>> initializers = parseInitializersTxt1("initializers.txt");
 
-    public static final List<List<Integer>> Linitializers = parseInitializersTxt("Linitializers.txt");
+    public static final List<List<Integer>> Linitializers = parseInitializersTxt1("Linitializers.txt");
 
-    public static final List<List<Integer>> Kuoinitializers = parseInitializersTxt("Kuoinitializers.txt");
+    public static final List<List<Integer>> Kuoinitializers = parseInitializersTxt1("Kuoinitializers.txt");
 
-    public static final List<List<Integer>> Kuo2initializers = parseInitializersTxt("Kuo2initializers.txt");
+    public static final List<List<Integer>> Kuo2initializers = parseInitializersTxt1("Kuo2initializers.txt");
 
-    public static final List<List<Integer>> Kuo3initializers = parseInitializersTxt("Kuo3initializers.txt");
+    public static final List<List<Integer>> Kuo3initializers = parseInitializersTxt1("Kuo3initializers.txt");
 
-    public static final List<List<Integer>> JoeKuoD6initializers = parseInitializersTxt("JoeKuoD6initializers.txt");
+    public static final List<List<Integer>> JoeKuoD6initializers = parseInitializersTxt1("JoeKuoD6initializers.txt");
 
-    public static final List<List<Integer>> JoeKuoD7initializers = parseInitializersTxt("JoeKuoD7initializers.txt");
+    public static final List<List<Integer>> JoeKuoD7initializers = parseInitializersTxt1("JoeKuoD7initializers.txt");
 
-    public static final List<List<Integer>> JoeKuoD5initializers = parseInitializersTxt("JoeKuoD5initializers.txt");
+    public static final List<List<Integer>> JoeKuoD5initializers = parseInitializersTxt1("JoeKuoD5initializers.txt");
 
     private static List<List<Integer>> parseInitializersTxt(String data){
         List<List<Integer>> result = new ArrayList<>();
@@ -42,6 +42,40 @@ public class RandomUtil {
         // 读取并解析（保留所有数字）
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(new FileInputStream(targetFile), StandardCharsets.UTF_8))) {
+
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmedLine = line.trim();
+                if (trimmedLine.isEmpty()) continue;
+
+                String[] numStrs = trimmedLine.split("\\s*,\\s*");
+                List<Integer> row = new ArrayList<>();
+                for (String numStr : numStrs) {
+                    if (!numStr.isEmpty()) {
+                        row.add(Integer.parseInt(numStr));
+                    }
+                }
+                if (!row.isEmpty()) result.add(row);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        return result;
+    }
+
+    public static List<List<Integer>> parseInitializersTxt1(String data) {
+        List<List<Integer>> result = new ArrayList<>();
+
+        // 类路径下的相对路径（resources 目录为类路径根，对应目录层级直接写）
+        String resourcePath = "jquant/math/randomnumbers/data/"+data;
+
+        // 用类加载器读取资源（推荐方式，打包后仍有效）
+        InputStream inputStream = RandomUtil.class.getClassLoader().getResourceAsStream(resourcePath);
+
+        // 读取解析（逻辑不变）
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
 
             String line;
             while ((line = reader.readLine()) != null) {
