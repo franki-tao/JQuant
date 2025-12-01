@@ -32,6 +32,10 @@ public class MathUtils {
 
     public static final double M_TWOPI = M_PI * 2;
 
+    public static final int PPMT_MAX_DIM = 21200;
+
+    public static final double M_LN2 = 0.693147180559945309417;  // ln(2)
+
     public static final double squared(double x) {
         return x * x;
     }

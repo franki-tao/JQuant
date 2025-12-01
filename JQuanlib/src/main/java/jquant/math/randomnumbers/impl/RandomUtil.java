@@ -29,6 +29,8 @@ public class RandomUtil {
 
     public static final List<List<Integer>> JoeKuoD5initializers = parseInitializersTxt1("JoeKuoD5initializers.txt");
 
+    public static final List<List<Integer>> PrimitivePolynomials =  parseInitializersTxt1("PrimitivePolynomials.txt");
+
     private static List<List<Integer>> parseInitializersTxt(String data){
         List<List<Integer>> result = new ArrayList<>();
 
@@ -108,5 +110,6 @@ public class RandomUtil {
         System.out.println(JoeKuoD6initializers.size());
         System.out.println(JoeKuoD7initializers.size());
         System.out.println(JoeKuoD5initializers.size());
+        System.out.println(PrimitivePolynomials.size());
     }
 }
