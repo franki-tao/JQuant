@@ -32,7 +32,7 @@ public class MersenneTwisterUniformRng extends RngImpl {
         seedInitialization(19650218L);
         int i=1, j=0, k = (Math.max(N, seeds.size()));
         for (; k != 0; k--) {
-            mt[i] = (mt[i] ^ ((mt[i-1] ^ (mt[i-1] >> 30)) * 1664525L))
+            mt[i] = (mt[i] ^ ((mt[i-1] ^ (mt[i-1] >>> 30)) * 1664525L))
             + seeds.get(j) + j; /* non linear */
             mt[i] &= 0xffffffffL; /* for WORDSIZE > 32 machines */
             i++; j++;
@@ -40,7 +40,7 @@ public class MersenneTwisterUniformRng extends RngImpl {
             if (j>=seeds.size()) j=0;
         }
         for (k = N - 1; k != 0; k--) {
-            mt[i] = (mt[i] ^ ((mt[i-1] ^ (mt[i-1] >> 30)) * 1566083941L))
+            mt[i] = (mt[i] ^ ((mt[i-1] ^ (mt[i-1] >>> 30)) * 1566083941L))
             - i; /* non linear */
             mt[i] &= 0xffffffffL; /* for WORDSIZE > 32 machines */
             i++;
@@ -55,7 +55,7 @@ public class MersenneTwisterUniformRng extends RngImpl {
         mt[0]= s & 0xffffffffL;
         for (mti=1; mti<N; mti++) {
             mt[mti] =
-                    (1812433253L * (mt[mti-1] ^ (mt[mti-1] >> 30)) + mti);
+                    (1812433253L * (mt[mti-1] ^ (mt[mti-1] >>> 30)) + mti);
             /* See Knuth TAOCP Vol2. 3rd Ed. P.106 for multiplier. */
             /* In the previous versions, MSBs of the seed affect   */
             /* only MSBs of the array mt[].                        */
@@ -73,14 +73,14 @@ public class MersenneTwisterUniformRng extends RngImpl {
 
         for (kk=0;kk<N-M;kk++) {
             y = (mt[kk]&UPPER_MASK)|(mt[kk+1]&LOWER_MASK);
-            mt[kk] = mt[kk+M] ^ (y >> 1) ^ mag01[(int) (y & 0x1L)];
+            mt[kk] = mt[kk+M] ^ (y >>> 1) ^ mag01[(int) (y & 0x1L)];
         }
         for (;kk<N-1;kk++) {
             y = (mt[kk]&UPPER_MASK)|(mt[kk+1]&LOWER_MASK);
-            mt[kk] = mt[(kk+M)-N] ^ (y >> 1) ^ mag01[(int) (y & 0x1L)];
+            mt[kk] = mt[(kk+M)-N] ^ (y >>> 1) ^ mag01[(int) (y & 0x1L)];
         }
         y = (mt[N-1]&UPPER_MASK)|(mt[0]&LOWER_MASK);
-        mt[N-1] = mt[M-1] ^ (y >> 1) ^ mag01[(int) (y & 0x1L)];
+        mt[N-1] = mt[M-1] ^ (y >>> 1) ^ mag01[(int) (y & 0x1L)];
 
         mti = 0;
     }
@@ -104,26 +104,18 @@ public class MersenneTwisterUniformRng extends RngImpl {
         long y = mt[mti++];
 
         /* Tempering */
-        y ^= (y >> 11);
+        y ^= (y >>> 11);
         y ^= (y << 7) & 0x9d2c5680L;
         y ^= (y << 15) & 0xefc60000L;
-        y ^= (y >> 18);
+        y ^= (y >>> 18);
         return y;
     }
 
     public static void main(String[] args) {
-        MersenneTwisterUniformRng rng = new MersenneTwisterUniformRng(10);
-        System.out.println(rng.nextInt32());
-        System.out.println(rng.nextInt32());
-        System.out.println(rng.nextInt32());
-        System.out.println(rng.nextInt32());
-        System.out.println(rng.nextInt32());
-        System.out.println(rng.nextInt32());
-        System.out.println(rng.nextReal());
-        System.out.println(rng.nextReal());
-        System.out.println(rng.nextReal());
-        System.out.println(rng.nextReal());
-        System.out.println(rng.nextReal());
-        System.out.println(rng.nextReal());
+        List<Long> init = List.of((long)0x123, (long)0x234,(long)0x345,(long)0x456);
+        MersenneTwisterUniformRng rng = new MersenneTwisterUniformRng(init);
+        for (int i = 0; i < 10; i++) {
+            System.out.println(rng.nextInt32());
+        }
     }
 }

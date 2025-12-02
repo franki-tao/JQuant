@@ -98,7 +98,7 @@ public class SobolRsg {
     private int sequenceCounter_ = 0;
     private boolean firstDraw_ = true;
     private SampleVector sequence_;
-    private List<Integer> integerSequence_;
+    private List<Long> integerSequence_;
     private List<List<Integer>> directionIntegers_;
     private boolean useGrayCode_;
 
@@ -123,7 +123,7 @@ public class SobolRsg {
                     boolean useGrayCode) {
         dimensionality_ = dimensionality;
         sequence_ = new SampleVector(CommonUtil.ArrayInit(dimensionality), 1d);
-        integerSequence_ = CommonUtil.ArrayInit(dimensionality, 0);
+        integerSequence_ = CommonUtil.ArrayInit(dimensionality, 0L);
         directionIntegers_ = CommonUtil.ArrayInit(dimensionality, CommonUtil.ArrayInit(32, 0));
         useGrayCode_ = useGrayCode;
         QL_REQUIRE(dimensionality > 0,
@@ -360,7 +360,7 @@ public class SobolRsg {
             int gk = degree.get(k);
             for (int l = gk; l < 32; l++) {
                 // eq. 8.19 "Monte Carlo Methods in Finance" by P. J�ckel
-                int n = (directionIntegers_.get(k).get(l - gk) >> gk);
+                int n = (directionIntegers_.get(k).get(l - gk) >>> gk);
                 // a[k][j] are the coefficients of the monomials in ppmt[k]
                 // The highest order coefficient a[k][0] is not actually
                 // used in the recurrence relation, and the lowest order
@@ -372,7 +372,7 @@ public class SobolRsg {
                 for (j = 1; j < gk; j++) {
                     // XORed with a selection of (unshifted) direction
                     // integers controlled by which of the a[k][j] are set
-                    if (((ppmt.get(k) >> (gk - j - 1)) & 1) != 0)
+                    if (((ppmt.get(k) >>> (gk - j - 1)) & 1) != 0)
                         n ^= directionIntegers_.get(k).get(l - j);
                 }
                 // a[k][gk] is always set, so directionIntegers_[k][l-gk]
@@ -385,7 +385,7 @@ public class SobolRsg {
         // first draw, this is only needed if Gray code is used
         if (useGrayCode_) {
             for (k = 0; k < dimensionality_; k++) {
-                integerSequence_.set(k, directionIntegers_.get(k).get(0));
+                integerSequence_.set(k, directionIntegers_.get(k).get(0) & 0xFFFFFFFFL);
             }
         }
     }
@@ -393,23 +393,23 @@ public class SobolRsg {
     /**
      * ! skip to the n-th sample in the low-discrepancy sequence
      */
-    public final List<Integer> skipTo(int skip) {
+    public final List<Long> skipTo(int skip) {
         int N = skip + 1;
 
         if (useGrayCode_) {
             int ops = (int) (Math.log((double) N) / M_LN2) + 1;
 
             // Convert to Gray code
-            int G = N ^ (N >> 1);
+            int G = N ^ (N >>> 1);
             for (int k = 0; k < dimensionality_; k++) {
-                integerSequence_.set(k, 0);
+                integerSequence_.set(k, 0L);
                 for (int index = 0; index < ops; index++) {
-                    if ((G >> index & 1) != 0)
+                    if ((G >>> index & 1) != 0)
                         integerSequence_.set(k, integerSequence_.get(k) ^ directionIntegers_.get(k).get(index));
                 }
             }
         } else {
-            integerSequence_ = CommonUtil.ArrayInit(integerSequence_.size(), 0);
+            integerSequence_ = CommonUtil.ArrayInit(integerSequence_.size(), 0L);
             int mask = 1;
             for (int index = 0; index < 32; index++) {
                 if ((N & mask) != 0) {
@@ -425,7 +425,7 @@ public class SobolRsg {
         return integerSequence_;
     }
 
-    public final List<Integer> nextInt32Sequence() {
+    public final List<Long> nextInt32Sequence() {
         if (!useGrayCode_) {
             skipTo(sequenceCounter_);
             if (firstDraw_) {
@@ -434,12 +434,14 @@ public class SobolRsg {
                 ++sequenceCounter_;
                 QL_REQUIRE(sequenceCounter_ != 0, "period exceeded");
             }
+            integerSequence_.replaceAll(aLong -> aLong & 0xFFFFFFFFL);
             return integerSequence_;
         }
 
         if (firstDraw_) {
             // it was precomputed in the constructor
             firstDraw_ = false;
+            integerSequence_.replaceAll(aLong -> aLong & 0xFFFFFFFFL);
             return integerSequence_;
         }
         // increment the counter
@@ -454,7 +456,7 @@ public class SobolRsg {
         // Find rightmost zero bit of n
         int j = 0;
         while ((n & 1) != 0) {
-            n >>= 1;
+            n >>>= 1;
             j++;
         }
         for (int k = 0; k < dimensionality_; k++) {
@@ -463,11 +465,12 @@ public class SobolRsg {
             // component
             integerSequence_.set(k, integerSequence_.get(k) ^ directionIntegers_.get(k).get(j));
         }
+        integerSequence_.replaceAll(aLong -> aLong & 0xFFFFFFFFL);
         return integerSequence_;
     }
 
     public final SampleVector nextSequence() {
-        final List<Integer> v = nextInt32Sequence();
+        final List<Long> v = nextInt32Sequence();
         // normalize to get a double in (0,1)
         for (int k = 0; k < dimensionality_; ++k)
             sequence_.value.set(k, v.get(k) * (0.5 / (1 << 31)));
