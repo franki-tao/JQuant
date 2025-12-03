@@ -78,4 +78,10 @@ public class HaltonRsg {
 
     public int dimension() {return dimensionality_;}
 
+    public static void main(String[] args) {
+        HaltonRsg rsg = new HaltonRsg(3, 0, true, false);
+        for (int i = 0; i < 10; i++) {
+            System.out.println(rsg.nextSequence().value);
+        }
+    }
 }
