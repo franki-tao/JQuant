@@ -51,7 +51,7 @@ public class MersenneTwisterUniformRng extends RngImpl {
     }
 
     private void seedInitialization(long seed) {
-        long s = (seed != 0 ? seed : new SeedGenerator().get());
+        long s = (seed != 0 ? seed : SeedGenerator.INSTANCE.get());
         mt[0]= s & 0xffffffffL;
         for (mti=1; mti<N; mti++) {
             mt[mti] =

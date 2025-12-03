@@ -1,15 +1,20 @@
 package jquant.math.randomnumbers;
 
 import jquant.math.CommonUtil;
+import jquant.patterns.Singleton;
 
 import java.util.List;
 import java.util.Locale;
 
-public class SeedGenerator {
+public class SeedGenerator implements Singleton<SeedGenerator> {
+
+    public static SeedGenerator INSTANCE = new SeedGenerator();
+
     private MersenneTwisterUniformRng rng_;
 
-    public SeedGenerator() {
+    private SeedGenerator() {
         rng_ = new MersenneTwisterUniformRng(42L);
+        initialize();
     }
 
     private void initialize() {
