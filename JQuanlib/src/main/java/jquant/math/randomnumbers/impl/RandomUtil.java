@@ -31,6 +31,14 @@ public class RandomUtil {
 
     public static final List<List<Integer>> PrimitivePolynomials =  parseInitializersTxt1("PrimitivePolynomials.txt");
 
+    public static final List<Integer> LatticeA = parseInitializersTxt1("latticeA.txt").get(0);
+
+    public static final List<Integer> LatticeB = parseInitializersTxt1("latticeB.txt").get(0);
+
+    public static final List<Integer> LatticeC = parseInitializersTxt1("latticeC.txt").get(0);
+
+    public static final List<Integer> LatticeD = parseInitializersTxt1("latticeD.txt").get(0);
+
     // for reverseBits() see http://graphics.stanford.edu/~seander/bithacks.html#BitReverseTable
     public static final int[] bitReverseTable = {
             0,   128, 64,  192, 32,  160, 96,  224, 16,  144, 80,  208, 48,  176,
@@ -181,5 +189,9 @@ public class RandomUtil {
         System.out.println(JoeKuoD7initializers.size());
         System.out.println(JoeKuoD5initializers.size());
         System.out.println(PrimitivePolynomials.size());
+        System.out.println(LatticeA.size());
+        System.out.println(LatticeB.size());
+        System.out.println(LatticeC.size());
+        System.out.println(LatticeD.size());
     }
 }
