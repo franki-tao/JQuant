@@ -14,7 +14,7 @@ public class MathUtils {
 
     public static final double M_EULER_MASCHERONI = 0.5772156649015328606065121;
 
-    public static final double M_PI_2   =   1.57079632679489661923;
+    public static final double M_PI_2 = 1.57079632679489661923;
     public static final double M_SQRT_2 = 0.7071067811865475244008443621048490392848359376887;
     public static final double M_SQRT2 = 1.41421356237309504880;
     public static final double QL_MAX_REAL = 1.79769e+308;
@@ -68,6 +68,20 @@ public class MathUtils {
 
         double diff = Math.abs(x - y);
         double tolerance = 42 * QL_EPSILON;
+
+        if (x == 0.0 || y == 0.0)
+            return diff < (tolerance * tolerance);
+
+        return diff <= tolerance * Math.abs(x) &&
+                diff <= tolerance * Math.abs(y);
+    }
+
+    public static boolean close(double x, double y, int n) {
+        // Deals with +infinity and -infinity representations etc.
+        if (x == y)
+            return true;
+
+        double diff = Math.abs(x - y), tolerance = n * QL_EPSILON;
 
         if (x == 0.0 || y == 0.0)
             return diff < (tolerance * tolerance);
@@ -258,8 +272,8 @@ public class MathUtils {
     }
 
     public static double abcdBlackVolatility(double u, double a, double b, double c, double d) {
-        AbcdFunction model = new AbcdFunction(a,b,c,d);
-        return model.volatility(0.,u,u);
+        AbcdFunction model = new AbcdFunction(a, b, c, d);
+        return model.volatility(0., u, u);
     }
 
 }
