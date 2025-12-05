@@ -16,7 +16,7 @@ public class MathUtils {
 
     public static final double M_PI_2   =   1.57079632679489661923;
     public static final double M_SQRT_2 = 0.7071067811865475244008443621048490392848359376887;
-
+    public static final double M_SQRT2 = 1.41421356237309504880;
     public static final double QL_MAX_REAL = 1.79769e+308;
 
     public static final double QL_MIN_REAL = -1.79769e+308;
