@@ -52,11 +52,17 @@ public class FaureRsg {
 
 
         mbit_ = (int) (Math.log(Integer.MAX_VALUE) / Math.log((double) base_));
-        gray_ = CommonUtil.ArrayInit(dimensionality_, CommonUtil.ArrayInit(mbit_ + 1, 0));
+        gray_ = new ArrayList<>();
+        for (int l = 0; l < dimensionality_; l++) {
+            gray_.add(CommonUtil.ArrayInit(mbit_ + 1, 0));
+        }
         bary_ = CommonUtil.ArrayInit(mbit_ + 1, 0);
 
         //setMatrixValues();
-        powBase_ = CommonUtil.ArrayInit(mbit_, CommonUtil.ArrayInit(2 * base_ - 1, 0));
+        powBase_ = new ArrayList<>();
+        for (int l = 0; l < mbit_; l++) {
+            powBase_.add(CommonUtil.ArrayInit(2 * base_ - 1, 0));
+        }
         powBase_.get(mbit_ - 1).set(base_, 1);
         for (int i2 = mbit_ - 2; i2 >= 0; --i2)
             powBase_.get(i2).set(base_, powBase_.get(i2 + 1).get(base_) * base_);
@@ -75,8 +81,10 @@ public class FaureRsg {
         //setPascalMatrix();
         pascal3D = new ArrayList<>();
         for (k = 0; k < mbit_; k++) {
-            List<List<Integer>> mm = ArrayInit(dimensionality_ + 1,
-                    ArrayInit(k + 1, 0));
+            List<List<Integer>> mm = new ArrayList<>();
+            for (int l = 0; l < dimensionality_ + 1; l++) {
+                mm.add(ArrayInit(k + 1, 0));
+            }
             pascal3D.add(mm);
             pascal3D.get(k).get(0).set(k, 1);
             pascal3D.get(k).get(1).set(0, 1);

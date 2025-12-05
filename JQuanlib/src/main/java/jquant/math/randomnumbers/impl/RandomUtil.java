@@ -1,5 +1,8 @@
 package jquant.math.randomnumbers.impl;
 
+import jquant.math.CommonUtil;
+import jquant.models.marketmodels.browniangenerators.SobolBrownianGeneratorBase;
+
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -144,7 +147,7 @@ public class RandomUtil {
         return result;
     }
 
-    public static List<List<Integer>> parseInitializersTxt1(String data) {
+    private static List<List<Integer>> parseInitializersTxt1(String data) {
         List<List<Integer>> result = new ArrayList<>();
 
         // 类路径下的相对路径（resources 目录为类路径根，对应目录层级直接写）
@@ -176,6 +179,21 @@ public class RandomUtil {
         }
 
         return result;
+    }
+
+    private static void copy(List<Double> arr, List<Double> out, int start) {
+        for (int i = 0; i < out.size(); i++) {
+            arr.set(i+start, out.get(i));
+        }
+    }
+
+    public static void setNextSequence(SobolBrownianGeneratorBase gen, List<Double> seq) {
+        gen.nextPath();
+        List<Double> output = CommonUtil.ArrayInit(gen.numberOfFactors(), 0d);
+        for (int i = 0; i < gen.numberOfSteps(); ++i) {
+            gen.nextStep(output);
+            copy(seq, output, i * gen.numberOfFactors());
+        }
     }
     public static void main(String[] args) throws IOException {
         System.out.println(AltPrimitivePolynomials.size());

@@ -2,6 +2,7 @@ package jquant.math.randomnumbers;
 
 import jquant.math.CommonUtil;
 import jquant.math.randomnumbers.impl.RandomUtil;
+import jquant.math.randomnumbers.impl.UsgImpl;
 import jquant.methods.montecarlo.SampleVector;
 
 import java.util.ArrayList;
@@ -14,7 +15,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * ! Reference: Brent Burley: Practical Hash-based Owen Scrambling,
  * Journal of Computer Graphics Techniques, Vol. 9, No. 4, 2020
  */
-public class Burley2020SobolRsg {
+public class Burley2020SobolRsg implements UsgImpl {
     private int dimensionality_;
     private long seed_;
     private SobolRsg.DirectionIntegers directionIntegers_;
@@ -75,6 +76,7 @@ public class Burley2020SobolRsg {
         return integerSequence_;
     }
 
+    @Override
     public final SampleVector nextSequence() {
         final List<Long> v = nextInt32Sequence();
         // normalize to get a double in (0,1)
@@ -86,6 +88,7 @@ public class Burley2020SobolRsg {
 
     public final SampleVector lastSequence() { return sequence_; }
 
+    @Override
     public int dimension() { return dimensionality_; }
 
 

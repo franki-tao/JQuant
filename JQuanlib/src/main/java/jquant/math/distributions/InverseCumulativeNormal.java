@@ -1,10 +1,11 @@
 package jquant.math.distributions;
 
+import jquant.math.Function;
 import jquant.math.MathUtils;
 
 import static jquant.math.MathUtils.*;
 
-public class InverseCumulativeNormal {
+public class InverseCumulativeNormal implements Function {
     private double average = 0;
     private double sigma = 1;
 
@@ -45,6 +46,7 @@ public class InverseCumulativeNormal {
         this.sigma = 1;
     }
 
+    @Override
     public double value(double x) {
         return average + sigma * standard_value(x);
     }

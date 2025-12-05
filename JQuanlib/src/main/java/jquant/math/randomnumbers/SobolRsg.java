@@ -2,8 +2,10 @@ package jquant.math.randomnumbers;
 
 import jquant.math.CommonUtil;
 import jquant.math.randomnumbers.impl.RandomUtil;
+import jquant.math.randomnumbers.impl.UsgImpl;
 import jquant.methods.montecarlo.SampleVector;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -87,7 +89,7 @@ import static jquant.math.randomnumbers.SobolRsg.DirectionIntegers.*;
  * - the correctness of the returned values is tested by checking
  * their discrepancy against known good values.
  */
-public class SobolRsg {
+public class SobolRsg implements UsgImpl {
     public enum DirectionIntegers {
         Unit, Jaeckel, SobolLevitan, SobolLevitanLemieux,
         JoeKuoD5, JoeKuoD6, JoeKuoD7,
@@ -99,7 +101,7 @@ public class SobolRsg {
     private boolean firstDraw_ = true;
     private SampleVector sequence_;
     private List<Long> integerSequence_;
-    private List<List<Integer>> directionIntegers_;
+    private List<List<Long>> directionIntegers_;
     private boolean useGrayCode_;
 
     /**
@@ -124,7 +126,10 @@ public class SobolRsg {
         dimensionality_ = dimensionality;
         sequence_ = new SampleVector(CommonUtil.ArrayInit(dimensionality), 1d);
         integerSequence_ = CommonUtil.ArrayInit(dimensionality, 0L);
-        directionIntegers_ = CommonUtil.ArrayInit(dimensionality, CommonUtil.ArrayInit(32, 0));
+        directionIntegers_ = new ArrayList<>();
+        for (int i = 0; i < dimensionality; ++i) {
+            directionIntegers_.add(CommonUtil.ArrayInit(32, 0L)); // 每次调用返回新 List
+        }
         useGrayCode_ = useGrayCode;
         QL_REQUIRE(dimensionality > 0,
                 "dimensionality must be greater than 0");
@@ -189,7 +194,7 @@ public class SobolRsg {
         // degenerate (no free direction integers) first dimension
         int j;
         for (j = 0; j < 32; j++)
-            directionIntegers_.get(0).set(j, (1 << (32 - j - 1)));
+            directionIntegers_.get(0).set(j, (1L << (32 - j - 1)));
 
 
         int maxTabulated = 0;
@@ -200,7 +205,7 @@ public class SobolRsg {
                 maxTabulated = dimensionality_;
                 for (k = 1; k < maxTabulated; k++) {
                     for (int l = 1; l <= degree.get(k); l++) {
-                        directionIntegers_.get(k).set(l - 1, 1);
+                        directionIntegers_.get(k).set(l - 1, 1L);
                         directionIntegers_.get(k).set(l - 1, directionIntegers_.get(k).get(l - 1) << (32 - l));
                     }
                 }
@@ -212,7 +217,7 @@ public class SobolRsg {
                     j = 0;
                     // 0UL marks coefficients' end for a given dimension
                     while (RandomUtil.initializers.get(k - 1).get(j) != 0) {
-                        directionIntegers_.get(k).set(j, RandomUtil.initializers.get(k - 1).get(j));
+                        directionIntegers_.get(k).set(j, (long)RandomUtil.initializers.get(k - 1).get(j));
                         directionIntegers_.get(k).set(j, directionIntegers_.get(k).get(j) << (32 - j - 1));
                         j++;
                     }
@@ -225,7 +230,7 @@ public class SobolRsg {
                     j = 0;
                     // 0UL marks coefficients' end for a given dimension
                     while (RandomUtil.SLinitializers.get(k - 1).get(j) != 0) {
-                        directionIntegers_.get(k).set(j, RandomUtil.SLinitializers.get(k - 1).get(j));
+                        directionIntegers_.get(k).set(j, (long)RandomUtil.SLinitializers.get(k - 1).get(j));
                         directionIntegers_.get(k).set(j, directionIntegers_.get(k).get(j) << (32 - j - 1));
                         j++;
                     }
@@ -238,7 +243,7 @@ public class SobolRsg {
                     j = 0;
                     // 0UL marks coefficients' end for a given dimension
                     while (RandomUtil.Linitializers.get(k - 1).get(j) != 0) {
-                        directionIntegers_.get(k).set(j, RandomUtil.Linitializers.get(k - 1).get(j));
+                        directionIntegers_.get(k).set(j, (long)RandomUtil.Linitializers.get(k - 1).get(j));
                         directionIntegers_.get(k).set(j, directionIntegers_.get(k).get(j) << (32 - j - 1));
                         j++;
                     }
@@ -251,7 +256,7 @@ public class SobolRsg {
                     j = 0;
                     // 0UL marks coefficients' end for a given dimension
                     while (RandomUtil.JoeKuoD5initializers.get(k - 1).get(j) != 0) {
-                        directionIntegers_.get(k).set(j, RandomUtil.JoeKuoD5initializers.get(k - 1).get(j));
+                        directionIntegers_.get(k).set(j, (long)RandomUtil.JoeKuoD5initializers.get(k - 1).get(j));
                         directionIntegers_.get(k).set(j, directionIntegers_.get(k).get(j) << (32 - j - 1));
                         j++;
                     }
@@ -264,7 +269,7 @@ public class SobolRsg {
                     j = 0;
                     // 0UL marks coefficients' end for a given dimension
                     while (RandomUtil.JoeKuoD6initializers.get(k - 1).get(j) != 0) {
-                        directionIntegers_.get(k).set(j, RandomUtil.JoeKuoD5initializers.get(k - 1).get(j));
+                        directionIntegers_.get(k).set(j, (long)RandomUtil.JoeKuoD5initializers.get(k - 1).get(j));
                         directionIntegers_.get(k).set(j, directionIntegers_.get(k).get(j) << (32 - j - 1));
                         j++;
                     }
@@ -277,7 +282,7 @@ public class SobolRsg {
                     j = 0;
                     // 0UL marks coefficients' end for a given dimension
                     while (RandomUtil.JoeKuoD7initializers.get(k - 1).get(j) != 0) {
-                        directionIntegers_.get(k).set(j, RandomUtil.JoeKuoD7initializers.get(k - 1).get(j));
+                        directionIntegers_.get(k).set(j, (long)RandomUtil.JoeKuoD7initializers.get(k - 1).get(j));
                         directionIntegers_.get(k).set(j, directionIntegers_.get(k).get(j) << (32 - j - 1));
                         j++;
                     }
@@ -292,7 +297,7 @@ public class SobolRsg {
                     j = 0;
                     // 0UL marks coefficients' end for a given dimension
                     while (RandomUtil.Kuoinitializers.get(k - 1).get(j) != 0) {
-                        directionIntegers_.get(k).set(j, RandomUtil.Kuoinitializers.get(k - 1).get(j));
+                        directionIntegers_.get(k).set(j, (long)RandomUtil.Kuoinitializers.get(k - 1).get(j));
                         directionIntegers_.get(k).set(j, directionIntegers_.get(k).get(j) << (32 - j - 1));
                         j++;
                     }
@@ -305,7 +310,7 @@ public class SobolRsg {
                     j = 0;
                     // 0UL marks coefficients' end for a given dimension
                     while (RandomUtil.Kuo2initializers.get(k - 1).get(j) != 0) {
-                        directionIntegers_.get(k).set(j, RandomUtil.Kuo2initializers.get(k - 1).get(j));
+                        directionIntegers_.get(k).set(j, (long)RandomUtil.Kuo2initializers.get(k - 1).get(j));
                         directionIntegers_.get(k).set(j, directionIntegers_.get(k).get(j) << (32 - j - 1));
                         j++;
                     }
@@ -319,7 +324,7 @@ public class SobolRsg {
                     j = 0;
                     // 0UL marks coefficients' end for a given dimension
                     while (RandomUtil.Kuo3initializers.get(k - 1).get(j) != 0) {
-                        directionIntegers_.get(k).set(j, RandomUtil.Kuo3initializers.get(k - 1).get(j));
+                        directionIntegers_.get(k).set(j, (long)RandomUtil.Kuo3initializers.get(k - 1).get(j));
                         directionIntegers_.get(k).set(j, directionIntegers_.get(k).get(j) << (32 - j - 1));
                         j++;
                     }
@@ -340,7 +345,7 @@ public class SobolRsg {
                         double u = uniformRng.next().value;
                         // the direction integer has at most the
                         // rightmost l bits non-zero
-                        directionIntegers_.get(k).set(l - 1, (int) (u * (1 << l)));
+                        directionIntegers_.get(k).set(l - 1,  (long)(u * (1L << l)));
                     } while ((directionIntegers_.get(k).get(l - 1) & 1) == 0);
                     // iterate until the direction integer is odd
                     // that is it has the rightmost bit set
@@ -360,7 +365,7 @@ public class SobolRsg {
             int gk = degree.get(k);
             for (int l = gk; l < 32; l++) {
                 // eq. 8.19 "Monte Carlo Methods in Finance" by P. J�ckel
-                int n = (directionIntegers_.get(k).get(l - gk) >>> gk);
+                long n = (directionIntegers_.get(k).get(l - gk) >>> gk);
                 // a[k][j] are the coefficients of the monomials in ppmt[k]
                 // The highest order coefficient a[k][0] is not actually
                 // used in the recurrence relation, and the lowest order
@@ -469,21 +474,24 @@ public class SobolRsg {
         return integerSequence_;
     }
 
+    @Override
     public final SampleVector nextSequence() {
         final List<Long> v = nextInt32Sequence();
         // normalize to get a double in (0,1)
         for (int k = 0; k < dimensionality_; ++k)
-            sequence_.value.set(k, v.get(k) * (0.5 / (1 << 31)));
+            sequence_.value.set(k, v.get(k) * (0.5 / (1L << 31)));
         return sequence_;
     }
 
     public final SampleVector lastSequence() { return sequence_; }
+
+    @Override
     public int dimension() { return dimensionality_; }
 
     public static void main(String[] args) {
-        SobolRsg rsg = new SobolRsg(3, 200, Unit, true);
+        SobolRsg rsg = new SobolRsg(3, 200, JoeKuoD7, true);
         for (int i = 0; i < 10; i++) {
-            System.out.println(rsg.nextInt32Sequence());
+            System.out.println(rsg.nextSequence().value);
         }
     }
 }

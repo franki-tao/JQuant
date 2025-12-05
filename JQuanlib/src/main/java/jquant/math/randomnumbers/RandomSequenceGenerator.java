@@ -2,6 +2,7 @@ package jquant.math.randomnumbers;
 
 import jquant.math.CommonUtil;
 import jquant.math.randomnumbers.impl.RngImpl;
+import jquant.math.randomnumbers.impl.UsgImpl;
 import jquant.methods.montecarlo.SampleReal;
 import jquant.methods.montecarlo.SampleVector;
 
@@ -25,7 +26,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 
     \warning do not use with low-discrepancy sequence generator.
 */
-public class RandomSequenceGenerator  {
+public class RandomSequenceGenerator implements UsgImpl {
 
     enum RNG {
         MersenneTwisterUniformRng
@@ -52,6 +53,7 @@ public class RandomSequenceGenerator  {
         int32Sequence_ = CommonUtil.ArrayInit(dimensionality);
     }
 
+    @Override
     public SampleVector nextSequence() {
         sequence_.weight = 1.0;
         for (int i=0; i<dimensionality_; i++) {
@@ -74,6 +76,7 @@ public class RandomSequenceGenerator  {
         return sequence_;
     }
 
+    @Override
     public int dimension() {return dimensionality_;}
 
 }
