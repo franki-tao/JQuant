@@ -13,7 +13,7 @@ public class TwoDimensionalIntegral {
         this.integratorX_ = integratorX;
     }
 
-    public double value(Function2 f, Point<Double> a, Point<Double> b) {
+    public double value(Function2 f, Point<Double, Double> a, Point<Double, Double> b) {
         Function f1 = new Function() {
             @Override
             public double value(double x) {

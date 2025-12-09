@@ -1,10 +1,15 @@
 package jquant.math;
 
-public class Point <T> {
+public class Point <T extends Number, R extends Number> {
     private T first;
-    private T second;
+    private R second;
 
-    public Point(T a, T b) {
+    public Point() {
+        this.first = null;
+        this.second = null;
+    }
+
+    public Point(T a, R b) {
         this.first = a;
         this.second = b;
     }
@@ -17,11 +22,11 @@ public class Point <T> {
         this.first = first;
     }
 
-    public T getSecond() {
+    public R getSecond() {
         return second;
     }
 
-    public void setSecond(T second) {
+    public void setSecond(R second) {
         this.second = second;
     }
 }
