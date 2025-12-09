@@ -1,6 +1,7 @@
 package jquant.math.statistics;
 
 import jquant.math.*;
+import jquant.math.statistics.impl.Stat;
 import org.apache.commons.math3.util.FastMath;
 
 import java.util.ArrayList;
@@ -20,7 +21,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * IncrementalStatistics. The downside is that it stores all
  * samples, thus increasing the memory requirements.
  */
-public class GeneralStatistics {
+public class GeneralStatistics extends Stat {
     private List<Point<Double, Double>> samples_;
     private boolean sorted_;
 

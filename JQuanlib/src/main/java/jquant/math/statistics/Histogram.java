@@ -107,7 +107,7 @@ public class Histogram {
                 }
                 case Scott: {
                     IncrementalStatistics summary = new IncrementalStatistics();
-                    summary.addSequence(data_, 0, data_.size());
+                    summary.addSequence(data_);
                     double variance = summary.variance();
                     double h = 3.5 * Math.sqrt(variance)
                             * Math.pow((data_.size()), -1.0 / 3.0);

@@ -1,6 +1,7 @@
 package jquant.math.statistics;
 
 import jquant.math.statistics.impl.DownsideAccumulatorSet;
+import jquant.math.statistics.impl.Stat;
 import jquant.math.statistics.impl.WeightedAccumulatorSet;
 
 import java.util.List;
@@ -13,7 +14,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * variance, skewness, kurtosis, error estimation, etc.).
  * This class is a wrapper to the boost accumulator library.
  */
-public class IncrementalStatistics {
+public class IncrementalStatistics extends Stat {
     private WeightedAccumulatorSet acc_;
     private DownsideAccumulatorSet downsideAcc_;
 
@@ -166,10 +167,11 @@ public class IncrementalStatistics {
             downsideAcc_.addValue(value, valueWeight);
         }
     }
+
     //! adds a sequence of data to the set, with default weight
-    public void addSequence(List<Double> arr, int begin, int end) {
-        for (int i = begin; i < end; i++) {
-            add(arr.get(i), 1.0);
+    public void addSequence(List<Double> arr) {
+        for (Double aDouble : arr) {
+            add(aDouble, 1.0);
         }
     }
 
