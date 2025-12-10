@@ -380,6 +380,16 @@ public class CommonUtil {
         return res;
     }
 
+    public static Matrix outerProduct(List<Double> a, List<Double> b) {
+        Matrix res = new Matrix(a.size(), a.size());
+        for (int i = 0; i < a.size(); i++) {
+            for (int j = 0; j < b.size(); j++) {
+                res.set(i, j, a.get(i) * b.get(j));
+            }
+        }
+        return res;
+    }
+
     public static void main(String[] args) {
         List<Integer> a = Arrays.asList(1, 2, 3);
         List<Integer> c = a;

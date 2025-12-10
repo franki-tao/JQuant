@@ -159,6 +159,11 @@ public class GenericGaussianStatistics extends Stat {
     }
 
     @Override
+    public double weightSum() {
+        return stat_.weightSum();
+    }
+
+    @Override
     public double standardDeviation() {
         return stat_.standardDeviation();
     }
@@ -201,6 +206,11 @@ public class GenericGaussianStatistics extends Stat {
     @Override
     public void addSequence(List<Double> values, List<Double> weights) {
         stat_.addSequence(values, weights);
+    }
+
+    @Override
+    public void reset() {
+        stat_.reset();
     }
 
     @Override

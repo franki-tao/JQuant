@@ -5,6 +5,7 @@ import java.util.List;
 public abstract class Stat {
     public abstract int samples();
     public abstract double mean();
+    public abstract double weightSum();
     public abstract double standardDeviation();
     public abstract double variance();
     public abstract double errorEstimate();
@@ -15,4 +16,5 @@ public abstract class Stat {
     public abstract void add(double value, double weight);
     public abstract void addSequence(List<Double> arr);
     public abstract void addSequence(List<Double> values, List<Double> weights);
+    public abstract void reset();
 }
