@@ -9,30 +9,13 @@ import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
-//  todo 部分阉割，后续根据需要再补充
-//! Statistics analysis of N-dimensional (sequence) data
-/*! It provides 1-dimensional statistics as discrepancy plus
-    N-dimensional (sequence) statistics (e.g. mean,
-    variance, skewness, kurtosis, etc.) with one component for each
-    dimension of the sample space.
-
-    For most of the statistics this class relies on
-    the StatisticsType underlying class to provide 1-D methods that
-    will be iterated for all the components of the N-D data. These
-    lifted methods are the union of all the methods that might be
-    requested to the 1-D underlying StatisticsType class, with the
-    usual compile-time checks provided by the template approach.
-
-    \test the correctness of the returned values is tested by
-          checking them against numerical calculations.
-*/
-public class GenericSequenceStatistics {
+public class SequenceStatistics {
     protected int dimension_ = 0;
-    protected List<Stat> stats_;
+    protected List<GenericRiskStatistics> stats_;
     protected List<Double> results_;
     protected Matrix quadraticSum_;
 
-    public GenericSequenceStatistics(int dimension) {
+    public SequenceStatistics(int dimension) {
         reset(dimension);
     }
 
@@ -192,8 +175,7 @@ public class GenericSequenceStatistics {
         }
     }
 
-    public Stat get(int i) {
+    public GenericRiskStatistics get(int i) {
         return stats_.get(i);
     }
-
 }

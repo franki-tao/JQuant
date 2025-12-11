@@ -13,11 +13,12 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * <p>
  * \todo add historical annualized volatility
  */
-public class GenericRiskStatistics {
-    public GeneralStatistics stat_;
+public class GenericRiskStatistics extends GenericGaussianStatistics{
+    public GenericGaussianStatistics stat_;
 
     public GenericRiskStatistics(GeneralStatistics stat) {
-        this.stat_ = stat;
+        super(stat);
+        this.stat_ = new GenericGaussianStatistics(stat);
     }
 
     /*! returns the variance of observations below the mean,

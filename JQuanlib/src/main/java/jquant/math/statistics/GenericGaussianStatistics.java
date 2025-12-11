@@ -15,10 +15,10 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
     shortfall, etc.) based on the mean and variance provided by
     the underlying statistic tool.
 */
-public class GenericGaussianStatistics extends Stat {
-    public Stat stat_;
+public class GenericGaussianStatistics extends GeneralStatistics {
+    public GeneralStatistics stat_;
 
-    public GenericGaussianStatistics(Stat stat) {
+    public GenericGaussianStatistics(GeneralStatistics stat) {
         stat_ = stat;
     }
 
