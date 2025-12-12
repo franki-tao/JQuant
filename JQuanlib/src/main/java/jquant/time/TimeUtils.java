@@ -21,6 +21,39 @@ public class TimeUtils {
             182, 213, 244, 274, 305, 335,   // Jun - Dec
             366     // used in dayOfMonth to bracket day
     };
+
+    public static final int[] EasterMonday = {
+            98,  90, 103,  95, 114, 106,  91, 111, 102,   // 1901-1909
+            87, 107,  99,  83, 103,  95, 115,  99,  91, 111,   // 1910-1919
+            96,  87, 107,  92, 112, 103,  95, 108, 100,  91,   // 1920-1929
+            111,  96,  88, 107,  92, 112, 104,  88, 108, 100,   // 1930-1939
+            85, 104,  96, 116, 101,  92, 112,  97,  89, 108,   // 1940-1949
+            100,  85, 105,  96, 109, 101,  93, 112,  97,  89,   // 1950-1959
+            109,  93, 113, 105,  90, 109, 101,  86, 106,  97,   // 1960-1969
+            89, 102,  94, 113, 105,  90, 110, 101,  86, 106,   // 1970-1979
+            98, 110, 102,  94, 114,  98,  90, 110,  95,  86,   // 1980-1989
+            106,  91, 111, 102,  94, 107,  99,  90, 103,  95,   // 1990-1999
+            115, 106,  91, 111, 103,  87, 107,  99,  84, 103,   // 2000-2009
+            95, 115, 100,  91, 111,  96,  88, 107,  92, 112,   // 2010-2019
+            104,  95, 108, 100,  92, 111,  96,  88, 108,  92,   // 2020-2029
+            112, 104,  89, 108, 100,  85, 105,  96, 116, 101,   // 2030-2039
+            93, 112,  97,  89, 109, 100,  85, 105,  97, 109,   // 2040-2049
+            101,  93, 113,  97,  89, 109,  94, 113, 105,  90,   // 2050-2059
+            110, 101,  86, 106,  98,  89, 102,  94, 114, 105,   // 2060-2069
+            90, 110, 102,  86, 106,  98, 111, 102,  94, 114,   // 2070-2079
+            99,  90, 110,  95,  87, 106,  91, 111, 103,  94,   // 2080-2089
+            107,  99,  91, 103,  95, 115, 107,  91, 111, 103,   // 2090-2099
+            88, 108, 100,  85, 105,  96, 109, 101,  93, 112,   // 2100-2109
+            97,  89, 109,  93, 113, 105,  90, 109, 101,  86,   // 2110-2119
+            106,  97,  89, 102,  94, 113, 105,  90, 110, 101,   // 2120-2129
+            86, 106,  98, 110, 102,  94, 114,  98,  90, 110,   // 2130-2139
+            95,  86, 106,  91, 111, 102,  94, 107,  99,  90,   // 2140-2149
+            103,  95, 115, 106,  91, 111, 103,  87, 107,  99,   // 2150-2159
+            84, 103,  95, 115, 100,  91, 111,  96,  88, 107,   // 2160-2169
+            92, 112, 104,  95, 108, 100,  92, 111,  96,  88,   // 2170-2179
+            108,  92, 112, 104,  89, 108, 100,  85, 105,  96,   // 2180-2189
+            116, 101,  93, 112,  97,  89, 109, 100,  85, 105    // 2190-2199
+    };
     // the list of all December 31st in the preceding year
     // e.g. for 1901 yearOffset[1] is 366, that is, December 31 1900
     public static final int[] YearOffset = {
@@ -159,11 +192,11 @@ public class TimeUtils {
             case DAYS:
                 return new Point<>(p.length(), p.length());
             case WEEKS:
-                return new Point<>(7*p.length(), 7*p.length());
+                return new Point<>(7 * p.length(), 7 * p.length());
             case MONTHS:
-                return new Point<>(28*p.length(), 31*p.length());
+                return new Point<>(28 * p.length(), 31 * p.length());
             case YEARS:
-                return new Point<>(365*p.length(), 366*p.length());
+                return new Point<>(365 * p.length(), 366 * p.length());
             default:
                 QL_FAIL("unknown time unit (" + p.units() + ")");
         }
@@ -291,13 +324,13 @@ public class TimeUtils {
         if (p1.units() == p2.units())
             return p1.length() < p2.length();
         if (p1.units() == TimeUnit.MONTHS && p2.units() == TimeUnit.YEARS)
-            return p1.length() < 12*p2.length();
+            return p1.length() < 12 * p2.length();
         if (p1.units() == TimeUnit.YEARS && p2.units() == TimeUnit.MONTHS)
-            return 12*p1.length() < p2.length();
+            return 12 * p1.length() < p2.length();
         if (p1.units() == TimeUnit.DAYS && p2.units() == TimeUnit.WEEKS)
-            return p1.length() < 7*p2.length();
+            return p1.length() < 7 * p2.length();
         if (p1.units() == TimeUnit.WEEKS && p2.units() == TimeUnit.DAYS)
-            return 7*p1.length() < p2.length();
+            return 7 * p1.length() < p2.length();
 
         // inexact comparisons (handled by converting to days and using limits)
         Point<Integer, Integer> p1lim = daysMinMax(p1);
@@ -323,10 +356,47 @@ public class TimeUtils {
     public static boolean neq(Period p1, Period p2) {
         return !equals(p1, p2);
     }
+
     public static boolean leq(Period p1, Period p2) {
         return !less(p2, p1);
     }
+
     public static boolean geq(Period p1, Period p2) {
         return !greater(p2, p1);
+    }
+
+    public static int substract(final Date d1, final Date d2) {
+        return d1.serialNumber() - d2.serialNumber();
+    }
+
+    public static boolean equals(final Date d1, final Date d2) {
+        return d1.serialNumber() == d2.serialNumber();
+    }
+
+    public static boolean neq(final Date d1, final Date d2) {
+        return d1.serialNumber() != d2.serialNumber();
+    }
+
+    public static boolean less(final Date d1, final Date d2) {
+        return d1.serialNumber() < d2.serialNumber();
+    }
+
+    public static boolean greater(final Date d1, final Date d2) {
+        return d1.serialNumber() > d2.serialNumber();
+    }
+
+    public static boolean leq(final Date d1, final Date d2) {
+        return d1.serialNumber() <= d2.serialNumber();
+    }
+
+    public static boolean geq(final Date d1, final Date d2) {
+        return d1.serialNumber() >= d2.serialNumber();
+    }
+
+    /*! \relates Date
+        \brief Difference in days (including fraction of days) between dates
+    */
+    public static double daysBetween(Date d1, Date d2) {
+        return (double) (substract(d2, d1));
     }
 }
