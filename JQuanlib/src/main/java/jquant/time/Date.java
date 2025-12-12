@@ -49,6 +49,10 @@ public class Date {
         serialNumber_ = d + offset + yearOffset(y);
     }
 
+    public Date copy() {
+        return new Date(serialNumber_);
+    }
+
     //! \name inspectors
     public Weekday weekday() {
         int w = serialNumber_ % 7;

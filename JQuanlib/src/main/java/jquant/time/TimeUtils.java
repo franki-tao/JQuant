@@ -2,6 +2,8 @@ package jquant.time;
 
 import jquant.math.Point;
 
+import java.util.Objects;
+
 import static jquant.math.CommonUtil.QL_FAIL;
 
 public class TimeUtils {
@@ -398,5 +400,28 @@ public class TimeUtils {
     */
     public static double daysBetween(Date d1, Date d2) {
         return (double) (substract(d2, d1));
+    }
+
+    public static int daysBetweenImpl(final Calendar cal,
+                                      final Date from, final Date to,
+                                      boolean includeFirst, boolean includeLast) {
+        int res = (includeLast && cal.isBusinessDay(to)) ? 1 : 0;
+        for (Date d = includeFirst ? from : from.add(1); less(d , to); d = d.add(1)) {
+            res += (cal.isBusinessDay(d)) ? 1 : 0;
+        }
+        return res;
+    }
+
+    /*! Returns <tt>true</tt> iff the two calendars belong to the same
+        derived class.
+        \relates Calendar
+    */
+    public static boolean equals(final Calendar c1, final Calendar c2) {
+        return (c1.empty() && c2.empty())
+                || (!c1.empty() && !c2.empty() && Objects.equals(c1.name(), c2.name()));
+    }
+    /*! \relates Calendar */
+    public static boolean neq(final Calendar c1, final Calendar c2) {
+        return !equals(c1, c2);
     }
 }
