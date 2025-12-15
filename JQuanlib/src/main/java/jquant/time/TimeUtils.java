@@ -424,4 +424,44 @@ public class TimeUtils {
     public static boolean neq(final Calendar c1, final Calendar c2) {
         return !equals(c1, c2);
     }
+    public static boolean allowsEndOfMonth(final Period tenor) {
+        return (tenor.units() == TimeUnit.MONTHS || tenor.units() == TimeUnit.YEARS)
+                && geq(tenor , multiply(1,TimeUnit.MONTHS));
+    }
+    /*! Helper function for returning the date on or before date \p d that is the 20th of the month and obeserves the
+        given date generation \p rule if it is relevant.
+    */
+    public static Date previousTwentieth(Date d, DateGenerationRule rule) {
+        Date result = new Date(20, d.month(), d.year());
+        if (greater(result , d))
+            result.substractEquals(multiply(1,TimeUnit.MONTHS));
+        if (rule == DateGenerationRule.TWENTIETH_IMM ||
+                rule == DateGenerationRule.OLD_CDS ||
+                rule == DateGenerationRule.CDS ||
+                rule == DateGenerationRule.CDS2015) {
+            Month m = result.month();
+            if (m.getValue() % 3 != 0) { // not a main IMM nmonth
+                int skip = m.getValue() % 3;
+                result.substractEquals(multiply(skip, TimeUnit.MONTHS));
+            }
+        }
+        return result;
+    }
+
+    public static Date nextTwentieth(Date d, DateGenerationRule rule) {
+        Date result = new Date(20, d.month(), d.year());
+        if (less(result , d))
+            result.addEquals(multiply(1, TimeUnit.MONTHS));
+        if (rule == DateGenerationRule.TWENTIETH_IMM ||
+                rule == DateGenerationRule.OLD_CDS ||
+                rule == DateGenerationRule.CDS ||
+                rule == DateGenerationRule.CDS2015) {
+            Month m = result.month();
+            if (m.getValue() % 3 != 0) { // not a main IMM nmonth
+                int skip = 3 - m.getValue()%3;
+                result.addEquals(multiply(skip, TimeUnit.MONTHS));
+            }
+        }
+        return result;
+    }
 }
