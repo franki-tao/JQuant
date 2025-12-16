@@ -398,4 +398,220 @@ public class Schedule {
                         "\n generation rule: " + rule_.get() +
                         "\n end of month: " + endOfMonth_.get());
     }
+
+    public Schedule() {
+        dates_ = new ArrayList<>();
+        isRegular_ = new ArrayList<>();
+        tenor_ = Optional.empty();
+        terminationDateConvention_ = Optional.empty();
+        rule_ = Optional.empty();
+        endOfMonth_ = Optional.empty();
+        firstDate_ = new Date();
+        nextToLastDate_ = new Date();
+    }
+
+    public int size() {
+        return dates_.size();
+    }
+
+    public Date at(int i) {
+        return dates_.get(i);
+    }
+
+    public Date date(int i) {
+        return dates_.get(i);
+    }
+
+    public List<Date> dates() {
+        return dates_;
+    }
+
+    public boolean empty() {
+        return dates_.isEmpty();
+    }
+
+    public Date front() {
+        QL_REQUIRE(!dates_.isEmpty(), "no front date for empty schedule");
+        return dates_.get(0);
+    }
+
+    public Date back() {
+        QL_REQUIRE(!dates_.isEmpty(), "no back date for empty schedule");
+        return dates_.get(dates_.size() - 1);
+    }
+
+    public Date previousDate(final Date refDate) {
+        int res = lower_bound(refDate);
+        if (res != 0)
+            return dates_.get(--res);
+        else
+            return new Date();
+    }
+
+    public Date nextDate(final Date refDate) {
+        int res = lower_bound(refDate);
+        if (res != dates_.size())
+            return dates_.get(res);
+        else
+            return new Date();
+    }
+
+    public boolean hasIsRegular() {
+        return !isRegular_.isEmpty();
+    }
+
+    public boolean isRegular(int i) {
+        QL_REQUIRE(hasIsRegular(),
+                "full interface (isRegular) not available");
+        QL_REQUIRE(i <= isRegular_.size() && i > 0,
+                "index (" + i + ") must be in [1, " +
+                        isRegular_.size() + "]");
+        return isRegular_.get(i - 1);
+    }
+
+    public final List<Boolean> isRegular() {
+        QL_REQUIRE(!isRegular_.isEmpty(), "full interface (isRegular) not available");
+        return isRegular_;
+    }
+
+    public final Calendar calendar() {
+        return calendar_;
+    }
+
+    public final Date startDate() {
+        return dates_.get(0);
+    }
+
+    public final Date endDate() {
+        return dates_.get(dates_.size() - 1);
+    }
+
+    public boolean hasTenor() {
+        return tenor_.isPresent();
+    }
+
+    public final Period tenor() {
+        QL_REQUIRE(hasTenor(),
+                "full interface (tenor) not available");
+        return tenor_.get();  // NOLINT(bugprone-unchecked-optional-access)
+    }
+
+    public BusinessDayConvention businessDayConvention() {
+        return convention_;
+    }
+
+    public boolean hasTerminationDateBusinessDayConvention() {
+        return terminationDateConvention_.isPresent();
+    }
+
+    public BusinessDayConvention terminationDateBusinessDayConvention() {
+        QL_REQUIRE(hasTerminationDateBusinessDayConvention(),
+                "full interface (termination date bdc) not available");
+        return terminationDateConvention_.get();  // NOLINT(bugprone-unchecked-optional-access)
+    }
+
+    public boolean hasRule() {
+        return rule_.isPresent();
+    }
+
+    public DateGenerationRule rule() {
+        QL_REQUIRE(hasRule(), "full interface (rule) not available");
+        return rule_.get();  // NOLINT(bugprone-unchecked-optional-access)
+    }
+
+    public boolean hasEndOfMonth() {
+        return endOfMonth_.isPresent();
+    }
+
+    public boolean endOfMonth() {
+        QL_REQUIRE(hasEndOfMonth(),
+                "full interface (end of month) not available");
+        return endOfMonth_.get();  // NOLINT(bugprone-unchecked-optional-access)
+    }
+
+    public int begin() {
+        return 0;
+    }
+
+    public int end() {
+        return dates_.size();
+    }
+
+    public int lower_bound(final Date refDate) {
+        Date d = TimeUtils.equals(refDate, new Date()) ? Settings.instance.evaluationDate().Date() : refDate;
+        int index = 0;
+        while (!TimeUtils.leq(d, dates_.get(index))) {
+            index++;
+        }
+        return index;
+    }
+
+    public Schedule after(final Date truncationDate) {
+        Schedule result = this.copy();
+
+        QL_REQUIRE(TimeUtils.less(truncationDate, result.dates_.get(result.dates_.size() - 1)),
+                "truncation date " + truncationDate +
+                        " must be before the last schedule date " +
+                        result.dates_.get(result.dates_.size() - 1));
+        if (TimeUtils.greater(truncationDate, result.dates_.get(0))) {
+            // remove earlier dates
+            while (TimeUtils.less(result.dates_.get(0), truncationDate)) {
+                result.dates_.remove(0);
+                if (!result.isRegular_.isEmpty())
+                    result.isRegular_.remove(0);
+            }
+
+            // add truncationDate if missing
+            if (TimeUtils.neq(truncationDate, result.dates_.get(0))) {
+                result.dates_.add(0, truncationDate);
+                result.isRegular_.add(0, false);
+                result.terminationDateConvention_ = Optional.of(BusinessDayConvention.UNADJUSTED);
+            } else {
+                result.terminationDateConvention_ = Optional.of(convention_);
+            }
+
+            if (TimeUtils.leq(result.nextToLastDate_, truncationDate))
+                result.nextToLastDate_ = new Date();
+            if (TimeUtils.leq(result.firstDate_, truncationDate))
+                result.firstDate_ = new Date();
+        }
+        return result;
+    }
+
+    public Schedule until(final Date truncationDate) {
+        Schedule result = this.copy();
+        QL_REQUIRE(TimeUtils.greater(truncationDate, result.dates_.get(0)),
+                "truncation date " + truncationDate +
+                        " must be later than schedule first date " +
+                        result.dates_.get(0));
+        if (TimeUtils.less(truncationDate, result.dates_.get(result.dates_.size() - 1))) {
+            // remove later dates
+            while (TimeUtils.greater(result.dates_.get(result.dates_.size() - 1), truncationDate)) {
+                result.dates_.remove(result.dates_.size() - 1);
+                if (!result.isRegular_.isEmpty())
+                    result.isRegular_.remove(result.isRegular_.size() - 1);
+            }
+
+            // add truncationDate if missing
+            if (TimeUtils.neq(truncationDate, result.dates_.get(result.dates_.size() - 1))) {
+                result.dates_.add(truncationDate);
+                result.isRegular_.add(false);
+                result.terminationDateConvention_ = Optional.of(BusinessDayConvention.UNADJUSTED);
+            } else {
+                result.terminationDateConvention_ = Optional.of(convention_);
+            }
+
+            if (TimeUtils.geq(result.nextToLastDate_, truncationDate))
+                result.nextToLastDate_ = new Date();
+            if (TimeUtils.geq(result.firstDate_, truncationDate))
+                result.firstDate_ = new Date();
+        }
+
+        return result;
+    }
+
+    public Schedule copy() {
+        return new Schedule(this.dates_, this.calendar_, this.convention_,
+                this.terminationDateConvention_,this.tenor_,this.rule_,this.endOfMonth_,this.isRegular_);
+    }
 }

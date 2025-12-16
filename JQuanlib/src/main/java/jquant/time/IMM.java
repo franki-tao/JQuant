@@ -219,4 +219,8 @@ public class IMM {
         Date date = nextDate(immCode, mainCycle, referenceDate);
         return code(date);
     }
+
+    public static void main(String[] args) {
+        System.out.println(IMM.code(Date.todaysDate().add(2)));
+    }
 }
