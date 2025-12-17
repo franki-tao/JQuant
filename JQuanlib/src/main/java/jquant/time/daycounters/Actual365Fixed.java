@@ -15,6 +15,10 @@ public class Actual365Fixed extends DayCounter {
         super(implementation(convention));
     }
 
+    public Actual365Fixed() {
+        this(Convention.Standard);
+    }
+
     private static DayCounterImpl implementation(Convention c) {
         switch (c) {
             case Standard:

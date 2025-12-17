@@ -1,10 +1,12 @@
 package jquant.time;
 
 import jquant.math.Point;
+import jquant.time.impl.DayCounterImpl;
 
 import java.util.*;
 
 import static jquant.math.CommonUtil.QL_FAIL;
+import static jquant.math.CommonUtil.QL_REQUIRE;
 
 public class TimeUtils {
     public static final int[] MonthLength = {
@@ -25,36 +27,36 @@ public class TimeUtils {
     };
 
     public static final int[] EasterMonday = {
-            98,  90, 103,  95, 114, 106,  91, 111, 102,   // 1901-1909
-            87, 107,  99,  83, 103,  95, 115,  99,  91, 111,   // 1910-1919
-            96,  87, 107,  92, 112, 103,  95, 108, 100,  91,   // 1920-1929
-            111,  96,  88, 107,  92, 112, 104,  88, 108, 100,   // 1930-1939
-            85, 104,  96, 116, 101,  92, 112,  97,  89, 108,   // 1940-1949
-            100,  85, 105,  96, 109, 101,  93, 112,  97,  89,   // 1950-1959
-            109,  93, 113, 105,  90, 109, 101,  86, 106,  97,   // 1960-1969
-            89, 102,  94, 113, 105,  90, 110, 101,  86, 106,   // 1970-1979
-            98, 110, 102,  94, 114,  98,  90, 110,  95,  86,   // 1980-1989
-            106,  91, 111, 102,  94, 107,  99,  90, 103,  95,   // 1990-1999
-            115, 106,  91, 111, 103,  87, 107,  99,  84, 103,   // 2000-2009
-            95, 115, 100,  91, 111,  96,  88, 107,  92, 112,   // 2010-2019
-            104,  95, 108, 100,  92, 111,  96,  88, 108,  92,   // 2020-2029
-            112, 104,  89, 108, 100,  85, 105,  96, 116, 101,   // 2030-2039
-            93, 112,  97,  89, 109, 100,  85, 105,  97, 109,   // 2040-2049
-            101,  93, 113,  97,  89, 109,  94, 113, 105,  90,   // 2050-2059
-            110, 101,  86, 106,  98,  89, 102,  94, 114, 105,   // 2060-2069
-            90, 110, 102,  86, 106,  98, 111, 102,  94, 114,   // 2070-2079
-            99,  90, 110,  95,  87, 106,  91, 111, 103,  94,   // 2080-2089
-            107,  99,  91, 103,  95, 115, 107,  91, 111, 103,   // 2090-2099
-            88, 108, 100,  85, 105,  96, 109, 101,  93, 112,   // 2100-2109
-            97,  89, 109,  93, 113, 105,  90, 109, 101,  86,   // 2110-2119
-            106,  97,  89, 102,  94, 113, 105,  90, 110, 101,   // 2120-2129
-            86, 106,  98, 110, 102,  94, 114,  98,  90, 110,   // 2130-2139
-            95,  86, 106,  91, 111, 102,  94, 107,  99,  90,   // 2140-2149
-            103,  95, 115, 106,  91, 111, 103,  87, 107,  99,   // 2150-2159
-            84, 103,  95, 115, 100,  91, 111,  96,  88, 107,   // 2160-2169
-            92, 112, 104,  95, 108, 100,  92, 111,  96,  88,   // 2170-2179
-            108,  92, 112, 104,  89, 108, 100,  85, 105,  96,   // 2180-2189
-            116, 101,  93, 112,  97,  89, 109, 100,  85, 105    // 2190-2199
+            98, 90, 103, 95, 114, 106, 91, 111, 102,   // 1901-1909
+            87, 107, 99, 83, 103, 95, 115, 99, 91, 111,   // 1910-1919
+            96, 87, 107, 92, 112, 103, 95, 108, 100, 91,   // 1920-1929
+            111, 96, 88, 107, 92, 112, 104, 88, 108, 100,   // 1930-1939
+            85, 104, 96, 116, 101, 92, 112, 97, 89, 108,   // 1940-1949
+            100, 85, 105, 96, 109, 101, 93, 112, 97, 89,   // 1950-1959
+            109, 93, 113, 105, 90, 109, 101, 86, 106, 97,   // 1960-1969
+            89, 102, 94, 113, 105, 90, 110, 101, 86, 106,   // 1970-1979
+            98, 110, 102, 94, 114, 98, 90, 110, 95, 86,   // 1980-1989
+            106, 91, 111, 102, 94, 107, 99, 90, 103, 95,   // 1990-1999
+            115, 106, 91, 111, 103, 87, 107, 99, 84, 103,   // 2000-2009
+            95, 115, 100, 91, 111, 96, 88, 107, 92, 112,   // 2010-2019
+            104, 95, 108, 100, 92, 111, 96, 88, 108, 92,   // 2020-2029
+            112, 104, 89, 108, 100, 85, 105, 96, 116, 101,   // 2030-2039
+            93, 112, 97, 89, 109, 100, 85, 105, 97, 109,   // 2040-2049
+            101, 93, 113, 97, 89, 109, 94, 113, 105, 90,   // 2050-2059
+            110, 101, 86, 106, 98, 89, 102, 94, 114, 105,   // 2060-2069
+            90, 110, 102, 86, 106, 98, 111, 102, 94, 114,   // 2070-2079
+            99, 90, 110, 95, 87, 106, 91, 111, 103, 94,   // 2080-2089
+            107, 99, 91, 103, 95, 115, 107, 91, 111, 103,   // 2090-2099
+            88, 108, 100, 85, 105, 96, 109, 101, 93, 112,   // 2100-2109
+            97, 89, 109, 93, 113, 105, 90, 109, 101, 86,   // 2110-2119
+            106, 97, 89, 102, 94, 113, 105, 90, 110, 101,   // 2120-2129
+            86, 106, 98, 110, 102, 94, 114, 98, 90, 110,   // 2130-2139
+            95, 86, 106, 91, 111, 102, 94, 107, 99, 90,   // 2140-2149
+            103, 95, 115, 106, 91, 111, 103, 87, 107, 99,   // 2150-2159
+            84, 103, 95, 115, 100, 91, 111, 96, 88, 107,   // 2160-2169
+            92, 112, 104, 95, 108, 100, 92, 111, 96, 88,   // 2170-2179
+            108, 92, 112, 104, 89, 108, 100, 85, 105, 96,   // 2180-2189
+            116, 101, 93, 112, 97, 89, 109, 100, 85, 105    // 2190-2199
     };
     // the list of all December 31st in the preceding year
     // e.g. for 1901 yearOffset[1] is 366, that is, December 31 1900
@@ -239,8 +241,8 @@ public class TimeUtils {
     });
 
     static {
-        for(int[] yearDates : ECB_DATES_BY_YEAR) {
-            for(int year : yearDates) {
+        for (int[] yearDates : ECB_DATES_BY_YEAR) {
+            for (int year : yearDates) {
                 ecbKnownDateSet.add(new Date(year));
             }
         }
@@ -463,7 +465,7 @@ public class TimeUtils {
                                       final Date from, final Date to,
                                       boolean includeFirst, boolean includeLast) {
         int res = (includeLast && cal.isBusinessDay(to)) ? 1 : 0;
-        for (Date d = includeFirst ? from : from.add(1); less(d , to); d = d.add(1)) {
+        for (Date d = includeFirst ? from : from.add(1); less(d, to); d = d.add(1)) {
             res += (cal.isBusinessDay(d)) ? 1 : 0;
         }
         return res;
@@ -477,21 +479,24 @@ public class TimeUtils {
         return (c1.empty() && c2.empty())
                 || (!c1.empty() && !c2.empty() && Objects.equals(c1.name(), c2.name()));
     }
+
     /*! \relates Calendar */
     public static boolean neq(final Calendar c1, final Calendar c2) {
         return !equals(c1, c2);
     }
+
     public static boolean allowsEndOfMonth(final Period tenor) {
         return (tenor.units() == TimeUnit.MONTHS || tenor.units() == TimeUnit.YEARS)
-                && geq(tenor , multiply(1,TimeUnit.MONTHS));
+                && geq(tenor, multiply(1, TimeUnit.MONTHS));
     }
+
     /*! Helper function for returning the date on or before date \p d that is the 20th of the month and obeserves the
         given date generation \p rule if it is relevant.
     */
     public static Date previousTwentieth(Date d, DateGenerationRule rule) {
         Date result = new Date(20, d.month(), d.year());
-        if (greater(result , d))
-            result.substractEquals(multiply(1,TimeUnit.MONTHS));
+        if (greater(result, d))
+            result.substractEquals(multiply(1, TimeUnit.MONTHS));
         if (rule == DateGenerationRule.TWENTIETH_IMM ||
                 rule == DateGenerationRule.OLD_CDS ||
                 rule == DateGenerationRule.CDS ||
@@ -507,7 +512,7 @@ public class TimeUtils {
 
     public static Date nextTwentieth(Date d, DateGenerationRule rule) {
         Date result = new Date(20, d.month(), d.year());
-        if (less(result , d))
+        if (less(result, d))
             result.addEquals(multiply(1, TimeUnit.MONTHS));
         if (rule == DateGenerationRule.TWENTIETH_IMM ||
                 rule == DateGenerationRule.OLD_CDS ||
@@ -515,7 +520,7 @@ public class TimeUtils {
                 rule == DateGenerationRule.CDS2015) {
             Month m = result.month();
             if (m.getValue() % 3 != 0) { // not a main IMM nmonth
-                int skip = 3 - m.getValue()%3;
+                int skip = 3 - m.getValue() % 3;
                 result.addEquals(multiply(skip, TimeUnit.MONTHS));
             }
         }
@@ -532,8 +537,114 @@ public class TimeUtils {
         return (d1.empty() && d2.empty())
                 || (!d1.empty() && !d2.empty() && Objects.equals(d1.name(), d2.name()));
     }
+
     public static boolean neq(final DayCounter d1, final DayCounter d2) {
         return !equals(d1, d2);
+    }
+
+    /* An ISMA day counter either needs a schedule or to have
+       been explicitly passed a reference period. This usage
+       leads to inaccurate year fractions.
+    */
+    public static double yearFractionGuess(final DayCounterImpl impl, Date d1, Date d2) {
+        return impl.dayCount(d1, d2) / 365.0;
+    }
+
+    public static List<Date> getListOfPeriodDatesIncludingQuasiPayments(final Schedule schedule) {
+        // Process the schedule into an array of dates.
+        Date issueDate = schedule.date(0);
+        List<Date> newDates = schedule.dates();
+
+        if (!schedule.hasIsRegular() || !schedule.isRegular(1)) {
+            Date firstCoupon = schedule.date(1);
+
+            Date notionalFirstCoupon =
+                    schedule.calendar().advance(firstCoupon,
+                            negetive(schedule.tenor()),
+                            schedule.businessDayConvention(),
+                            schedule.endOfMonth());
+
+            newDates.set(0, notionalFirstCoupon);
+
+            //long first coupon
+            if (greater(notionalFirstCoupon, issueDate)) {
+                Date priorNotionalCoupon =
+                        schedule.calendar().advance(notionalFirstCoupon,
+                                negetive(schedule.tenor()),
+                                schedule.businessDayConvention(),
+                                schedule.endOfMonth());
+                newDates.add(0, priorNotionalCoupon); //insert as the first element?
+            }
+        }
+
+        if (!schedule.hasIsRegular() || !schedule.isRegular(schedule.size() - 1)) {
+            Date notionalLastCoupon =
+                    schedule.calendar().advance(schedule.date(schedule.size() - 2),
+                            schedule.tenor(),
+                            schedule.businessDayConvention(),
+                            schedule.endOfMonth());
+
+            newDates.set(schedule.size() - 1, notionalLastCoupon);
+
+            if (less(notionalLastCoupon, schedule.endDate())) {
+                Date nextNotionalCoupon =
+                        schedule.calendar().advance(notionalLastCoupon,
+                                schedule.tenor(),
+                                schedule.businessDayConvention(),
+                                schedule.endOfMonth());
+                newDates.add(nextNotionalCoupon);
+            }
+        }
+
+        return newDates;
+    }
+    // the template argument works around passing a protected type
+    public static int findCouponsPerYear(DayCounterImpl impl, Date refStart, Date refEnd) {
+        // This will only work for day counts longer than 15 days.
+        int months = (int)Math.round(12 * (impl.dayCount(refStart, refEnd)) / 365.0);
+        return (int)Math.round(12.0 / (months));
+    }
+
+    public static double yearFractionWithReferenceDates(final DayCounterImpl impl, Date d1, Date d2, Date d3, Date d4) {
+        QL_REQUIRE(leq(d1 , d2),
+                "This function is only correct if d1 <= d2\n"+
+                "d1: " + d1 + " d2: " + d2);
+
+        double referenceDayCount = (impl.dayCount(d3, d4));
+        //guess how many coupon periods per year:
+        int couponsPerYear;
+        if (referenceDayCount < 16) {
+            couponsPerYear = 1;
+            referenceDayCount = impl.dayCount(d1, d1.add(multiply(1,TimeUnit.YEARS)));
+        }
+        else {
+            couponsPerYear = findCouponsPerYear(impl, d3, d4);
+        }
+        return (impl.dayCount(d1, d2)) / (referenceDayCount*couponsPerYear);
+    }
+
+    public static Date min_date(List<Date> dates) {
+        return Collections.min(dates, (o1, o2) -> {
+            if (equals(o1, o2))
+                return 0;
+            return TimeUtils.greater(o1, o2) ? 1 : -1;
+        });
+    }
+
+    public static Date max_date(List<Date> dates) {
+        return Collections.max(dates, (o1, o2) -> {
+            if (equals(o1, o2))
+                return 0;
+            return TimeUtils.greater(o1, o2) ? 1 : -1;
+        });
+    }
+
+    public static Date max(Date d1, Date d2) {
+        return geq(d1, d2) ? d1 : d2;
+    }
+
+    public static Date min(Date d1, Date d2) {
+        return geq(d1, d2) ? d2 : d1;
     }
 
     public static void main(String[] args) {
