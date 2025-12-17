@@ -522,6 +522,20 @@ public class TimeUtils {
         return result;
     }
 
+    // comparison based on name
+
+    /*! Returns <tt>true</tt> iff the two day counters belong to the same
+        derived class.
+        \relates DayCounter
+    */
+    public static boolean equals(final DayCounter d1, final DayCounter d2) {
+        return (d1.empty() && d2.empty())
+                || (!d1.empty() && !d2.empty() && Objects.equals(d1.name(), d2.name()));
+    }
+    public static boolean neq(final DayCounter d1, final DayCounter d2) {
+        return !equals(d1, d2);
+    }
+
     public static void main(String[] args) {
         System.out.println(ecbKnownDateSet);
     }
