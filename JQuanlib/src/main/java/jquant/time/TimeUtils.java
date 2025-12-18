@@ -7,6 +7,8 @@ import java.util.*;
 
 import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
+import static jquant.math.MathUtils.QL_EPSILON;
+import static jquant.math.MathUtils.close_enough;
 
 public class TimeUtils {
     public static final int[] MonthLength = {
@@ -234,6 +236,9 @@ public class TimeUtils {
             {45322, 45364, 45399, 45455, 45497, 45553, 45588, 45644}
     };
 
+    public static Map<String, Map<Integer, Map<Month, Integer>>> monthlyFigures_ = new HashMap<>();
+    public static Map<String, Map<Integer, Integer>> yearlyFigures_ = new HashMap<>();
+
     public static Set<Date> ecbKnownDateSet = new TreeSet<>((o1, o2) -> {
         if (TimeUtils.equals(o1, o2))
             return 0;
@@ -246,6 +251,48 @@ public class TimeUtils {
                 ecbKnownDateSet.add(new Date(year));
             }
         }
+    }
+
+    public static boolean isLastOfFebruary(int d, Month m, int y) {
+        return m.getValue() == 2 && d == 28 + (Date.isLeap(y) ? 1 : 0);
+    }
+
+    public static Date yearFractionToDate(final DayCounter dayCounter, final Date referenceDate, double t) {
+        Date guessDate = referenceDate.add(new Period((int) Math.round(t * 365.25), TimeUnit.DAYS));
+        double guessTime = dayCounter.yearFraction(referenceDate, guessDate, new Date(), new Date());
+
+        guessDate.addEquals(new Period((int) Math.round((t - guessTime) * 365.25), TimeUnit.DAYS));
+        guessTime = dayCounter.yearFraction(referenceDate, guessDate, new Date(), new Date());
+
+        if (close_enough(guessTime, t))
+            return guessDate;
+
+        int searchDirection = (int) Math.copySign(1.0, t - guessTime);
+
+        t += searchDirection * 100 * QL_EPSILON;
+
+        Date nextDate;
+        TimeUnit[] temp = {TimeUnit.YEARS, TimeUnit.MONTHS, TimeUnit.DAYS};
+        for (TimeUnit u : temp) {
+            while (searchDirection * (
+                    dayCounter.yearFraction(
+                            referenceDate,
+                            nextDate = guessDate.add(new Period(searchDirection, u)),
+                            new Date(),
+                            new Date()) - t) < 0.0)
+                guessDate = nextDate;
+        }
+
+        guessTime = dayCounter.yearFraction(referenceDate, guessDate, new Date(), new Date());
+        if (close_enough(guessTime, t)
+                || Math.abs(dayCounter.yearFraction(referenceDate,
+                guessDate.add(new Period(searchDirection, TimeUnit.DAYS)),
+                new Date(),
+                new Date()) - t) >
+                Math.abs(guessTime - t))
+            return guessDate;
+        else
+            return guessDate.add(new Period(searchDirection, TimeUnit.DAYS));
     }
 
     public static Point<Integer, Integer> daysMinMax(final Period p) {
@@ -598,29 +645,29 @@ public class TimeUtils {
 
         return newDates;
     }
+
     // the template argument works around passing a protected type
     public static int findCouponsPerYear(DayCounterImpl impl, Date refStart, Date refEnd) {
         // This will only work for day counts longer than 15 days.
-        int months = (int)Math.round(12 * (impl.dayCount(refStart, refEnd)) / 365.0);
-        return (int)Math.round(12.0 / (months));
+        int months = (int) Math.round(12 * (impl.dayCount(refStart, refEnd)) / 365.0);
+        return (int) Math.round(12.0 / (months));
     }
 
     public static double yearFractionWithReferenceDates(final DayCounterImpl impl, Date d1, Date d2, Date d3, Date d4) {
-        QL_REQUIRE(leq(d1 , d2),
-                "This function is only correct if d1 <= d2\n"+
-                "d1: " + d1 + " d2: " + d2);
+        QL_REQUIRE(leq(d1, d2),
+                "This function is only correct if d1 <= d2\n" +
+                        "d1: " + d1 + " d2: " + d2);
 
         double referenceDayCount = (impl.dayCount(d3, d4));
         //guess how many coupon periods per year:
         int couponsPerYear;
         if (referenceDayCount < 16) {
             couponsPerYear = 1;
-            referenceDayCount = impl.dayCount(d1, d1.add(multiply(1,TimeUnit.YEARS)));
-        }
-        else {
+            referenceDayCount = impl.dayCount(d1, d1.add(multiply(1, TimeUnit.YEARS)));
+        } else {
             couponsPerYear = findCouponsPerYear(impl, d3, d4);
         }
-        return (impl.dayCount(d1, d2)) / (referenceDayCount*couponsPerYear);
+        return (impl.dayCount(d1, d2)) / (referenceDayCount * couponsPerYear);
     }
 
     public static Date min_date(List<Date> dates) {
@@ -647,7 +694,19 @@ public class TimeUtils {
         return geq(d1, d2) ? d2 : d1;
     }
 
+    public static boolean sameMonth(Date d1, Date d2) {
+        return d1.year() == d2.year() && d1.month() == d2.month();
+    }
+
+    public static boolean sameYear(Date d1, Date d2) {
+        return d1.year() == d2.year();
+    }
+
     public static void main(String[] args) {
+        Date d3 = new Date(13, Month.FEBRUARY, 2024);
+        Date d2 = new Date(2, Month.JANUARY, 2025);
+        Date d1 = new Date(1, Month.JANUARY, 2025);
+        System.out.println(min_date(Arrays.asList(d1, d2, d3)));
         System.out.println(ecbKnownDateSet);
     }
 }

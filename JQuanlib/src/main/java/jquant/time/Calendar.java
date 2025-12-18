@@ -283,11 +283,17 @@ public abstract class Calendar {
     */
     public int businessDaysBetween(final Date from,
                                    final Date to,
-                                   boolean includeFirst,
-                                   boolean includeLast) {
+                                   boolean includeFirst, //true
+                                   boolean includeLast //false
+    ) {
         return (TimeUtils.less(from, to)) ? daysBetweenImpl(this, from, to, includeFirst, includeLast) :
                 (TimeUtils.greater(from, to)) ? -daysBetweenImpl(this, to, from, includeLast, includeFirst) :
                         ((includeFirst && includeLast && isBusinessDay(from)) ? 1 : 0);
+    }
+
+    public int businessDaysBetween(final Date from,
+                                   final Date to) {
+        return businessDaysBetween(from, to, true, false);
     }
 
     @Override
