@@ -268,4 +268,12 @@ public class Period {
         p.normalize();
         return p;
     }
+
+    @Override
+    public String toString() {
+        return "Period{" +
+                "length_=" + length_ +
+                ", units_=" + units_ +
+                '}';
+    }
 }
