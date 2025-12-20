@@ -7,9 +7,9 @@ import jquant.time.TimeUtils;
 import java.util.Optional;
 
 public class Settings implements Singleton<Settings> {
-    private DateProxy evaluationDate_;
+    private DateProxy evaluationDate_ = new DateProxy();
     private boolean includeReferenceDateEvents_ = false;
-    private Optional<Boolean> includeTodaysCashFlows_;
+    private Optional<Boolean> includeTodaysCashFlows_ = Optional.empty();
     private Boolean enforcesTodaysHistoricFixings_ = false;
     public static Settings instance = new  Settings();
     private Settings() {}

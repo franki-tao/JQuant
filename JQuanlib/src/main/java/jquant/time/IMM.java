@@ -143,7 +143,7 @@ public class IMM {
         else if (ms == 'Z') m = jquant.time.Month.DECEMBER;
         else QL_FAIL("invalid IMM month letter");
 
-        int y = Integer.getInteger(code.substring(1, 2));
+        int y = Character.getNumericValue(code.charAt(1));
         /* year<1900 are not valid QuantLib years: to avoid a run-time
            exception few lines below we need to add 10 years right away */
         if (y == 0 && referenceDate.year() <= 1909) y += 10;

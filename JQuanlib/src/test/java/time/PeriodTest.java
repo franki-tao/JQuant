@@ -1,9 +1,12 @@
 package time;
 
+import jquant.time.Frequency;
 import jquant.time.Period;
 import jquant.time.TimeUnit;
 import jquant.time.TimeUtils;
 import org.junit.jupiter.api.Test;
+
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -123,5 +126,93 @@ public class PeriodTest {
 
         assertEquals(12, TimeUtils.months(new Period(1, TimeUnit.YEARS)));
         assertEquals(36, TimeUtils.months(new Period(3, TimeUnit.YEARS)));
+    }
+
+    @Test
+    public void testConvertToWeeks() {
+        System.out.println("Testing conversion of periods to weeks...");
+        assertEquals(0, TimeUtils.weeks(new Period(0, TimeUnit.WEEKS)));
+        assertEquals(1, TimeUtils.weeks(new Period(1, TimeUnit.WEEKS)));
+        assertEquals(5, TimeUtils.weeks(new Period(5, TimeUnit.WEEKS)));
+        final double tol = 1e-15;
+        assertTrue(Math.abs(1.0/7.0 - TimeUtils.weeks(new Period(1, TimeUnit.DAYS))) <= tol);
+        assertTrue(Math.abs(3.0/7.0 - TimeUtils.weeks(new Period(3, TimeUnit.DAYS))) <= tol);
+        assertTrue(Math.abs(11.0/7.0 - TimeUtils.weeks(new Period(11, TimeUnit.DAYS))) <= tol);
+    }
+
+    @Test
+    public void testNormalization() {
+        System.out.println("Testing period normalization...");
+        Period[] test_values = {
+                new Period(0, TimeUnit.DAYS),
+                new Period(0, TimeUnit.WEEKS),
+                new Period(0, TimeUnit.MONTHS),
+                new Period(0, TimeUnit.YEARS),
+                new Period(3, TimeUnit.DAYS),
+                new Period(7, TimeUnit.DAYS),
+                new Period(14, TimeUnit.DAYS),
+                new Period(30, TimeUnit.DAYS),
+                new Period(60, TimeUnit.DAYS),
+                new Period(365, TimeUnit.DAYS),
+                new Period(1, TimeUnit.WEEKS),
+                new Period(2, TimeUnit.WEEKS),
+                new Period(4, TimeUnit.WEEKS),
+                new Period(8, TimeUnit.WEEKS),
+                new Period(52, TimeUnit.WEEKS),
+                new Period(1, TimeUnit.MONTHS),
+                new Period(2, TimeUnit.MONTHS),
+                new Period(6, TimeUnit.MONTHS),
+                new Period(12, TimeUnit.MONTHS),
+                new Period(18, TimeUnit.MONTHS),
+                new Period(24, TimeUnit.MONTHS),
+                new Period(1, TimeUnit.YEARS),
+                new Period(2, TimeUnit.YEARS)
+        };
+        for (Period p1 : test_values) {
+            Period n1 = p1.normalized();
+            assertFalse(TimeUtils.neq(n1, p1), "Normalizing " + p1 + " yields " + n1 + ", which compares different");
+            for (Period p2 : test_values) {
+                Period n2 = p2.normalized();
+                Optional<Boolean> comparison = Optional.empty();
+                try {
+                    comparison = Optional.of(TimeUtils.equals(p1, p2));
+                } catch (Exception e) {
+                    System.out.println(p1 + " and " + p2);;
+                }
+                if (comparison.isPresent() && comparison.get()) {
+                    assertFalse(n1.units() != n2.units() || n1.length() != n2.length(), p1 + " and " + p2 + " compare equal, but normalize to "
+                            + n1 + " and " + n2 + " respectively");
+                }
+
+                if (n1.units() == n2.units() && n1.length() == n2.length()) {
+                    // periods normalizing to exactly the same period must compare equal
+                    assertFalse(TimeUtils.neq(p1, p2), p1 + " and " + p2 + " compare different, but normalize to "
+                            + n1 + " and " + n2 + " respectively");
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testFrequencyComputation() {
+        System.out.println("Testing computation of frequency from period...");
+        // frequency -> period -> frequency == initial frequency?
+        Frequency[] ff = {Frequency.NO_FREQUENCY, Frequency.ONCE, Frequency.ANNUAL, Frequency.SEMIANNUAL, Frequency.EVERY_FOURTH_MONTH, Frequency.QUARTERLY,
+        Frequency.BIMONTHLY,Frequency.MONTHLY,Frequency.EVERY_FOURTH_WEEK, Frequency.BIWEEKLY, Frequency.WEEKLY, Frequency.DAILY};
+        for (Frequency f : ff) {
+            assertSame(new Period(f).frequency(), f);
+        }
+
+        // test Period(count, timeUnit).frequency()
+        assertSame(new Period(1, TimeUnit.YEARS).frequency(), Frequency.ANNUAL);
+        assertSame(new Period(6, TimeUnit.MONTHS).frequency(), Frequency.SEMIANNUAL);
+        assertSame(new Period(4, TimeUnit.MONTHS).frequency(), Frequency.EVERY_FOURTH_MONTH);
+        assertSame(new Period(3, TimeUnit.MONTHS).frequency(), Frequency.QUARTERLY);
+        assertSame(new Period(2, TimeUnit.MONTHS).frequency(), Frequency.BIMONTHLY);
+        assertSame(new Period(1, TimeUnit.MONTHS).frequency(), Frequency.MONTHLY);
+        assertSame(new Period(4, TimeUnit.WEEKS).frequency(), Frequency.EVERY_FOURTH_WEEK);
+        assertSame(new Period(2, TimeUnit.WEEKS).frequency(), Frequency.BIWEEKLY);
+        assertSame(new Period(1, TimeUnit.WEEKS).frequency(), Frequency.WEEKLY);
+        assertSame(new Period(1, TimeUnit.DAYS).frequency(), Frequency.DAILY);
     }
 }

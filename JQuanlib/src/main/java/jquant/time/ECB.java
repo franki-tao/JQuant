@@ -153,7 +153,7 @@ public class ECB {
      */
     public static boolean isECBdate(final Date d) {
         Date date = nextDate(d.substract(1));
-        return date.equals(d);
+        return TimeUtils.equals(date, d);
     }
 
     /// /! returns whether or not the given string is an ECB code
@@ -211,6 +211,7 @@ public class ECB {
             // 实际上，我们只关心年份后两位，所以可以直接递增并对 100 取模。
             if (nextYearLastTwoDigits >= 100) {
                 nextYearLastTwoDigits %= 100;
+                nextCodeStr.append(0);
             }
             nextCodeStr.append(nextYearLastTwoDigits);
         }
@@ -232,7 +233,7 @@ public class ECB {
         return index;
     }
 
-    private static Date get(int index) {
+    public static Date get(int index) {
         int i = 0;
         for (Date dd : knownDates()) {
             if (index == i) {
