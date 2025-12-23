@@ -5,6 +5,7 @@ import jquant.math.distributions.InverseCumulativeNormal;
 import jquant.math.distributions.NormalDistribution;
 import jquant.math.statistics.impl.Stat;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -20,6 +21,10 @@ public class GenericGaussianStatistics extends GeneralStatistics {
 
     public GenericGaussianStatistics(GeneralStatistics stat) {
         stat_ = stat;
+    }
+
+    public GenericGaussianStatistics() {
+        this(new GeneralStatistics());
     }
 
     //! \name Gaussian risk measures
@@ -209,12 +214,15 @@ public class GenericGaussianStatistics extends GeneralStatistics {
     }
 
     @Override
-    public void reset() {
-        stat_.reset();
+    public double variance() {
+        return stat_.variance();
     }
 
     @Override
-    public double variance() {
-        return stat_.variance();
+    public void reset() {
+        // 初始化时 stat_ 还没准备好，所以先跳过
+        if (stat_ != null) {
+            stat_.reset();
+        }
     }
 }

@@ -5,6 +5,7 @@ import jquant.math.CommonUtil;
 import jquant.math.Matrix;
 import jquant.math.statistics.impl.Stat;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -31,8 +32,10 @@ public class GenericSequenceStatistics {
     protected List<Stat> stats_;
     protected List<Double> results_;
     protected Matrix quadraticSum_;
+    private Stat statType;
 
-    public GenericSequenceStatistics(int dimension) {
+    public GenericSequenceStatistics(int dimension, Stat stat) {
+        statType = stat;
         reset(dimension);
     }
 
@@ -170,7 +173,7 @@ public class GenericSequenceStatistics {
                         " provided");
         quadraticSum_ = quadraticSum_.add(CommonUtil.outerProduct(values, values).multiply(weight));
 
-        for (int i = 0; i < values.size(); i++) {
+        for (int i = 0; i < dimension_; i++) {
             stats_.get(i).add(values.get(i), weight);
         }
     }
@@ -183,8 +186,17 @@ public class GenericSequenceStatistics {
                     stats_.get(i).reset();
             } else {
                 dimension_ = dimension;
-                stats_ = CommonUtil.ArrayInit(dimension);
                 results_ = CommonUtil.ArrayInit(dimension, 0d);
+                this.stats_ = new ArrayList<>();
+                try {
+                    java.lang.reflect.Constructor<? extends Stat> constructor =
+                            (java.lang.reflect.Constructor<? extends Stat>) statType.getClass().getDeclaredConstructor();
+                    for (int i = 0; i < dimension; i++) {
+                        this.stats_.add(constructor.newInstance());
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException("无法通过反射创建 Stat 实例，请确保 Stat 类有无参构造函数", e);
+                }
             }
             quadraticSum_ = new Matrix(dimension_, dimension_, 0.0);
         } else {

@@ -40,6 +40,10 @@ public class ConvergenceStatistics {
         reset();
     }
 
+    public ConvergenceStatistics(Stat stats) {
+        this(stats, new DoublingConvergenceSteps());
+    }
+
     public void add(ReferencePkg<Double> value, double weight) {
         stat_.add(value.getT(), weight);
         if (stat_.samples() == nextSampleSize_) {

@@ -113,14 +113,14 @@ public class WeightedAccumulatorSet {
         // Dof = V1 - (V2 / V1)
         double V1 = sumOfWeights;
         double V2 = sumOfSquaredWeights;
-        double dof = V1 - (V2 / V1);
+        //V1 - (V2 / V1);
 
-        if (dof <= 0) {
+        if (sumOfWeights <= 0) {
             return 0.0;
         }
 
         // 公式: (Σ wi * (xi - x_w)^2) / DoF
-        return weightedSquaredDeviationSum / dof;
+        return weightedSquaredDeviationSum / sumOfWeights;
     }
 
     // --- 对应 tag::weighted_skewness (手动实现) ---

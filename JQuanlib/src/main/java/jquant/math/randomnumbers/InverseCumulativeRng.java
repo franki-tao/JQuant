@@ -29,8 +29,9 @@ public class InverseCumulativeRng {
     private RngImpl uniformGenerator_;
     private Function ICND_;
 
-    public InverseCumulativeRng(final RngImpl ug) {
+    public InverseCumulativeRng(final RngImpl ug, Function ICND) {
         uniformGenerator_ = ug;
+        ICND_ = ICND;
     }
 
     //! returns a sample from a Gaussian distribution

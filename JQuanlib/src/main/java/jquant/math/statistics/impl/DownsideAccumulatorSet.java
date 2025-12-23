@@ -75,10 +75,10 @@ public class DownsideAccumulatorSet {
 
     // --- 对应 tag::weighted_moment<2> ---
     /**
-     * 获取加权二阶中心矩 (Weighted Second Central Moment, M2).
-     * M_k = (1/V1) * Σ wi * (xi - x_w)^k
-     * 其中 k=2, V1 = sum_of_weights.
-     * @return M2 (加权二阶中心矩)
+     * 获取加权二阶原点矩 (Weighted Second Raw Moment).
+     * 对应 Boost 的 boost::accumulators::tag::moment<2>
+     * 公式: M2' = (1/V1) * Σ (wi * xi^2)
+     * @return M2' (加权二阶原点矩)
      */
     public double getWeightedSecondCentralMoment() {
         long count = getCount();
@@ -86,30 +86,23 @@ public class DownsideAccumulatorSet {
             return 0.0;
         }
 
-        double mean = calculateAndCacheWeightedMean();
-        if (Double.isNaN(mean)) {
-            return 0.0;
-        }
-
         double sumOfWeights = getSumOfWeights();
-        if (sumOfWeights == 0.0) {
+        if (sumOfWeights <= 0.0) {
             return 0.0;
         }
 
-        // 计算加权平方偏差总和 (Weighted Sum of Squared Deviations)
-        double weightedSquaredDeviationSum = 0.0;
+        double weightedSquaredSum = 0.0;
 
         for (int i = 0; i < count; i++) {
             double weight = weights.get(i);
-            // 偏差 (x_i - mean)
-            double deviation = values.get(i) - mean;
+            double value = values.get(i);
 
-            // 权重 * 偏差的平方 (wi * (xi - x_w)^2)
-            weightedSquaredDeviationSum += weight * FastMath.pow(deviation, 2);
+            // 关键修改：直接计算值的平方，不减去 mean
+            weightedSquaredSum += weight * (value * value);
         }
 
-        // M2 公式: (1/V1) * Σ wi * (xi - x_w)^2
-        return weightedSquaredDeviationSum / sumOfWeights;
+        // 公式: (Σ wi * xi^2) / Σ wi
+        return weightedSquaredSum / sumOfWeights;
     }
 
     // 提供加权方差的快捷方法（虽然不是 Boost 定义的，但与 M2 密切相关）

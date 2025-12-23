@@ -21,6 +21,10 @@ public class GenericRiskStatistics extends GenericGaussianStatistics{
         this.stat_ = new GenericGaussianStatistics(stat);
     }
 
+    public GenericRiskStatistics() {
+        this(new GeneralStatistics());
+    }
+
     /*! returns the variance of observations below the mean,
         \f[ \frac{N}{N-1}
             \mathrm{E}\left[ (x-\langle x \rangle)^2 \;|\;
