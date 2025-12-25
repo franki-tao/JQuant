@@ -1,5 +1,3 @@
-package time;
-
 import jquant.Settings;
 import jquant.time.Date;
 import jquant.time.Month;

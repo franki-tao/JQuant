@@ -1,10 +1,9 @@
-package time;
+package math;
 
 import jquant.math.CommonUtil;
 import jquant.math.ode.AdaptiveRungeKutta;
 import jquant.math.ode.OdeFct;
 import jquant.math.ode.OdeFct1d;
-import jquant.time.Date;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

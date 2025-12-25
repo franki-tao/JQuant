@@ -1,4 +1,4 @@
-package time;
+package math;
 
 import jquant.math.CommonUtil;
 import jquant.math.Function;

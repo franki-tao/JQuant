@@ -211,8 +211,8 @@ public class Schedule {
                     } else {
                         // skip dates that would result in duplicates
                         // after adjustment
-                        if (calendar_.adjust(dates_.get(dates_.size() - 1), convention) !=
-                                calendar_.adjust(temp, convention)) {
+                        if (TimeUtils.neq(calendar_.adjust(dates_.get(dates_.size() - 1), convention),
+                                calendar_.adjust(temp, convention))) {
                             dates_.add(temp);
                             isRegular_.add(true);
                         }
@@ -612,6 +612,6 @@ public class Schedule {
 
     public Schedule copy() {
         return new Schedule(this.dates_, this.calendar_, this.convention_,
-                this.terminationDateConvention_,this.tenor_,this.rule_,this.endOfMonth_,this.isRegular_);
+                this.terminationDateConvention_, this.tenor_, this.rule_, this.endOfMonth_, this.isRegular_);
     }
 }

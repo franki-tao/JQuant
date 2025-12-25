@@ -308,6 +308,9 @@ public class Date {
 
     @Override
     public String toString() {
+        if (serialNumber_ < minimumSerialNumber() || serialNumber_ > maximumSerialNumber()) {
+            return "null";
+        }
         int dd = dayOfMonth();
         int mm = month().getValue();
         int yy = year();
