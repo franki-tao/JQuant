@@ -37,6 +37,10 @@ public abstract class DiscretizedAsset {
         return values_;
     }
 
+    public void setValues(Array values) {
+        values_ = values;
+    }
+
     public final Lattice method() {
         return method_;
     }
@@ -120,7 +124,7 @@ public abstract class DiscretizedAsset {
     }
 
     /*! This method performs both pre- and post-adjustment */
-    void adjustValues() {
+    public void adjustValues() {
         preAdjustValues();
         postAdjustValues();
     }
