@@ -1,17 +1,23 @@
 package jquant.utilities;
 
+import jquant.patterns.Observable;
+import jquant.patterns.ObservableSettings;
+import jquant.patterns.Observer;
+
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * ObservableValue 类，用于封装一个值 (T)，并在该值改变时通知所有注册的监听器。
  * 这遵循了 Java Bean 的规范。
  * @param <T> 被封装的值的类型。
  */
-public class ObservableValue<T> {
-
+public class ObservableValue<T> implements Observable {
+    private final Set<Observer> observers = new HashSet<>();
     // 存储被封装的实际值
     private T value;
 
@@ -51,6 +57,7 @@ public class ObservableValue<T> {
      * @param newValue 要设置的新值。
      */
     public void setValue(T newValue) {
+        notifyObservers();
         // 1. 获取旧值
         T oldValue = this.value;
 
@@ -81,6 +88,31 @@ public class ObservableValue<T> {
      */
     public void removeChangeListener(PropertyChangeListener listener) {
         support.removePropertyChangeListener(listener);
+    }
+
+    @Override
+    public void registerObserver(Observer o) {
+        observers.add(o);
+    }
+
+    @Override
+    public void unregisterObserver(Observer o) {
+        observers.remove(o);
+    }
+
+    @Override
+    public void notifyObservers() {
+        if (!ObservableSettings.getInstance().isUpdatesEnabled()) {
+            ObservableSettings.getInstance().registerDeferred(observers);
+        } else {
+            for (Observer observer : observers) {
+                try {
+                    observer.update();
+                } catch (Exception e) {
+                    System.err.println("Error notifying observer: " + e.getMessage());
+                }
+            }
+        }
     }
 
     public static void main(String[] args) {

@@ -8,8 +8,6 @@ package jquant.methods.finitedifferences.meshers;
     \end{array}
     \f]
 */
-
-import jquant.math.Function;
 import jquant.math.GammaFunction;
 import jquant.math.integrals.GaussLobattoIntegral;
 

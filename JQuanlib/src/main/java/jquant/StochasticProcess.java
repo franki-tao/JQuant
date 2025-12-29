@@ -3,8 +3,12 @@ package jquant;
 import jquant.math.Array;
 import jquant.math.Matrix;
 import jquant.patterns.Observable;
+import jquant.patterns.ObservableSettings;
 import jquant.patterns.Observer;
 import jquant.time.Date;
+
+import java.util.HashSet;
+import java.util.Set;
 
 import static jquant.math.CommonUtil.QL_FAIL;
 /// ! multi-dimensional stochastic process class.
@@ -15,9 +19,9 @@ import static jquant.math.CommonUtil.QL_FAIL;
  + \sigma(t, \mathrm{x}_t) \cdot d\mathrm{W}_t.
  \f]
  */
-public abstract class StochasticProcess extends Observer {
-    // 内部的 Observable 逻辑（由于不能多继承，通过组合实现或让父类具备通知能力）
-    protected final Observable changeNotifier = new Observable();
+public abstract class StochasticProcess implements Observer, Observable {
+    private final Set<Observable> registeredObservables = new HashSet<>();
+    private final Set<Observer> observers = new HashSet<>();
     protected discretization discretization_;
 
     public StochasticProcess() {
@@ -127,11 +131,55 @@ public abstract class StochasticProcess extends Observer {
     //@{
     @Override
     public void update() {
-        changeNotifier.notifyObservers();
+        notifyObservers();
     }
 
-    // 提供给外部注册的方法
-    public void addObserver(Observer o) {
-        changeNotifier.registerObserver(o);
+    @Override
+    public void registerWith(Observable observable) {
+        if (observable != null) {
+            observable.registerObserver(this);
+            registeredObservables.add(observable);
+        }
+    }
+
+    @Override
+    public void unregisterWith(Observable o) {
+        if (o != null) {
+            o.unregisterObserver(this);
+            registeredObservables.remove(o);
+        }
+    }
+
+    @Override
+    public void unregisterWithAll() {
+        for (Observable o : registeredObservables) {
+            o.unregisterObserver(this);
+        }
+        registeredObservables.clear();
+    }
+
+    @Override
+    public void registerObserver(Observer o) {
+        observers.add(o);
+    }
+
+    @Override
+    public void unregisterObserver(Observer o) {
+        observers.remove(o);
+    }
+
+    @Override
+    public void notifyObservers() {
+        if (!ObservableSettings.getInstance().isUpdatesEnabled()) {
+            ObservableSettings.getInstance().registerDeferred(observers);
+        } else {
+            for (Observer observer : observers) {
+                try {
+                    observer.update();
+                } catch (Exception e) {
+                    System.err.println("Error notifying observer: " + e.getMessage());
+                }
+            }
+        }
     }
 }
