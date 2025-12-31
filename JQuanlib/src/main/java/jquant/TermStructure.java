@@ -1,5 +1,6 @@
 package jquant;
 
+import jquant.impl.HandleImpl;
 import jquant.math.interpolations.Extrapolator;
 import jquant.patterns.Observable;
 import jquant.patterns.ObservableSettings;
@@ -14,7 +15,7 @@ import static jquant.math.MathUtils.close_enough;
 import static jquant.time.TimeUnit.DAYS;
 
 //! Basic term-structure functionality
-public abstract class TermStructure extends Extrapolator implements Observer, Observable {
+public abstract class TermStructure extends Extrapolator implements Observer, Observable, HandleImpl {
     protected boolean moving_ = false;
     protected boolean updated_ = true;
     protected Calendar calendar_;
@@ -94,7 +95,7 @@ public abstract class TermStructure extends Extrapolator implements Observer, Ob
     }
 
     //! the date at which discount = 1.0 and/or variance = 0.0
-    public final Date referenceDate() {
+    public Date referenceDate() {
         if (!updated_) {
             Date today = Settings.instance.evaluationDate().Date();
             referenceDate_ = calendar().advance(today, settlementDays(), DAYS, BusinessDayConvention.FOLLOWING, false);
@@ -190,5 +191,15 @@ public abstract class TermStructure extends Extrapolator implements Observer, Ob
         QL_REQUIRE(extrapolate || allowsExtrapolation()
                         || t <= maxTime() || close_enough(t, maxTime()),
                 "time (" + t + ") is past max curve time (" + maxTime() + ")");
+    }
+
+    @Override
+    public double value() {
+        return 0;
+    }
+
+    @Override
+    public boolean isValid() {
+        return true;
     }
 }
