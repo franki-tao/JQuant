@@ -17,6 +17,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 import static jquant.math.MathUtils.*;
 
 public class Concentrating1dMesher extends Fdm1dMesher {
+    // requireCPoint = false
     public Concentrating1dMesher(double start, double end, int size, final Point<Double, Double> cPoints, final boolean requireCPoint) {
         super(size);
         QL_REQUIRE(end > start, "end must be larger than start");

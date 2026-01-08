@@ -311,6 +311,10 @@ public class TimeUtils {
         return new Point<>();
     }
 
+    public static Date max(Date d1, Date d2) {
+        return leq(d1, d2) ? d2 : d1;
+    }
+
     public static double years(Period p) {
         if (p.length() == 0) return 0.0;
 
@@ -684,10 +688,6 @@ public class TimeUtils {
                 return 0;
             return TimeUtils.greater(o1, o2) ? 1 : -1;
         });
-    }
-
-    public static Date max(Date d1, Date d2) {
-        return geq(d1, d2) ? d1 : d2;
     }
 
     public static Date min(Date d1, Date d2) {

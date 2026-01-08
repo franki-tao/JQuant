@@ -50,6 +50,7 @@ public abstract class BlackVolTermStructure extends VolatilityTermStructure {
     //! \name Black Volatility
     //@{
     //! spot volatility
+    // extrapolate = false
     public double blackVol(final Date d,
                            double strike,
                            boolean extrapolate) {

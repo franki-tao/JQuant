@@ -1,8 +1,10 @@
 package jquant;
 
 import jquant.patterns.Observable;
+import jquant.patterns.Visitor;
 import jquant.time.Date;
 
+import java.util.Objects;
 import java.util.Optional;
 
 //! Base class for event
@@ -25,5 +27,5 @@ public interface Event extends Observable {
 
     //! \name Visitability
     //@{
-    void accept();
+    void accept(Visitor<Objects> v);
 }

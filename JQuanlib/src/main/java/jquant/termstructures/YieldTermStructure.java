@@ -73,6 +73,7 @@ public abstract class YieldTermStructure extends TermStructure {
         as a fraction of year from the reference date.
     */
     //@{
+    // extrapolate = false
     public double discount(final Date d, boolean extrapolate) {
         return discount(timeFromReference(d), extrapolate);
     }
