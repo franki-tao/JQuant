@@ -1,5 +1,6 @@
 package jquant;
 
+import jquant.patterns.AcyclicVisitor;
 import jquant.patterns.Observable;
 import jquant.patterns.Visitor;
 import jquant.time.Date;
@@ -27,5 +28,5 @@ public interface Event extends Observable {
 
     //! \name Visitability
     //@{
-    void accept(Visitor<Objects> v);
+    void accept(AcyclicVisitor v);
 }
