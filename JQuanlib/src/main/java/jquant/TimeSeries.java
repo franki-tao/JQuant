@@ -67,6 +67,9 @@ public class TimeSeries <T extends Number> {
     public T insert(Date d) {
         return values_.put(d, null);
     }
+    public T insert(Date d, T v) {
+        return values_.put(d, v);
+    }
     public boolean find(Date d) {
         return values_.containsKey(d);
     }
