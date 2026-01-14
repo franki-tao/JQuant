@@ -17,7 +17,7 @@ import static jquant.math.MathUtils.close;
 
 //! global repository for past index fixings
 public class IndexManager implements Singleton<IndexManager> {
-    private static IndexManager Instance = new IndexManager();
+    public static IndexManager Instance = new IndexManager();
     private TreeMap<String, TimeSeries<Double>> data_;
     private TreeMap<String, Observable> notifiers_;
     private IndexManager() {

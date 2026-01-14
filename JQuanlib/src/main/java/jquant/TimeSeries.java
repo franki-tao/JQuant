@@ -74,7 +74,7 @@ public class TimeSeries <T extends Number> {
         return values_.containsKey(d);
     }
     //! returns the dates for which historical data exist
-    public List<Date> keys() {
+    public List<Date> dates() {
         return new ArrayList<Date>(values_.keySet());
     }
     //! returns the historical data
