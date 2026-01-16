@@ -32,6 +32,8 @@ public class MathUtils {
 
     public static final double M_TWOPI = M_PI * 2;
 
+    public static final double M_2_PI = 0.636619772367581343076;
+
     public static final int PPMT_MAX_DIM = 21200;
 
     public static final double M_LN2 = 0.693147180559945309417;  // ln(2)

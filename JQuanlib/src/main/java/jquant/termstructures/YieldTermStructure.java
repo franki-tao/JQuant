@@ -204,6 +204,7 @@ public abstract class YieldTermStructure extends TermStructure {
         used by the term structure. The same rule should be used
         for calculating the passed times t1 and t2.
     */
+    // freq = ANNUAL extrapolate = false
     public InterestRate forwardRate(double t1,
                                     double t2,
                                     Compounding comp,
