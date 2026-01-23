@@ -142,7 +142,7 @@ public abstract class LazyObject implements Observable, Observer {
                  classes, LazyObject::calculate() should be called
                  in the overriding method.
     */
-    protected void calculate() {
+    public void calculate() {
         if (!calculated_ && !frozen_) {
             calculated_ = true;   // prevent infinite recursion in
             // case of bootstrapping
