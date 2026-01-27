@@ -44,6 +44,43 @@ public class Array {
         return realVector.getEntry(index);
     }
 
+    public int upperIndex(double x) {
+        int low = 0;
+        int high = size();
+
+        while (low < high) {
+            int mid = low + (high - low) / 2;
+            if (get(mid) <= x) {
+                // 如果中间值还小于等于 x，说明目标在右边
+                low = mid + 1;
+            } else {
+                // 如果中间值大于 x，说明这可能是结果，但左边可能还有更小的“大于 x”的值
+                high = mid;
+            }
+        }
+        // 如果 low 等于 size，说明所有元素都 <= x
+        return (low == size()) ? size() : low;
+    }
+
+    public int lowerIndex(double x) {
+        int low = 0;
+        int high = size();
+
+        while (low < high) {
+            int mid = low + (high - low) / 2;
+            if (get(mid) < x) {
+                // 如果中间值小于 x，说明目标还在右边
+                low = mid + 1;
+            } else {
+                // 如果中间值 >= x，说明这可能是结果，我们需要继续向左收缩
+                high = mid;
+            }
+        }
+
+        // 如果所有元素都小于 x，low 会等于 size()
+        return (low == size()) ? size() : low;
+    }
+
     public void addEq(int i, double eps) {
         realVector.addToEntry(i, eps);
     }
@@ -152,9 +189,11 @@ public class Array {
         }
         return maxIndex;
     }
+
     public double back() {
         return get(size() -1);
     }
+
     public double front() {
         return get(0);
     }

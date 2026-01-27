@@ -1,5 +1,7 @@
 package jquant.math;
 
+import java.util.Objects;
+
 public class Point<T extends Number & Comparable<T>, R extends Number & Comparable<R>>
         implements Comparable<Point<T, R>> {
     private T first;
@@ -29,6 +31,18 @@ public class Point<T extends Number & Comparable<T>, R extends Number & Comparab
 
     public void setSecond(R second) {
         this.second = second;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) return false;
+        Point<?, ?> point = (Point<?, ?>) o;
+        return Objects.equals(first, point.first) && Objects.equals(second, point.second);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(first, second);
     }
 
     @Override
