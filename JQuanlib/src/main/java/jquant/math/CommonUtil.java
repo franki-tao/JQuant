@@ -62,6 +62,20 @@ public class CommonUtil {
         return true;
     }
 
+    public static int upper_bound(List<Double> arr, double t) {
+        int idx = Collections.binarySearch(arr, t);
+        if (idx < 0) {
+            idx = -idx - 1;   // 插入点 = upper_bound
+        } else {
+            // 命中了某个等于 t 的元素
+            // upper_bound 要跳过所有 == t 的
+            while (idx < arr.size() && arr.get(idx) <= t) {
+                idx++;
+            }
+        }
+        return idx;
+    }
+
     public static <T> List<T> resize(List<T> arr, int n, T t) {
         // 处理边界情况
         if (n < 0) {
