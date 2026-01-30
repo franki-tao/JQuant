@@ -1,6 +1,7 @@
 package jquant.methods.lattices;
 
 import jquant.DiscretizedAsset;
+import jquant.Lattice;
 import jquant.TimeGrid;
 import jquant.math.Array;
 import jquant.math.CommonUtil;
@@ -34,7 +35,7 @@ import static jquant.math.MathUtils.close;
 
     \ingroup lattices
 */
-public abstract class TreeLattice {
+public abstract class TreeLattice extends Lattice {
     private int n_;
     private int statePricesLimit_;
     protected TreeLatticeImpl impl_;
@@ -43,6 +44,7 @@ public abstract class TreeLattice {
     protected List<Array> statePrices_;
 
     public TreeLattice(TimeGrid timeGrid, int n) {
+        super(timeGrid);
         t_ = timeGrid;
         n_ = n;
         QL_REQUIRE(n > 0, "there is no zeronomial lattice!");
@@ -55,9 +57,6 @@ public abstract class TreeLattice {
         impl_ = impl;
     }
 
-    public final TimeGrid timeGrid() {
-        return t_;
-    }
 
     public void initialize(DiscretizedAsset asset, double t) {
         int i = t_.index(t);
