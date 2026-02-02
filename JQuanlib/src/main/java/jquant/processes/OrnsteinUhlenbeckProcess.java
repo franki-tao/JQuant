@@ -10,7 +10,7 @@ public class OrnsteinUhlenbeckProcess extends StochasticProcess1D {
     private double speed_;
     private double level_;
     private double volatility_;
-
+    // level = 0.0, x0 = 0.0
     public OrnsteinUhlenbeckProcess(double speed, double vol, double x0, double level) {
         x0_ = x0;
         speed_ = speed;
