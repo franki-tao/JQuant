@@ -1114,6 +1114,14 @@ public class MatrixUtil {
         }
     }
 
+    public static Array Sqrt(Array v) {
+        Array res = new Array(v.size());
+        for (int i = 0; i < v.size(); i++) {
+            res.set(i, Math.sqrt(v.get(i)));
+        }
+        return res;
+    }
+
 
     public static void main(String[] args) {
         SparseMatrix a = new SparseMatrix(3, 3);
