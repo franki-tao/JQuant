@@ -9,7 +9,7 @@ import static jquant.math.CommonUtil.QL_FAIL;
 
 //! Merton-76 jump-diffusion process
 /*! \ingroup processes */
-public abstract class Merton76Process extends StochasticProcess1D {
+public class Merton76Process extends StochasticProcess1D {
     private GeneralizedBlackScholesProcess blackProcess_;
     private Handle<Quote> jumpIntensity_, logMeanJump_, logJumpVolatility_;
 
