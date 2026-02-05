@@ -3,9 +3,7 @@ package jquant;
 import jquant.time.Date;
 import jquant.time.TimeUtils;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.TreeMap;
+import java.util.*;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
@@ -80,5 +78,17 @@ public class TimeSeries <T extends Number> {
     //! returns the historical data
     public List<T> values() {
         return new ArrayList<T>(values_.values());
+    }
+
+    public Iterator<Map.Entry<Date, T>> cbegin() {
+        return values_.entrySet().iterator();
+    }
+
+    public Map.Entry<Date, T> last() {
+        return values_.lastEntry();
+    }
+
+    public Map.Entry<Date, T> lowerEntry(Date d) {
+        return values_.lowerEntry(d);
     }
 }

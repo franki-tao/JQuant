@@ -3,6 +3,7 @@ package jquant.math;
 import jquant.math.optimization.impl.QrFacParams;
 import jquant.math.optimization.impl.Qrsolv;
 import jquant.math.optimization.impl.QrsolvParams;
+import org.apache.commons.math3.complex.Complex;
 import org.apache.commons.math3.linear.Array2DRowRealMatrix;
 import org.apache.commons.math3.linear.ArrayRealVector;
 import org.apache.commons.math3.linear.RealMatrix;
@@ -153,7 +154,7 @@ public class CommonUtil {
         Optional<Double> min = list.stream().min(Comparator.naturalOrder());
         if (min.isPresent()) {
             return min.get();
-        }  else {
+        } else {
             throw new IllegalArgumentException(list.toString());
         }
     }
@@ -308,7 +309,7 @@ public class CommonUtil {
                     q.set(k, j, w.get(j));
                     // q[k][j] = w[j];
                 }
-                for (int i = Math.min(n,m); i < q.cols(); i++) {
+                for (int i = Math.min(n, m); i < q.cols(); i++) {
                     q.set(k, i, 0d);
                 }
                 // std::fill (q.row_begin(k) + std::min (n, m),q.row_end(k), 0.0);
@@ -325,7 +326,7 @@ public class CommonUtil {
         } else {
             for (int i = 0; i < n; ++i)
                 ipvt.set(i, i);
-                // ipvt[i] = i;
+            // ipvt[i] = i;
         }
 
         return ipvt;
@@ -404,6 +405,41 @@ public class CommonUtil {
         return res;
     }
 
+    public static List<Complex> double_ft(List<Double> val) {
+        int nData = val.size();
+        int order = FastFourierTransform.min_order(nData) + 1;
+        FastFourierTransform fft = new FastFourierTransform(order);
+        List<Complex> ft = ArrayInit(fft.output_size());
+        fft.transform(val, ft);
+        List<Double> tmp = ArrayInit(ft.size(), 0.0);
+        for (int i = 0; i < ft.size(); i++) {
+            double norm = ft.get(i).getReal() * ft.get(i).getReal() +
+                    ft.get(i).getImaginary() * ft.get(i).getImaginary();
+            tmp.set(i, norm);
+            ft.set(i, new Complex(0));
+        }
+        fft.transform(tmp, ft);
+        return ft;
+    }
+
+    //! Unbiased auto-covariances
+    /*! Results are calculated via FFT.
+
+        \pre Input data are supposed to be centered (i.e., zero mean).
+        \pre The size of the output sequence must be maxLag + 1
+    */
+    public static void autocovariances(List<Double> val, Array arr, int maxLag) {
+        int nData = val.size();
+        QL_REQUIRE(maxLag < nData,
+                "number of covariances must be less than data size");
+        final List<Complex> ft = double_ft(val);
+        double w1 = 1d / ft.size();
+        double w2 = nData;
+        for (int k = 0; k <= maxLag; ++k, w2 -= 1.0) {
+            arr.set(k, ft.get(k).getReal() * w1 / w2);
+        }
+    }
+
     public static void main(String[] args) {
         List<Integer> a = Arrays.asList(1, 2, 3);
         List<Integer> c = a;
@@ -415,14 +451,14 @@ public class CommonUtil {
         for (int i = 0; i < 10; i++) {
             System.out.println(doubles.get(i));
         }
-        double[][] mm = {{1,2,3,0},{4,5,6,0},{7,8,9,0}};
+        double[][] mm = {{1, 2, 3, 0}, {4, 5, 6, 0}, {7, 8, 9, 0}};
         RealMatrix matrix = new Array2DRowRealMatrix(mm);
-        double[] aa = {1,1,1,1};
+        double[] aa = {1, 1, 1, 1};
         RealVector vector = new ArrayRealVector(aa);
         System.out.println(matrix.transpose().preMultiply(vector));
-        
-        double[] y = {1,2};
-        double[][] m = {{1,2,3},{4,5,6}};
+
+        double[] y = {1, 2};
+        double[][] m = {{1, 2, 3}, {4, 5, 6}};
         Array array = qrSolve(new Matrix(m), new Array(y), true, new Array(0));
         for (int i = 0; i < array.size(); i++) {
             System.out.println(array.get(i));
