@@ -80,7 +80,7 @@ public class SimulatedAnnealing extends OptimizationMethod {
     public EndCriteria.Type minimize(Problem P, EndCriteria ec) {
 
         ReferencePkg<Integer> stationaryStateIterations_ = new ReferencePkg<>(0);
-        EndCriteria.Type ecType = EndCriteria.Type.None;
+        ReferencePkg<EndCriteria.Type> ecType = new ReferencePkg<>(EndCriteria.Type.None);
         P.reset();
         Array x = P.currentValue();
         iteration_ = 0;
@@ -159,7 +159,7 @@ public class SimulatedAnnealing extends OptimizationMethod {
                     // no matter what, we return the best ever point !
                     P.setCurrentValue(pb_);
                     P.setFunctionValue(yb_);
-                    return ecType;
+                    return ecType.getT();
                 }
 
                 iteration_ += 2;

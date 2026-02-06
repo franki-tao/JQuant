@@ -79,8 +79,8 @@ public class Problem {
     }
 
     //! current value of the local minimum
-    public Array currentValue() {
-        return currentValue_;
+    public final Array currentValue() {
+        return new Array(currentValue_.toArray());
     }
 
     public void setFunctionValue(double functionValue) {

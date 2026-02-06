@@ -24,7 +24,7 @@ public abstract class LineSearchBasedMethod extends OptimizationMethod {
         double ftol = endCriteria.functionEpsilon();
         int maxStationaryStateIterations_
                 = endCriteria.maxStationaryStateIterations();
-        EndCriteria.Type ecType = EndCriteria.Type.None;   // reset end criteria
+        ReferencePkg<EndCriteria.Type> ecType = new ReferencePkg<>(EndCriteria.Type.None);   // reset end criteria
         P.reset();                                      // reset problem
         Array x_ = P.currentValue();              // store the starting point
         int iterationNumber_ = 0;
@@ -91,7 +91,7 @@ public abstract class LineSearchBasedMethod extends OptimizationMethod {
                             mssi, ecType);
                     maxStationaryStateIterations_ = mssi.getT();
                     endCriteria.checkMaxIterations(iterationNumber_, ecType);
-                    return ecType;
+                    return ecType.getT();
                 }
                 P.setCurrentValue(x_);      // update problem current value
                 ++iterationNumber_;         // Increase iteration number
@@ -101,7 +101,7 @@ public abstract class LineSearchBasedMethod extends OptimizationMethod {
             }
         } while (!done);
         P.setCurrentValue(x_);
-        return ecType;
+        return ecType.getT();
     }
     //! computes the new search direction
     protected abstract Array getUpdatedDirection(final Problem P,

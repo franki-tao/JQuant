@@ -4,6 +4,7 @@ import jquant.math.Array;
 import jquant.math.CommonUtil;
 import jquant.math.ReferencePkg;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_FAIL;
@@ -47,7 +48,7 @@ public class Simplex extends OptimizationMethod {
         double xtol = endCriteria.rootEpsilon();          // end criteria on x (see GSL v. 1.9, http://www.gnu.org/software/gsl/)
         int maxStationaryStateIterations_
                 = endCriteria.maxStationaryStateIterations();
-        EndCriteria.Type ecType = EndCriteria.Type.None;
+        ReferencePkg<EndCriteria.Type> ecType = new ReferencePkg<>(EndCriteria.Type.None);
         P.reset();
 
         Array x_ = P.currentValue();
@@ -58,7 +59,10 @@ public class Simplex extends OptimizationMethod {
 
         // Initialize vertices of the simplex
         int n = x_.size();
-        vertices_ = CommonUtil.ArrayInit(n+1, x_);
+        vertices_ = CommonUtil.ArrayInit(n+1);
+        for (int i = 0; i < n+1; i++) {
+            vertices_.set(i, new Array(x_.toArray()));
+        }
         for (int i=0; i<n; ++i) {
             Array direction = new Array(n, 0.0);
             direction.set(i, 1.0);
@@ -120,7 +124,7 @@ public class Simplex extends OptimizationMethod {
                 double low = values_.get(iLowest);
                 P.setFunctionValue(low);
                 P.setCurrentValue(x_);
-                return ecType;
+                return ecType.getT();
             }
             // If end criteria is not met, continue
             ReferencePkg<Double> factor = new ReferencePkg<>(-1.0);

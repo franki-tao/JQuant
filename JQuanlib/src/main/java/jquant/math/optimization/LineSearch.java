@@ -1,6 +1,7 @@
 package jquant.math.optimization;
 
 import jquant.math.Array;
+import jquant.math.ReferencePkg;
 
 import static jquant.math.CommonUtil.QL_FAIL;
 
@@ -18,6 +19,9 @@ public abstract class LineSearch {
 
     //! Default constructor x=0
     public LineSearch(double x) {
+        gradient_ = new Array(0);
+        xtd_ = new Array(0);
+        searchDirection_ = new Array(0);
     }
 
     public LineSearch() {
@@ -48,7 +52,7 @@ public abstract class LineSearch {
     }
 
     public abstract double value(Problem P, // Optimization problem
-                                 EndCriteria.Type ecType,
+                                 ReferencePkg<EndCriteria.Type> ecType,
                                  EndCriteria endCriteria,
                                  double t_ini);
 
@@ -68,7 +72,10 @@ public abstract class LineSearch {
             newParams = params.add(direction.mutiply(diff)); // + diff*direction;
             valid = constraint.test(newParams);
         }
-        params = params.add(direction.mutiply(diff));
+        Array finalParams = params.add(direction.mutiply(diff));
+        for (int i = 0; i < params.size(); i++) {
+            params.set(i, finalParams.get(i));
+        }
         // params += diff*direction;
         return diff;
     }

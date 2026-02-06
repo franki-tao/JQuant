@@ -83,7 +83,7 @@ public class EndCriteria {
                          double fold,
                          double fnew,
                          double normgnew,
-                         Type ecType) {
+                         ReferencePkg<Type> ecType) {
         return checkMaxIterations(iteration, ecType) ||
                 checkStationaryFunctionValue(fold, fnew, statStateIterations, ecType) ||
                 checkStationaryFunctionAccuracy(fnew, positiveOptimization, ecType) ||
@@ -92,17 +92,17 @@ public class EndCriteria {
 
     /*! Test if the number of iteration is below MaxIterations */
     // 实际中根据返回true false更改枚举， 下同
-    public boolean checkMaxIterations(int iteration, Type ecType) {
+    public boolean checkMaxIterations(int iteration, ReferencePkg<Type> ecType) {
         if (iteration < maxIterations_)
             return false;
-        ecType = MaxIterations;
+        ecType.setT(MaxIterations);
         return true;
     }
 
     public boolean checkStationaryPoint(double xOld,
                                         double xNew,
                                         ReferencePkg<Integer> statStateIterations,
-                                        Type ecType) {
+                                        ReferencePkg<Type> ecType) {
         if (Math.abs(xNew - xOld) >= rootEpsilon_) {
             statStateIterations.setT(0);
             return false;
@@ -110,7 +110,7 @@ public class EndCriteria {
         statStateIterations.setT(statStateIterations.getT() + 1);
         if (statStateIterations.getT() <= maxStationaryStateIterations_)
             return false;
-        ecType = StationaryPoint;
+        ecType.setT(StationaryPoint);
         return true;
     }
 
@@ -119,7 +119,7 @@ public class EndCriteria {
             double fxOld,
             double fxNew,
             ReferencePkg<Integer> statStateIterations,
-            Type ecType) {
+            ReferencePkg<Type> ecType) {
         if (Math.abs(fxNew - fxOld) >= functionEpsilon_) {
             statStateIterations.setT(0);
             return false;
@@ -127,26 +127,26 @@ public class EndCriteria {
         statStateIterations.setT(statStateIterations.getT() + 1);
         if (statStateIterations.getT() <= maxStationaryStateIterations_)
             return false;
-        ecType = StationaryFunctionValue;
+        ecType.setT(StationaryFunctionValue);
         return true;
     }
 
     public boolean checkStationaryFunctionAccuracy(
             double f,
             boolean positiveOptimization,
-            Type ecType) {
+            ReferencePkg<Type> ecType) {
         if (!positiveOptimization)
             return false;
         if (f >= functionEpsilon_)
             return false;
-        ecType = StationaryFunctionAccuracy;
+        ecType.setT(StationaryFunctionAccuracy);
         return true;
     }
     public boolean checkZeroGradientNorm(double gradientNorm,
-                                         Type ecType) {
+                                         ReferencePkg<Type> ecType) {
         if (gradientNorm >= gradientNormEpsilon_)
             return false;
-        ecType = ZeroGradientNorm;
+        ecType.setT(ZeroGradientNorm);
         return true;
     }
 

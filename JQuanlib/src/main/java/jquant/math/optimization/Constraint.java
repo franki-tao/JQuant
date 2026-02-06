@@ -53,7 +53,10 @@ public class Constraint {
             newParams = params.add(direction.mutiply(diff));
             valid = test(newParams);
         }
-        params = params.add(direction.mutiply(diff));
+        Array finalParams = params.add(direction.mutiply(diff));
+        for (int i = 0; i < params.size(); i++) {
+            params.set(i, finalParams.get(i));
+        }
         return diff;
     }
 }

@@ -107,8 +107,6 @@ public class LevenbergMarquardt extends OptimizationMethod {
         Array xx = new Array(initX);
         double[] fvec = new double[m];
         double[] diag = new double[n];
-//        std::unique_ptr<Real[]> fvec(new Real[m]);
-//        std::unique_ptr<Real[]> diag(new Real[n]);
         int mode = 1;
         // magic number recommended by the documentation
         double factor = 100;
@@ -127,13 +125,6 @@ public class LevenbergMarquardt extends OptimizationMethod {
         double[] wa2 = new double[n];
         double[] wa3 = new double[n];
         double[] wa4 = new double[m];
-
-//        std::unique_ptr<int[]> ipvt(new int[n]);
-//        std::unique_ptr<Real[]> qtf(new Real[n]);
-//        std::unique_ptr<Real[]> wa1(new Real[n]);
-//        std::unique_ptr<Real[]> wa2(new Real[n]);
-//        std::unique_ptr<Real[]> wa3(new Real[n]);
-//        std::unique_ptr<Real[]> wa4(new Real[m]);
         // requirements; check here to get more detailed error messages.
         QL_REQUIRE(n > 0, "no variables given");
         QL_REQUIRE(m >= n,
@@ -153,10 +144,6 @@ public class LevenbergMarquardt extends OptimizationMethod {
                 fcn(params.x1, params.x2, params.v1, params.v2);
             }
         };
-//        MINPACK::LmdifCostFunction lmdifCostFunction =
-//            [this](const auto m, const auto n, const auto x, const auto fvec, const auto iflag) {
-//            this->fcn(m, n, x, fvec);
-//        };
 
         LmdifCostFunction lmdifJacFunction = useCostFunctionsJacobian_ ? new LmdifCostFunction() {
             @Override
@@ -177,18 +164,6 @@ public class LevenbergMarquardt extends OptimizationMethod {
                 lmdifCostFunction,
                 lmdifJacFunction);
         MinPack.lmdif(params);
-//        MINPACK::lmdif(m, n, xx.begin(), fvec.get(),
-//                endCriteria.functionEpsilon(),
-//                xtol_,
-//                gtol_,
-//                maxfev,
-//                epsfcn_,
-//                diag.get(), mode, factor,
-//                nprint, &info, &nfev, fjac.get(),
-//                ldfjac, ipvt.get(), qtf.get(),
-//                wa1.get(), wa2.get(), wa3.get(), wa4.get(),
-//                lmdifCostFunction,
-//                lmdifJacFunction);
         // for the time being
         info_ = params.info;
         // check requirements & endCriteria evaluation

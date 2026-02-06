@@ -361,7 +361,7 @@ public class DifferentialEvolution extends OptimizationMethod {
 
     @Override
     public EndCriteria.Type minimize(Problem p, EndCriteria endCriteria) {
-        EndCriteria.Type ecType = EndCriteria.Type.None;
+        ReferencePkg<EndCriteria.Type> ecType = new ReferencePkg<>(EndCriteria.Type.None);
         p.reset();
 
         if (configuration().upperBound.empty()) {
@@ -423,7 +423,7 @@ public class DifferentialEvolution extends OptimizationMethod {
         }
         p.setCurrentValue(bestMemberEver_.values);
         p.setFunctionValue(bestMemberEver_.cost);
-        return ecType;
+        return ecType.getT();
     }
 
     private void partialSort(List<Candidate> population, int k) {

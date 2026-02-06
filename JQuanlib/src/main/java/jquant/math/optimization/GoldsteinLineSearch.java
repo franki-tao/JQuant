@@ -1,6 +1,7 @@
 package jquant.math.optimization;
 
 import jquant.math.Array;
+import jquant.math.ReferencePkg;
 
 import static jquant.math.CommonUtil.DotProduct;
 import static jquant.math.MathUtils.close_enough;
@@ -29,7 +30,7 @@ public class GoldsteinLineSearch extends LineSearch {
 
     //! Perform line search
     @Override
-    public double value(Problem P, EndCriteria.Type ecType, EndCriteria endCriteria, double t_ini) {
+    public double value(Problem P, ReferencePkg<EndCriteria.Type> ecType, EndCriteria endCriteria, double t_ini) {
         Constraint constraint = P.constraint();
         succeed_ = true;
         boolean maxIter = false;
