@@ -3,6 +3,7 @@ package jquant.math.optimization.impl;
 import jquant.math.Array;
 import jquant.math.optimization.DifferentialEvolution;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -20,6 +21,9 @@ public class Configuration {
     // Clang seems to have problems if we use '= default' here.
     // NOLINTNEXTLINE(modernize-use-equals-default)
     public Configuration() {
+        initialPopulation = new ArrayList<>();
+        upperBound = new Array(0);
+        lowerBound = new Array(0);
     }
 
     public Configuration withBounds(boolean b) {
