@@ -228,6 +228,7 @@ public abstract class Calendar {
         returns the result.
         \note The input date is not modified.
     */
+    // c = following, endOfMonth = false
     public Date advance(final Date d, int n, TimeUnit unit, BusinessDayConvention c, boolean endOfMonth) {
         QL_REQUIRE(d != null, "null date");
         if (n == 0) {
