@@ -88,7 +88,7 @@ public class IborIndex extends InterestRateIndex {
        public, but before doing that I'd think hard whether we
        have any other way to get the same results.
     */
-    private double forecastFixing(final Date d1,
+    public double forecastFixing(final Date d1,
                                   final Date d2,
                                   double t) {
         QL_REQUIRE(!termStructure_.empty(),

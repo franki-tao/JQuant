@@ -275,6 +275,7 @@ public abstract class Calendar {
         returns the result.
         \note The input date is not modified.
     */
+    // c = following, endofMonth = false
     public Date advance(final Date d, final Period period, BusinessDayConvention c, boolean endOfMonth) {
         return advance(d, period.length(), period.units(), c, endOfMonth);
     }
