@@ -20,7 +20,7 @@ public class Array {
     }
 
     public Array(Array a) {
-        this.realVector = a.realVector;
+        this.realVector = a.realVector.copy();
     }
 
     public Array(int dim, double value) {

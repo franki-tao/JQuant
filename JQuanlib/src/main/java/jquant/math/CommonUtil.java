@@ -121,6 +121,37 @@ public class CommonUtil {
         return res;
     }
 
+    public static <T> T get(List<T> v, int i, T d) {
+        if (v.isEmpty()) {
+            return d;
+        } else if (i < v.size()) {
+            return v.get(i);
+        } else {
+            return v.get(v.size() - 1);
+        }
+    }
+
+    public static double effectiveFixedRate(final List<Double> spreads,
+                                            final List<Double> caps,
+                                            final List<Double> floors,
+                                            int i) {
+        double result = get(spreads, i, 0.0);
+        double floor = get(floors, i, Double.NaN);
+        if (!Double.isNaN(floor))
+            result = Math.max(floor, result);
+        double cap = get(caps, i, Double.NaN);
+        if (!Double.isNaN(cap))
+            result = Math.min(cap, result);
+        return result;
+    }
+
+    public static boolean noOption(final List<Double> caps,
+                                   final List<Double> floors,
+                                   int i) {
+        return (Double.isNaN(get(caps,   i, Double.NaN))) &&
+                (Double.isNaN(get(floors, i, Double.NaN)));
+    }
+
     public static <T> List<T> clone(List<T> array) {
         return new ArrayList<>(array);
     }

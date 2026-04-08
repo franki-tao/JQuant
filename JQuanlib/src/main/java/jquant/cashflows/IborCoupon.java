@@ -9,11 +9,23 @@ import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.TimeUtils;
 
+import java.util.Optional;
+
 import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 //! %Coupon paying a Libor-type index
-public abstract class IborCoupon extends FloatingRateCoupon {
+public class IborCoupon extends FloatingRateCoupon {
+    @Override
+    public boolean hasOccurred(Date refDate, Optional<Boolean> includeRefDate) {
+        return false;
+    }
+
+    @Override
+    public boolean tradingExCoupon(Date refDate) {
+        return false;
+    }
+
     // IborCoupon::Settings forward declaration
     public static final class Settings implements Singleton<Settings> {
         private Settings() {
