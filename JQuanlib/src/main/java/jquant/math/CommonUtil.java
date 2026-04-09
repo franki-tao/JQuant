@@ -77,6 +77,20 @@ public class CommonUtil {
         return idx;
     }
 
+    public static int lower_bound(List<Double> arr, double t) {
+        int idx = Collections.binarySearch(arr, t);
+        if (idx < 0) {
+            idx = -idx - 1;   // 插入点 = lower_bound
+        } else {
+            // 命中了某个等于 t 的元素
+            // lower_bound 要找到**第一个** == t 的位置
+            while (idx > 0 && arr.get(idx - 1) == t) {
+                idx--;
+            }
+        }
+        return idx;
+    }
+
     public static <T> List<T> resize(List<T> arr, int n, T t) {
         // 处理边界情况
         if (n < 0) {

@@ -1,5 +1,6 @@
 package jquant.cashflows;
 
+import jquant.patterns.AcyclicVisitor;
 import jquant.patterns.Observable;
 import jquant.patterns.ObservableSettings;
 import jquant.patterns.Observer;
@@ -7,7 +8,7 @@ import jquant.patterns.Observer;
 import java.util.HashSet;
 import java.util.Set;
 
-public abstract class FloatingRateCouponPricer implements Observable, Observer {
+public abstract class FloatingRateCouponPricer implements Observable, Observer, AcyclicVisitor {
     private final Set<Observable> registeredObservables = new HashSet<>();
     private final Set<Observer> observers = new HashSet<>();
 

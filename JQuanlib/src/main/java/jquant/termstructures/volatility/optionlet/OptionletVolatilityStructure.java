@@ -7,7 +7,7 @@ import jquant.time.*;
 
 import static jquant.termstructures.volatility.Sarb.VolatilityType.ShiftedLognormal;
 
-public abstract class OptionletVolatilityStructure extends VolatilityTermStructure {
+public class OptionletVolatilityStructure extends VolatilityTermStructure {
     /*! \name Constructors
         See the TermStructure documentation for issues regarding
         constructors.
@@ -37,6 +37,16 @@ public abstract class OptionletVolatilityStructure extends VolatilityTermStructu
                                         BusinessDayConvention bdc,
                                         final DayCounter dc) {
         super(settlementDays, cal, bdc, dc);
+    }
+
+    @Override
+    public double minStrike() {
+        return 0;
+    }
+
+    @Override
+    public double maxStrike() {
+        return 0;
     }
 
     //! returns the volatility for a given option tenor and strike rate
@@ -129,17 +139,25 @@ public abstract class OptionletVolatilityStructure extends VolatilityTermStructu
     }
 
     //! implements the actual volatility calculation in derived classes
-    protected abstract double volatilityImpl(double optionTime, double strike);
+    protected double volatilityImpl(double optionTime, double strike) {
+        return 0;
+    }
 
     protected double volatilityImpl(final Date optionDate, double strike) {
         return volatilityImpl(timeFromReference(optionDate), strike);
     }
 
     //! implements the actual smile calculation in derived classes
-    protected abstract SmileSection smileSectionImpl(double optionTime);
+    protected SmileSection smileSectionImpl(double optionTime) {
+        return null;
+    }
 
     protected SmileSection smileSectionImpl(final Date optionDate) {
         return smileSectionImpl(timeFromReference(optionDate));
     }
 
+    @Override
+    public Date maxDate() {
+        return null;
+    }
 }

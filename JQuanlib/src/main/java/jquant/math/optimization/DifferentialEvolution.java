@@ -68,6 +68,18 @@ public class DifferentialEvolution extends OptimizationMethod {
     private Candidate bestMemberEver_;
     private MersenneTwisterUniformRng rng_;
 
+    private static List<Candidate> deepClone(List<Candidate> src) {
+        List<Candidate> dst = new ArrayList<>(src.size());
+        for (Candidate c : src) {
+            Candidate copy = new Candidate(c.values.size());
+            copy.values = new Array(c.values);
+            copy.cost = c.cost;
+            dst.add(copy);
+        }
+        return dst;
+    }
+
+
     public DifferentialEvolution(final Configuration configuration) {
         this.configuration_ = configuration;
         rng_ = new MersenneTwisterUniformRng(configuration.seed);
@@ -167,15 +179,15 @@ public class DifferentialEvolution extends OptimizationMethod {
     private void calculateNextGeneration(List<Candidate> population,
                                          Problem p) {
         List<Candidate> mirrorPopulation = new ArrayList<>();
-        List<Candidate> oldPopulation = CommonUtil.clone(population);
+        List<Candidate> oldPopulation = deepClone(population);
 
         switch (configuration().strategy) {
 
             case Rand1Standard: {
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop1 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop1 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop2 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop2 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
                 mirrorPopulation = shuffledPop1;
 
@@ -188,7 +200,7 @@ public class DifferentialEvolution extends OptimizationMethod {
 
             case BestMemberWithJitter: {
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop1 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop1 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
                 Array jitter = new Array(population.get(0).values.size(), 0.0);
 
@@ -206,7 +218,7 @@ public class DifferentialEvolution extends OptimizationMethod {
 
             case CurrentToBest2Diffs: {
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop1 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop1 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
 
                 for (int popIter = 0; popIter < population.size(); popIter++) {
@@ -220,9 +232,9 @@ public class DifferentialEvolution extends OptimizationMethod {
 
             case Rand1DiffWithPerVectorDither: {
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop1 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop1 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop2 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop2 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
                 mirrorPopulation = shuffledPop1;
                 Array FWeight = new Array(population.get(0).values.size(), 0.0);
@@ -239,9 +251,9 @@ public class DifferentialEvolution extends OptimizationMethod {
 
             case Rand1DiffWithDither: {
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop1 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop1 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop2 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop2 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
                 mirrorPopulation = shuffledPop1;
                 double FWeight = (1.0 - configuration().stepsizeWeight) * rng_.nextReal()
@@ -255,9 +267,9 @@ public class DifferentialEvolution extends OptimizationMethod {
 
             case EitherOrWithOptimalRecombination: {
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop1 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop1 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop2 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop2 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
                 mirrorPopulation = shuffledPop1;
                 double probFWeight = 0.5;
@@ -280,9 +292,9 @@ public class DifferentialEvolution extends OptimizationMethod {
 
             case Rand1SelfadaptiveWithRotation: {
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop1 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop1 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
-                List<Candidate> shuffledPop2 = CommonUtil.clone(population);
+                List<Candidate> shuffledPop2 = deepClone(population);
                 randomize(population, 0, population.size(), rng_);
                 mirrorPopulation = shuffledPop1;
 
@@ -308,7 +320,8 @@ public class DifferentialEvolution extends OptimizationMethod {
     }
 
     private Array rotateArray(Array inputArray) {
-        randomize(inputArray, 0, inputArray.size(), rng_);
+        Array copy = new Array(inputArray);
+        randomize(copy, 0, copy.size(), rng_);
         return inputArray;
     }
 
@@ -323,9 +336,13 @@ public class DifferentialEvolution extends OptimizationMethod {
 
         Array mutationProbabilities = getMutationProbabilities(population);
 
-        List<Array> crossoverMask = CommonUtil.ArrayInit(population.size(),
-                new Array(population.get(0).values.size(), 1.0));
-        List<Array> invCrossoverMask = CommonUtil.clone(crossoverMask);
+        int maskSize = population.get(0).values.size();
+        List<Array> crossoverMask = new ArrayList<>(population.size());
+        List<Array> invCrossoverMask = new ArrayList<>(population.size());
+        for (int i = 0; i < population.size(); i++) {
+            crossoverMask.add(new Array(maskSize, 1.0));
+            invCrossoverMask.add(new Array(maskSize, 1.0));
+        }
         getCrossoverMask(crossoverMask, invCrossoverMask, mutationProbabilities);
 
         // crossover of the old and mutant population
@@ -348,13 +365,21 @@ public class DifferentialEvolution extends OptimizationMethod {
                 }
             }
             // evaluate objective function as soon as possible to avoid unnecessary loops
+            double trialCost;
             try {
-                population.get(popIter).cost = p.value(population.get(popIter).values);
+                trialCost = p.value(population.get(popIter).values);
             } catch (Exception e) {
-                population.get(popIter).cost = QL_MAX_REAL;
+                trialCost = QL_MAX_REAL;
             }
-            if (!Double.isFinite(population.get(popIter).cost))
-                population.get(popIter).cost = QL_MAX_REAL;
+            if (!Double.isFinite(trialCost))
+                trialCost = QL_MAX_REAL;
+            // selection: keep trial only if better than original
+            if (trialCost <= oldPopulation.get(popIter).cost) {
+                population.get(popIter).cost = trialCost;
+            } else {
+                population.get(popIter).values = new Array(oldPopulation.get(popIter).values);
+                population.get(popIter).cost = oldPopulation.get(popIter).cost;
+            }
 
         }
     }
@@ -393,8 +418,11 @@ public class DifferentialEvolution extends OptimizationMethod {
                 population.get(i).cost = p.costFunction().value(population.get(i).values);
             }
         } else {
-            population = CommonUtil.ArrayInit(configuration().populationMembers,
-                    new Candidate(p.currentValue().size()));
+            int dim = p.currentValue().size();
+            population = new ArrayList<>(configuration().populationMembers);
+            for (int i = 0; i < configuration().populationMembers; i++) {
+                population.add(new Candidate(dim));
+            }
             fillInitialPopulation(population, p);
         }
         partialSort(population, 1);

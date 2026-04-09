@@ -474,12 +474,12 @@ public class OptimizersTest {
             if (i != 3) {
                 // stable
                 System.out.println(problem.functionValue());
-                //assertFalse(Math.abs(problem.functionValue() - minima.get(i)) > 1e-8);
+                // assertFalse(Math.abs(problem.functionValue() - minima.get(i)) > 1e-8);
             } else {
                 // this case is unstable due to randomness; we're good as
                 // long as the result is below 15
                 System.out.println(problem.functionValue());
-                //assertFalse(problem.functionValue() > 15);
+                assertFalse(problem.functionValue() > 15);
             }
         }
     }

@@ -69,7 +69,7 @@ public class BlackIborCouponPricer extends IborCouponPricer {
 
     @Override
     public double swapletRate() {
-        return gearing_ * adjustedFixing() + spread_;
+        return gearing_ * adjustedFixing(Double.NaN) + spread_;
     }
 
     @Override
