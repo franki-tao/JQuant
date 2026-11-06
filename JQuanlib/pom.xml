@@ -46,4 +46,18 @@
         </dependency>
     </dependencies>
 
+    <build>
+        <plugins>
+            <!-- Maven 3.8.7 defaults to Surefire 2.12.4, which has no JUnit Platform
+                 provider. With only JUnit 5 on the classpath it uses surefire-junit3
+                 PojoTestSet and runs public instance void methods whose names are
+                 longer than "test" and start with that prefix, ignoring @Test. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+        </plugins>
+    </build>
+
 </project>
