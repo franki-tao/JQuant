@@ -14,6 +14,14 @@ public class Thirty365Impl extends DayCounterImpl {
         int mm1 = d1.month().getValue(), mm2 = d2.month().getValue();
         int yy1 = d1.year(), yy2 = d2.year();
 
+        // ISO 20022, same adjustment as QuantLib Thirty365::Impl::dayCount.
+        if (dd1 == 31) {
+            dd1 = 30;
+        }
+        if (dd2 == 31) {
+            dd2 = 30;
+        }
+
         return 360 * (yy2 - yy1) + 30 * (mm2 - mm1) + (dd2 - dd1);
     }
 

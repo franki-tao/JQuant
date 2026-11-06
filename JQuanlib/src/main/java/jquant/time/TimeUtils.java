@@ -604,7 +604,10 @@ public class TimeUtils {
     public static List<Date> getListOfPeriodDatesIncludingQuasiPayments(final Schedule schedule) {
         // Process the schedule into an array of dates.
         Date issueDate = schedule.date(0);
-        List<Date> newDates = schedule.dates();
+        // QuantLib copies the schedule dates. Aliasing schedule.dates()
+        // changes endDate() before the notional comparison and rejects
+        // an immutable date list.
+        List<Date> newDates = new ArrayList<>(schedule.dates());
 
         if (!schedule.hasIsRegular() || !schedule.isRegular(1)) {
             Date firstCoupon = schedule.date(1);
@@ -635,7 +638,7 @@ public class TimeUtils {
                             schedule.businessDayConvention(),
                             schedule.endOfMonth());
 
-            newDates.set(schedule.size() - 1, notionalLastCoupon);
+            newDates.set(newDates.size() - 1, notionalLastCoupon);
 
             if (less(notionalLastCoupon, schedule.endDate())) {
                 Date nextNotionalCoupon =
