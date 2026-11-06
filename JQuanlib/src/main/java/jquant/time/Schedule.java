@@ -189,7 +189,7 @@ public class Schedule {
                     dates_.add(nextToLastDate_);
                     Date temp = nullCalendar.advance(seed,
                             TimeUtils.negetive(TimeUtils.multiply(periods, (tenor_.get()))), convention, endOfMonth_.get());
-                    isRegular_.add(temp == nextToLastDate_);
+                    isRegular_.add(TimeUtils.equals(temp, nextToLastDate_));
                     seed = nextToLastDate_;
                 }
 
@@ -202,7 +202,7 @@ public class Schedule {
                             TimeUtils.negetive(TimeUtils.multiply(periods, (tenor_.get()))), convention, endOfMonth_.get());
                     if (TimeUtils.less(temp, exitDate)) {
                         if (TimeUtils.neq(firstDate_, new Date()) &&
-                                (calendar_.adjust(dates_.get(dates_.size() - 1), convention) !=
+                                TimeUtils.neq(calendar_.adjust(dates_.get(dates_.size() - 1), convention),
                                         calendar_.adjust(firstDate_, convention))) {
                             dates_.add(firstDate_);
                             isRegular_.add(false);
@@ -220,8 +220,8 @@ public class Schedule {
                     }
                 }
 
-                if (calendar_.adjust(dates_.get(dates_.size() - 1), convention) !=
-                        calendar_.adjust(effectiveDate, convention)) {
+                if (TimeUtils.neq(calendar_.adjust(dates_.get(dates_.size() - 1), convention),
+                        calendar_.adjust(effectiveDate, convention))) {
                     dates_.add(effectiveDate);
                     isRegular_.add(false);
                 }
@@ -258,7 +258,7 @@ public class Schedule {
                     dates_.add(firstDate_);
                     Date temp = nullCalendar.advance(seed, TimeUtils.multiply(periods, (tenor_.get())),
                             convention, endOfMonth_.get());
-                    if (temp != firstDate_)
+                    if (TimeUtils.neq(temp, firstDate_))
                         isRegular_.add(false);
                     else
                         isRegular_.add(true);
@@ -277,7 +277,7 @@ public class Schedule {
                             next20th = TimeUtils.nextTwentieth(next20th.add(1), rule_.get());
                         }
                     }
-                    if (next20th != effectiveDate) {
+                    if (TimeUtils.neq(next20th, effectiveDate)) {
                         dates_.add(next20th);
                         isRegular_.add(rule_.get() == CDS || rule_.get() == CDS2015);
                         seed = next20th;
@@ -292,7 +292,7 @@ public class Schedule {
                             convention, endOfMonth_.get());
                     if (TimeUtils.greater(temp, exitDate)) {
                         if (TimeUtils.neq(nextToLastDate_, new Date()) &&
-                                (calendar_.adjust(dates_.get(dates_.size() - 1), convention) !=
+                                TimeUtils.neq(calendar_.adjust(dates_.get(dates_.size() - 1), convention),
                                         calendar_.adjust(nextToLastDate_, convention))) {
                             dates_.add(nextToLastDate_);
                             isRegular_.add(false);
@@ -301,8 +301,8 @@ public class Schedule {
                     } else {
                         // skip dates that would result in duplicates
                         // after adjustment
-                        if (calendar_.adjust(dates_.get(dates_.size() - 1), convention) !=
-                                calendar_.adjust(temp, convention)) {
+                        if (TimeUtils.neq(calendar_.adjust(dates_.get(dates_.size() - 1), convention),
+                                calendar_.adjust(temp, convention))) {
                             dates_.add(temp);
                             isRegular_.add(true);
                         }
@@ -310,8 +310,8 @@ public class Schedule {
                     }
                 }
 
-                if (calendar_.adjust(dates_.get(dates_.size() - 1), terminationDateConvention) !=
-                        calendar_.adjust(terminationDate, terminationDateConvention)) {
+                if (TimeUtils.neq(calendar_.adjust(dates_.get(dates_.size() - 1), terminationDateConvention),
+                        calendar_.adjust(terminationDate, terminationDateConvention))) {
                     if (rule_.get() == TWENTIETH ||
                             rule_.get() == TWENTIETH_IMM ||
                             rule_.get() == OLD_CDS ||
