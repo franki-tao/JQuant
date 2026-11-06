@@ -145,6 +145,40 @@ public class BlackFormulaTest {
     }
 
     @Test
+    public void testItmProbabilities() {
+        // QuantLib blackformula.cpp testItmProbabilitiesWithZeroVolatility.
+        // stdDev 0 is exactly 0 or 1. A tiny stdDev must stay within 1e-12 of that limit.
+        // Non-zero values are the published BlackCalculator cash and asset probabilities
+        // for the call K=105, F=100, stdDev=0.20 (test-suite/blackcalculator.cpp).
+        Object[][] zeroVol = {
+                {Option.Type.Call, 0.03, 0.05, 1.0},
+                {Option.Type.Call, 0.05, 0.03, 0.0},
+                {Option.Type.Put, 0.03, 0.05, 0.0},
+                {Option.Type.Put, 0.05, 0.03, 1.0},
+                {Option.Type.Call, 90.0, 100.0, 1.0},
+                {Option.Type.Put, 90.0, 100.0, 0.0}
+        };
+        for (Object[] row : zeroVol) {
+            Option.Type type = (Option.Type) row[0];
+            double strike = (Double) row[1];
+            double forward = (Double) row[2];
+            double expected = (Double) row[3];
+            assertEquals(expected, BlackFormula.blackFormulaCashItmProbability(
+                    type, strike, forward, 0.0, 0.0), 0.0);
+            assertEquals(expected, BlackFormula.blackFormulaAssetItmProbability(
+                    type, strike, forward, 0.0, 0.0), 0.0);
+            assertEquals(expected, BlackFormula.blackFormulaCashItmProbability(
+                    type, strike, forward, 1.0e-8, 0.0), 1.0e-12);
+            assertEquals(expected, BlackFormula.blackFormulaAssetItmProbability(
+                    type, strike, forward, 1.0e-8, 0.0), 1.0e-12);
+        }
+        assertEquals(0.36544163566592136, BlackFormula.blackFormulaCashItmProbability(
+                Option.Type.Call, 105.0, 100.0, 0.20, 0.0), 1.0e-8);
+        assertEquals(0.44276965216477238, BlackFormula.blackFormulaAssetItmProbability(
+                Option.Type.Call, 105.0, 100.0, 0.20, 0.0), 1.0e-8);
+    }
+
+    @Test
     public void testCallIsNotThePutPrice() {
         // A swapped sign would price the strike-90 call at the published put.
         double call = price(Option.Type.Call, 90.0, 100.0, 0.20, 1.0);

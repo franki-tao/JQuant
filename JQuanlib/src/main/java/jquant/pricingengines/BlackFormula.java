@@ -353,6 +353,50 @@ public class BlackFormula {
         return Math.abs((strike - forward) / (xstar * Math.sqrt(tte)));
     }
 
+    /**
+     * Black 1976 probability of exercise in the bond (cash) measure, N(d2)
+     * with the call/put sign. QuantLib {@code blackFormulaCashItmProbability}.
+     */
+    public static double blackFormulaCashItmProbability(Option.Type optionType,
+                                                       double strike,
+                                                       double forward,
+                                                       double stdDev,
+                                                       double displacement) {
+        checkParameters(strike, forward, displacement);
+        int sign = optionType == Option.Type.Call ? 1 : -1;
+        if (stdDev == 0.0)
+            return (forward * sign > strike * sign ? 1.0 : 0.0);
+
+        forward = forward + displacement;
+        strike = strike + displacement;
+        if (strike == 0.0)
+            return (optionType == Option.Type.Call ? 1.0 : 0.0);
+        double d2 = Math.log(forward / strike) / stdDev - 0.5 * stdDev;
+        return new CumulativeNormalDistribution().value(sign * d2);
+    }
+
+    /**
+     * Black 1976 probability of exercise in the asset measure, N(d1)
+     * with the call/put sign. QuantLib {@code blackFormulaAssetItmProbability}.
+     */
+    public static double blackFormulaAssetItmProbability(Option.Type optionType,
+                                                        double strike,
+                                                        double forward,
+                                                        double stdDev,
+                                                        double displacement) {
+        checkParameters(strike, forward, displacement);
+        int sign = optionType == Option.Type.Call ? 1 : -1;
+        if (stdDev == 0.0)
+            return (forward * sign > strike * sign ? 1.0 : 0.0);
+
+        forward = forward + displacement;
+        strike = strike + displacement;
+        if (strike == 0.0)
+            return (optionType == Option.Type.Call ? 1.0 : 0.0);
+        double d1 = Math.log(forward / strike) / stdDev + 0.5 * stdDev;
+        return new CumulativeNormalDistribution().value(sign * d1);
+    }
+
     public static void checkParameters(double strike,
                                        double forward,
                                        double displacement) {
