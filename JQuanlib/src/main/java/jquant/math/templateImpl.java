@@ -15,7 +15,7 @@ public abstract class templateImpl extends Impl {
     public templateImpl(double[] xValue, double[] yValue, int requiredPoints) {
         this.xValue = xValue;
         this.yValue = yValue;
-        if (xValue.length <= requiredPoints || yValue.length < xValue.length) {
+        if (xValue.length < requiredPoints || yValue.length < xValue.length) {
             QL_FAIL("not enough points to interpolate");
         }
     }
