@@ -215,6 +215,88 @@ public class EuropeanOptionTest {
         Settings.instance.evaluationDate().equal(today);
     }
 
+    @Test
+    public void testLiveQuoteUpdatesRepriceGreeks() {
+        // One vanilla point from QuantLib testGreeks: spot 100, strike 100,
+        // q=0.05, r=0.05, residual time 1, vol 0.11. Curves keep a fixed
+        // reference date. The same option is repriced after each live quote
+        // bump; finite differences are the official central bumps.
+        Date today = Date.todaysDate();
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual360(false);
+        double spot0 = 100.0;
+        double q0 = 0.05;
+        double r0 = 0.05;
+        double vol0 = 0.11;
+        SimpleQuote spot = new SimpleQuote(spot0);
+        SimpleQuote qRate = new SimpleQuote(q0);
+        SimpleQuote rRate = new SimpleQuote(r0);
+        SimpleQuote vol = new SimpleQuote(vol0);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true),
+                new Handle<>(flatRate(today, qRate, dc), true),
+                new Handle<>(flatRate(today, rRate, dc), true),
+                new Handle<>(flatVol(today, vol, dc), true));
+        EuropeanOption option = new EuropeanOption(
+                new PlainVanillaPayoff(Option.Type.Call, 100.0),
+                new EuropeanExercise(today.add(timeToDays(1.0))));
+        option.setPricingEngine(new AnalyticEuropeanEngine(process));
+
+        double value = option.NPV();
+        double delta = option.delta();
+        double gamma = option.gamma();
+        double theta = option.theta();
+        double rho = option.rho();
+        double dividendRho = option.dividendRho();
+        double vega = option.vega();
+        double elasticity = option.elasticity();
+        assertEquals(delta / value * spot0, elasticity, 1.0e-10);
+
+        double du = spot0 * 1.0e-4;
+        spot.setValue(spot0 + du);
+        double valueUp = option.NPV();
+        double deltaUp = option.delta();
+        spot.setValue(spot0 - du);
+        double valueDown = option.NPV();
+        double deltaDown = option.delta();
+        spot.setValue(spot0);
+        assertEquals((valueUp - valueDown) / (2.0 * du), delta, 1.0e-5 * spot0);
+        assertEquals((deltaUp - deltaDown) / (2.0 * du), gamma, 1.0e-5 * spot0);
+
+        double dr = r0 * 1.0e-4;
+        rRate.setValue(r0 + dr);
+        valueUp = option.NPV();
+        rRate.setValue(r0 - dr);
+        valueDown = option.NPV();
+        rRate.setValue(r0);
+        assertEquals((valueUp - valueDown) / (2.0 * dr), rho, 1.0e-5 * spot0);
+
+        double dq = q0 * 1.0e-4;
+        qRate.setValue(q0 + dq);
+        valueUp = option.NPV();
+        qRate.setValue(q0 - dq);
+        valueDown = option.NPV();
+        qRate.setValue(q0);
+        assertEquals((valueUp - valueDown) / (2.0 * dq), dividendRho, 1.0e-5 * spot0);
+
+        double dv = vol0 * 1.0e-4;
+        vol.setValue(vol0 + dv);
+        valueUp = option.NPV();
+        vol.setValue(vol0 - dv);
+        valueDown = option.NPV();
+        vol.setValue(vol0);
+        assertEquals((valueUp - valueDown) / (2.0 * dv), vega, 1.0e-5 * spot0);
+
+        assertEquals(value, option.NPV(), 0.0);
+        assertEquals(delta, option.delta(), 0.0);
+        assertEquals(gamma, option.gamma(), 0.0);
+        assertEquals(theta, option.theta(), 0.0);
+        assertEquals(rho, option.rho(), 0.0);
+        assertEquals(dividendRho, option.dividendRho(), 0.0);
+        assertEquals(vega, option.vega(), 0.0);
+        assertEquals(elasticity, option.elasticity(), 0.0);
+    }
+
     private static void assertGreek(AnalyticEuropeanEngine engine, SimpleQuote spot, SimpleQuote qRate,
                                     SimpleQuote rRate, SimpleQuote vol, Option.Type type, double strike,
                                     double spotValue, double q, double r, double t, double v,
