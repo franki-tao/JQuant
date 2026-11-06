@@ -1,34 +1,29 @@
 package jquant.math.interpolations.impl;
 
-import jquant.math.CommonUtil;
 import jquant.math.Interpolation;
 import jquant.math.templateImpl;
-
-import java.util.List;
 
 import static java.lang.Math.exp;
 import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 public class LogInterpolationImpl extends templateImpl {
-    private List<Double> logY_;
-    private Interpolation interpolation_;
-    // 此处用来获取泛型中requiredPoints
-    private Interpolator interpolator;
+    private final double[] logY_;
+    private final Interpolation interpolation_;
 
     public LogInterpolationImpl(double[] x, double[] y, Interpolator factory) {
         super(x, y, factory.getRequiredPoints());
-        logY_ = CommonUtil.ArrayInit(x.length);
-        interpolation_ = factory.interpolate(x, y);
+        logY_ = new double[x.length];
+        // The inner interpolation is on log(y). value() exponentiates it.
+        interpolation_ = factory.interpolate(x, logY_);
     }
     @Override
     public void update() {
-        for (int i=0; i<logY_.size(); ++i) {
+        for (int i=0; i<logY_.length; ++i) {
             QL_REQUIRE(yValue[i]>0.0,
                     "invalid value (" + yValue[i] +
                      ") at index " + i);
-            logY_.set(i, Math.log(yValue[i]));
-            // logY_[i] = std::log(this->yBegin_[i]);
+            logY_[i] = Math.log(yValue[i]);
         }
         interpolation_.update();
     }
