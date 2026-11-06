@@ -38,6 +38,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
     private double[] data_;
     private Date maxDate_;
     private Interpolation interpolation_;
+    private int bootstrapIterations_;
+    private boolean loopRequired;
 
     public PiecewiseYieldCurve(Date referenceDate,
                                List<RateHelper> instruments,
@@ -62,6 +64,11 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
 
     public List<Date> dates() {
         return List.copyOf(dates_);
+    }
+
+    /** How many pillar passes the iterative bootstrap used. */
+    public int bootstrapIterations() {
+        return bootstrapIterations_;
     }
 
     @Override
@@ -92,6 +99,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         QL_REQUIRE(alive + 1 >= new LogLinear().getRequiredPoints(),
                 "not enough alive instruments: " + alive + " provided");
 
+        loopRequired = false;
         dates_.clear();
         dates_.add(firstDate);
         times_ = new double[alive + 1];
@@ -109,10 +117,11 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
             Date latestRelevantDate = helper.latestRelevantDate();
             QL_REQUIRE(TimeUtils.greater(latestRelevantDate, maxDate),
                     "instrument has latestRelevantDate before or equal to the previous one");
-            // A pillar before the latest relevant date needs another pass
-            // over the whole curve. Deposit pillars are the maturity date.
-            QL_REQUIRE(!TimeUtils.less(dates_.get(i), latestRelevantDate),
-                    "pillar before latest relevant date is not bootstrapped");
+            // Log-linear is local, so a pillar that is also the latest
+            // relevant date does not need another pass. A swap whose last
+            // floating fixing ends after its maturity pillar does.
+            if (TimeUtils.less(dates_.get(i), latestRelevantDate))
+                loopRequired = true;
             maxDate = TimeUtils.greater(dates_.get(i), latestRelevantDate)
                     ? dates_.get(i) : latestRelevantDate;
         }
@@ -122,37 +131,76 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         for (int j = firstAlive; j < instruments_.size(); ++j)
             instruments_.get(j).setTermStructure(this);
 
-        for (int i = 1, j = firstAlive; j < instruments_.size(); ++i, ++j) {
-            double dt = times_[i] - times_[i - 1];
-            double min = data_[i - 1] * Math.exp(-MAX_RATE * dt);
-            double max = data_[i - 1] * Math.exp(MAX_RATE * dt);
-            double guess = i == 1
-                    ? 1.0 / (1.0 + AVERAGE_RATE * times_[1])
-                    : Math.exp(-(-Math.log(data_[i - 1]) / times_[i - 1]) * times_[i]);
-            if (guess >= max)
-                guess = max - (max - min) / 5.0;
-            else if (guess <= min)
-                guess = min + (max - min) / 5.0;
-
-            RateHelper helper = instruments_.get(j);
-            int node = i;
-            Function error = x -> {
-                data_[node] = x;
-                interpolation_.update();
-                return helper.quoteError();
-            };
-            Brent solver = new Brent();
-            try {
-                double discount = solver.solve(error, accuracy_, guess, min, max);
-                data_[node] = discount;
-                interpolation_.update();
-            } catch (IllegalArgumentException e) {
-                QL_FAIL("failed at alive instrument " + i
-                        + ", pillar " + helper.pillarDate()
-                        + ", maturity " + helper.maturityDate()
-                        + ", reference date " + dates_.get(0)
-                        + ": " + e.getMessage());
+        boolean validData = false;
+        int iteration = 0;
+        while (true) {
+            iteration++;
+            double[] previous = null;
+            if (loopRequired && validData)
+                previous = data_.clone();
+            for (int i = 1, j = firstAlive; j < instruments_.size(); ++i, ++j)
+                solvePillar(i, j, validData);
+            if (!loopRequired) {
+                bootstrapIterations_ = iteration;
+                break;
             }
+            if (validData) {
+                double change = 0.0;
+                for (int i = 1; i < data_.length; i++)
+                    change = Math.max(change, Math.abs(data_[i] - previous[i]));
+                if (change <= accuracy_) {
+                    bootstrapIterations_ = iteration;
+                    break;
+                }
+            }
+            QL_REQUIRE(iteration < 100,
+                    "convergence not reached after " + iteration + " iterations");
+            validData = true;
+        }
+    }
+
+    private void solvePillar(int i, int j, boolean validData) {
+        double dt = times_[i] - times_[i - 1];
+        double min;
+        if (validData) {
+            double smallest = data_[0];
+            for (double value : data_)
+                smallest = Math.min(smallest, value);
+            min = smallest / 2.0;
+        } else {
+            min = data_[i - 1] * Math.exp(-MAX_RATE * dt);
+        }
+        double max = data_[i - 1] * Math.exp(MAX_RATE * dt);
+        double guess;
+        if (validData)
+            guess = data_[i];
+        else if (i == 1)
+            guess = 1.0 / (1.0 + AVERAGE_RATE * times_[1]);
+        else
+            guess = Math.exp(-(-Math.log(data_[i - 1]) / times_[i - 1]) * times_[i]);
+        if (guess >= max)
+            guess = max - (max - min) / 5.0;
+        else if (guess <= min)
+            guess = min + (max - min) / 5.0;
+
+        RateHelper helper = instruments_.get(j);
+        int node = i;
+        Function error = x -> {
+            data_[node] = x;
+            interpolation_.update();
+            return helper.quoteError();
+        };
+        Brent solver = new Brent();
+        try {
+            double discount = solver.solve(error, accuracy_, guess, min, max);
+            data_[node] = discount;
+            interpolation_.update();
+        } catch (IllegalArgumentException e) {
+            QL_FAIL("failed at alive instrument " + i
+                    + ", pillar " + helper.pillarDate()
+                    + ", maturity " + helper.maturityDate()
+                    + ", reference date " + dates_.get(0)
+                    + ": " + e.getMessage());
         }
     }
 }
