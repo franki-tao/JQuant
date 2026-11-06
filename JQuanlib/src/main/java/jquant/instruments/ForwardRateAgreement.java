@@ -51,6 +51,9 @@ public class ForwardRateAgreement extends Instrument {
         maturityDate_ = index.fixingCalendar().adjust(maturityDate, index.businessDayConvention());
         discountCurve_ = discountCurve;
         QL_REQUIRE(TimeLess(valueDate_, maturityDate_), "valueDate must be earlier than maturityDate");
+        if (discountCurve_ != null)
+            registerWith(discountCurve_);
+        registerWith(index_);
     }
 
     public Date valueDate() {
