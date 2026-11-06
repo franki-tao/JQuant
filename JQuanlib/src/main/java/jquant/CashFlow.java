@@ -3,6 +3,7 @@ package jquant;
 import jquant.patterns.LazyObject;
 import jquant.patterns.Visitor;
 import jquant.time.Date;
+import jquant.time.TimeUtils;
 
 import java.util.Optional;
 
@@ -37,4 +38,19 @@ public abstract class CashFlow extends LazyObject implements Event {
     public abstract Date exCouponDate();
     /*returns true if the cashflow is trading ex-coupon on the refDate*/
     public abstract boolean tradingExCoupon(final Date refDate);
+
+    /**
+     * A cash flow on {@code refDate} has occurred unless reference-date events are included.
+     * QuantLib {@code Event::hasOccurred}.
+     */
+    public static boolean hasOccurred(Date eventDate, Date refDate, Optional<Boolean> includeRefDate) {
+        Date ref = (refDate == null || TimeUtils.equals(refDate, new Date()))
+                ? Settings.instance.evaluationDate().Date() : refDate;
+        boolean include = includeRefDate != null && includeRefDate.isPresent()
+                ? includeRefDate.get()
+                : Settings.instance.includeReferenceDateEvents();
+        if (include)
+            return TimeUtils.less(eventDate, ref);
+        return !TimeUtils.greater(eventDate, ref);
+    }
 }

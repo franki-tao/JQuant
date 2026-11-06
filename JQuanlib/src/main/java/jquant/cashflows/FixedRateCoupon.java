@@ -50,7 +50,7 @@ public class FixedRateCoupon extends Coupon {
 
     @Override
     public boolean hasOccurred(Date refDate, Optional<Boolean> includeRefDate) {
-        return false;
+        return jquant.CashFlow.hasOccurred(date(), refDate, includeRefDate);
     }
 
     @Override
