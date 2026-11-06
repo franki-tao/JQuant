@@ -44,6 +44,7 @@ public class GeneralizedBlackScholesProcess extends StochasticProcess1D {
         blackVolatility_ = blackVolTS;
         forceDiscretization_ = forceDiscretization;
         hasExternalLocalVol_ = false;
+        localVolatility_ = new RelinkableHandle<>(null, false);
         updated_ = false;
         isStrikeIndependent_ = false;
         registerWith(x0_.getValue());

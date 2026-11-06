@@ -25,6 +25,50 @@ public class BlackScholesLattice extends TreeLattice1D {
         pu_ = tree.probability(0, 0, 1);
     }
 
+    /** Cox-Ross-Rubinstein tree with a constant risk-free discount per step. */
+    public BlackScholesLattice(final CoxRossRubinstein tree,
+                               double riskFreeRate,
+                               double end,
+                               int steps) {
+        super(new TimeGrid(end, steps), 2);
+        riskFreeRate_ = riskFreeRate;
+        dt_ = end / steps;
+        discount_ = Math.exp(-riskFreeRate * dt_);
+        pd_ = tree.probability(0, 0, 0);
+        pu_ = tree.probability(0, 0, 1);
+        setImpl_(new TreeLatticeImpl() {
+            @Override
+            public int size(int index) {
+                return tree.size(index);
+            }
+
+            @Override
+            public double discount(int i, int j) {
+                return discount_;
+            }
+
+            @Override
+            public int descendant(int i, int j, int branch) {
+                return tree.descendant(i, j, branch);
+            }
+
+            @Override
+            public double probability(int i, int j, int branch) {
+                return tree.probability(i, j, branch);
+            }
+
+            @Override
+            public void stepback(int i, Array values, Array newValues) {
+                BlackScholesLattice.this.stepback(i, values, newValues);
+            }
+
+            @Override
+            public double underlying(int i, int j) {
+                return tree.underlying(i, j);
+            }
+        });
+    }
+
     public double riskFreeRate() {
         return riskFreeRate_;
     }
