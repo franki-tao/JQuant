@@ -177,6 +177,54 @@ public class DayCounterTest {
     }
 
     @Test
+    public void testActualActualWithSemiannualSchedule() {
+        // QuantLib testActualActualWithSemiannualSchedule. endOfMonth is true
+        // for the coupon that must be exactly one half year.
+        Calendar calendar = new UnitedStates(UnitedStates.Market.GovernmentBond);
+        Date fromDate = d(10, Month.JANUARY, 2017);
+        Date firstCoupon = d(31, Month.AUGUST, 2017);
+        Schedule schedule = new MakeSchedule()
+                .from(fromDate)
+                .withFirstDate(firstCoupon)
+                .to(d(28, Month.FEBRUARY, 2026))
+                .withFrequency(Frequency.SEMIANNUAL)
+                .withCalendar(calendar)
+                .withConvention(BusinessDayConvention.UNADJUSTED)
+                .backwards()
+                .endOfMonth(true)
+                .toSchedule();
+        assertSameDate(firstCoupon, schedule.date(1));
+        assertSameDate(d(28, Month.FEBRUARY, 2018), schedule.date(2));
+        DayCounter dayCounter = new ActualActual(ActualActual.Convention.ISMA, schedule);
+        DayCounter noSchedule = new ActualActual(ActualActual.Convention.ISMA);
+        Date referencePeriodStart = schedule.date(1);
+        Date referencePeriodEnd = schedule.date(2);
+        assertEquals(0.0, yearFraction(dayCounter, referencePeriodStart, referencePeriodStart),
+                ACT_ACT_TOLERANCE);
+        assertEquals(0.0, yearFraction(noSchedule, referencePeriodStart, referencePeriodStart),
+                ACT_ACT_TOLERANCE);
+        assertEquals(0.5, yearFraction(dayCounter, referencePeriodStart, referencePeriodEnd),
+                ACT_ACT_TOLERANCE);
+        assertEquals(0.5, yearFraction(noSchedule, referencePeriodStart, referencePeriodEnd,
+                referencePeriodStart, referencePeriodEnd), ACT_ACT_TOLERANCE);
+
+        for (Date testDate = schedule.date(1); TimeUtils.less(testDate, referencePeriodEnd);
+             testDate = calendar.advance(testDate, 1, TimeUnit.DAYS,
+                     BusinessDayConvention.FOLLOWING, false)) {
+            double difference = yearFraction(dayCounter, testDate, referencePeriodEnd,
+                    referencePeriodStart, referencePeriodEnd)
+                    - yearFraction(dayCounter, testDate, referencePeriodEnd);
+            assertEquals(0.0, difference, ACT_ACT_TOLERANCE, testDate.toString());
+        }
+
+        double calculatedYearFraction = yearFraction(dayCounter, fromDate, firstCoupon);
+        double expectedYearFraction = 0.5
+                + dayCounter.dayCount(fromDate, d(28, Month.FEBRUARY, 2017))
+                / (2.0 * dayCounter.dayCount(d(31, Month.AUGUST, 2016), d(28, Month.FEBRUARY, 2017)));
+        assertEquals(expectedYearFraction, calculatedYearFraction, ACT_ACT_TOLERANCE);
+    }
+
+    @Test
     public void testActualActualWithAnnualSchedule() {
         Calendar calendar = new UnitedStates(UnitedStates.Market.GovernmentBond);
         Schedule schedule = new MakeSchedule()
