@@ -58,6 +58,10 @@ public class AnalyticEuropeanEngine implements PricingEngine {
         });
     }
 
+    public GeneralizedBlackScholesProcess process() {
+        return process_;
+    }
+
     @Override
     public arguments getArguments() {
         return arguments_;

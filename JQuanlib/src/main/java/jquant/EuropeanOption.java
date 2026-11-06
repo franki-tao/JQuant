@@ -1,9 +1,18 @@
 package jquant;
 
+import jquant.math.Function;
+import jquant.math.solvers1d.Brent;
+import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
+import jquant.processes.BlackScholesMertonProcess;
+import jquant.processes.GeneralizedBlackScholesProcess;
+import jquant.quotes.SimpleQuote;
+import jquant.termstructures.volatility.equityfx.BlackConstantVol;
+import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
 import jquant.time.Date;
 import jquant.time.TimeUtils;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
+import static jquant.math.MathUtils.QL_EPSILON;
 
 /**
  * European option priced by a {@link PricingEngine}. Greeks are read from
@@ -75,6 +84,71 @@ public class EuropeanOption extends Option {
         calculate();
         QL_REQUIRE(!Double.isNaN(elasticity_), "elasticity not provided");
         return elasticity_;
+    }
+
+    /**
+     * Black volatility that reprices {@code targetValue} with a cloned process.
+     * Accuracy, evaluation limit and the volatility bracket follow
+     * {@code VanillaOption::impliedVolatility}: {@code 1e-4}, {@code 100},
+     * {@code 1e-7} and {@code 4}.
+     */
+    public double impliedVolatility(double targetValue, AnalyticEuropeanEngine engine) {
+        return impliedVolatility(targetValue, engine, 1.0e-4, 100, 1.0e-7, 4.0);
+    }
+
+    /**
+     * Solves {@code engine price - targetValue = 0} with Brent.
+     *
+     * <p>The spot, dividend and risk-free handles of {@code engine} are shared.
+     * Volatility is a new constant curve that copies the original reference
+     * date, calendar and day counter and is driven by a temporary quote. The
+     * quote passed into the original curve is never written, so a failed solve
+     * leaves the market where it was. The temporary engine is the one that
+     * prices each trial volatility.
+     */
+    public double impliedVolatility(double targetValue, AnalyticEuropeanEngine engine,
+                                    double accuracy, int maxEvaluations,
+                                    double minVol, double maxVol) {
+        QL_REQUIRE(engine != null, "no pricing engine given");
+        QL_REQUIRE(!isExpired(), "option expired");
+        QL_REQUIRE(minVol >= 0.0, "minimum volatility must be non-negative");
+        QL_REQUIRE(maxEvaluations > 0, "maximum number of evaluations must be positive");
+        GeneralizedBlackScholesProcess process = engine.process();
+        QL_REQUIRE(process != null, "no process given");
+        BlackVolTermStructure blackVol = process.blackVolatility().getValue();
+        SimpleQuote volQuote = new SimpleQuote((minVol + maxVol) / 2.0);
+        BlackConstantVol flatVol = new BlackConstantVol(
+                blackVol.referenceDate(),
+                blackVol.calendar(),
+                new Handle<>(volQuote, true),
+                blackVol.dayCounter());
+        AnalyticEuropeanEngine solverEngine = new AnalyticEuropeanEngine(
+                new BlackScholesMertonProcess(
+                        process.stateVariable(),
+                        process.dividendYield(),
+                        process.riskFreeRate(),
+                        new Handle<>(flatVol, true)));
+        setupArguments(solverEngine.getArguments());
+        solverEngine.getArguments().validate();
+
+        Function priceError = x -> {
+            volQuote.setValue(x);
+            solverEngine.calculate();
+            return ((Instrument.results) solverEngine.getResults()).value - targetValue;
+        };
+
+        // A price a few ulps above the lower-vol price is already at the
+        // bracket floor: no smaller price exists. A price below that floor
+        // is left for Brent, which reports that the root is not bracketed.
+        double lowerError = priceError.value(minVol);
+        double scale = Math.abs(targetValue) > 1.0 ? Math.abs(targetValue) : 1.0;
+        double bound = 1.0e4 * QL_EPSILON * scale;
+        if (lowerError >= 0.0 && lowerError <= bound)
+            return minVol;
+
+        Brent solver = new Brent();
+        solver.setMaxEvaluations(maxEvaluations);
+        return solver.solve(priceError, accuracy, (minVol + maxVol) / 2.0, minVol, maxVol);
     }
 
     @Override

@@ -23,6 +23,8 @@ import jquant.time.daycounters.Actual360;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Analytic European prices from QuantLib {@code test-suite/europeanoption.cpp}
@@ -295,6 +297,151 @@ public class EuropeanOptionTest {
         assertEquals(dividendRho, option.dividendRho(), 0.0);
         assertEquals(vega, option.vega(), 0.0);
         assertEquals(elasticity, option.elasticity(), 0.0);
+    }
+
+    @Test
+    public void testImpliedVolatilityRecoversHaugVol() {
+        // Haug call 60/65, q=0, r=0.08, t=0.25 is 2.1334 at vol 0.30.
+        // The quote is moved to 0.27 before the solve, so the root is not
+        // the volatility already stored on the curve.
+        Date today = Date.todaysDate();
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual360(false);
+        SimpleQuote spot = new SimpleQuote(60.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        SimpleQuote rRate = new SimpleQuote(0.08);
+        SimpleQuote vol = new SimpleQuote(0.30);
+        AnalyticEuropeanEngine engine = engine(today, spot, qRate, rRate, vol, dc);
+        EuropeanOption call = option(engine, Option.Type.Call, 65.0, today, 0.25);
+        EuropeanOption put = option(engine, Option.Type.Put, 65.0, today, 0.25);
+        double callAt30 = call.NPV();
+        double putAt30 = put.NPV();
+        assertEquals(2.1334, callAt30, TOLERANCE);
+
+        vol.setValue(0.27);
+        double callAt27 = call.NPV();
+        double putAt27 = put.NPV();
+        assertTrue(Math.abs(callAt27 - callAt30) > TOLERANCE);
+
+        double callIv = call.impliedVolatility(callAt30, engine, 1.0e-6, 100, 1.0e-7, 4.0);
+        double putIv = put.impliedVolatility(putAt30, engine, 1.0e-6, 100, 1.0e-7, 4.0);
+        assertEquals(0.30, callIv, 1.0e-5);
+        assertEquals(0.30, putIv, 1.0e-5);
+        assertEquals(callIv, call.impliedVolatility(callAt30, engine, 1.0e-6, 100, 1.0e-7, 4.0), 0.0);
+
+        assertEquals(0.27, vol.value(), 0.0);
+        assertEquals(60.0, spot.value(), 0.0);
+        assertEquals(0.0, qRate.value(), 0.0);
+        assertEquals(0.08, rRate.value(), 0.0);
+        assertEquals(callAt27, call.NPV(), 0.0);
+        assertEquals(putAt27, put.NPV(), 0.0);
+
+        vol.setValue(0.40);
+        assertTrue(Math.abs(call.NPV() - callAt27) > TOLERANCE);
+        vol.setValue(0.27);
+        assertEquals(callAt27, call.NPV(), 0.0);
+
+        // Haug put 95/100, q=0.05, r=0.10, t=0.50 is 2.4648 at vol 0.20.
+        SimpleQuote putSpot = new SimpleQuote(100.0);
+        SimpleQuote putQ = new SimpleQuote(0.05);
+        SimpleQuote putR = new SimpleQuote(0.10);
+        SimpleQuote putVol = new SimpleQuote(0.20);
+        AnalyticEuropeanEngine putEngine = engine(today, putSpot, putQ, putR, putVol, dc);
+        EuropeanOption haugPut = option(putEngine, Option.Type.Put, 95.0, today, 0.50);
+        double putAt20 = haugPut.NPV();
+        assertEquals(2.4648, putAt20, TOLERANCE);
+        putVol.setValue(0.27);
+        assertEquals(0.20, haugPut.impliedVolatility(putAt20, putEngine, 1.0e-6, 100, 1.0e-7, 4.0), 1.0e-5);
+        assertEquals(0.27, putVol.value(), 0.0);
+    }
+
+    @Test
+    public void testImpliedVolatilityRestoresQuoteWhenItFails() {
+        Date today = Date.todaysDate();
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual360(false);
+        SimpleQuote spot = new SimpleQuote(60.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        SimpleQuote rRate = new SimpleQuote(0.08);
+        SimpleQuote vol = new SimpleQuote(0.27);
+        AnalyticEuropeanEngine engine = engine(today, spot, qRate, rRate, vol, dc);
+        EuropeanOption call = option(engine, Option.Type.Call, 65.0, today, 0.25);
+        double price = call.NPV();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> call.impliedVolatility(price, engine, 1.0e-8, 1, 1.0e-7, 4.0));
+        assertEquals(0.27, vol.value(), 0.0);
+        assertEquals(price, call.NPV(), 0.0);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> call.impliedVolatility(-1.0, engine, 1.0e-6, 100, 1.0e-7, 4.0));
+        // This call is out of the money, so the price at the volatility floor is
+        // already within QuantLib's 1e4*epsilon band of zero. The floor is the
+        // root. A zero target on an in-the-money option is below intrinsic and fails.
+        assertEquals(1.0e-7, call.impliedVolatility(0.0, engine, 1.0e-6, 100, 1.0e-7, 4.0), 0.0);
+        EuropeanOption itmZero = option(engine, Option.Type.Call, 50.0, today, 0.25);
+        assertThrows(IllegalArgumentException.class,
+                () -> itmZero.impliedVolatility(0.0, engine, 1.0e-6, 100, 1.0e-7, 4.0));
+        assertThrows(IllegalArgumentException.class,
+                () -> call.impliedVolatility(1.0e6, engine, 1.0e-6, 100, 1.0e-7, 4.0));
+
+        vol.setValue(1.0e-7);
+        EuropeanOption itm = option(engine, Option.Type.Call, 50.0, today, 0.25);
+        double floor = itm.NPV();
+        vol.setValue(0.27);
+        assertThrows(IllegalArgumentException.class,
+                () -> itm.impliedVolatility(floor - 1.0e-8, engine, 1.0e-6, 100, 1.0e-7, 4.0));
+
+        assertEquals(0.27, vol.value(), 0.0);
+        assertEquals(60.0, spot.value(), 0.0);
+        assertEquals(price, call.NPV(), 0.0);
+        vol.setValue(0.30);
+        assertEquals(2.1334, call.NPV(), TOLERANCE);
+        vol.setValue(0.27);
+        assertEquals(price, call.NPV(), 0.0);
+    }
+
+    @Test
+    public void testImpliedVolatilityLeavesLiteralCurveUntouched() {
+        Date today = Date.todaysDate();
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual360(false);
+        BlackConstantVol volCurve = new BlackConstantVol(today, new NullCalendar(), 0.30, dc);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(new SimpleQuote(60.0), true),
+                new Handle<>(new FlatForward(today, new Handle<>(new SimpleQuote(0.0), true), dc,
+                        Compounding.Continuous, Frequency.ANNUAL), true),
+                new Handle<>(new FlatForward(today, new Handle<>(new SimpleQuote(0.08), true), dc,
+                        Compounding.Continuous, Frequency.ANNUAL), true),
+                new Handle<>(volCurve, true));
+        AnalyticEuropeanEngine engine = new AnalyticEuropeanEngine(process);
+        EuropeanOption call = option(engine, Option.Type.Call, 65.0, today, 0.25);
+        double price = call.NPV();
+        assertEquals(2.1334, price, TOLERANCE);
+        assertEquals(0.30, call.impliedVolatility(price, engine, 1.0e-6, 100, 1.0e-7, 4.0), 1.0e-5);
+        assertEquals(0.30, call.impliedVolatility(price, engine), 1.0e-4);
+        assertTrue(process.blackVolatility().getValue() == volCurve);
+        assertTrue(volCurve.dayCounter() == dc);
+        assertEquals(price, call.NPV(), 0.0);
+    }
+
+    private static AnalyticEuropeanEngine engine(Date today, SimpleQuote spot, SimpleQuote qRate,
+                                                 SimpleQuote rRate, SimpleQuote vol, DayCounter dc) {
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true),
+                new Handle<>(flatRate(today, qRate, dc), true),
+                new Handle<>(flatRate(today, rRate, dc), true),
+                new Handle<>(flatVol(today, vol, dc), true));
+        return new AnalyticEuropeanEngine(process);
+    }
+
+    private static EuropeanOption option(AnalyticEuropeanEngine engine, Option.Type type, double strike,
+                                         Date today, double t) {
+        EuropeanOption option = new EuropeanOption(
+                new PlainVanillaPayoff(type, strike),
+                new EuropeanExercise(today.add(timeToDays(t))));
+        option.setPricingEngine(engine);
+        return option;
     }
 
     private static void assertGreek(AnalyticEuropeanEngine engine, SimpleQuote spot, SimpleQuote qRate,
