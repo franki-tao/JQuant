@@ -27,7 +27,9 @@ public class BlackFormula {
         QL_REQUIRE(discount > 0.0,
                 "discount (" + discount + ") must be positive");
 
-        int sign = optionType == Option.Type.Put ? 1 : -1;
+        // QuantLib Option::Type is Put=-1, Call=+1 (ql/option.hpp). blackFormula
+        // takes that integer as its sign (ql/pricingengines/blackformula.cpp).
+        int sign = optionType == Option.Type.Call ? 1 : -1;
 
         if (stdDev == 0.0)
             return Math.max((forward - strike) * sign, (0.0)) * discount;
