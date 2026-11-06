@@ -1,12 +1,13 @@
 package jquant.pricingengines;
 
 import jquant.Option;
+import jquant.Payoff;
 
 /**
- * Vanilla strike payoff used by {@link BlackCalculator}. Exotic payoffs
- * (cash-or-nothing, asset-or-nothing, gap) are not represented here.
+ * Vanilla strike payoff. Cash-or-nothing, asset-or-nothing and gap payoffs
+ * are not represented here.
  */
-public class PlainVanillaPayoff {
+public class PlainVanillaPayoff implements Payoff {
     private final Option.Type optionType_;
     private final double strike_;
 
@@ -21,5 +22,23 @@ public class PlainVanillaPayoff {
 
     public double strike() {
         return strike_;
+    }
+
+    @Override
+    public String name() {
+        return "Vanilla";
+    }
+
+    @Override
+    public String description() {
+        return optionType_ + " " + strike_;
+    }
+
+    @Override
+    public double value(double price) {
+        if (optionType_ == Option.Type.Call) {
+            return Math.max(price - strike_, 0.0);
+        }
+        return Math.max(strike_ - price, 0.0);
     }
 }

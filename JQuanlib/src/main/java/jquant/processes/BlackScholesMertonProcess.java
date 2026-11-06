@@ -21,6 +21,13 @@ public class BlackScholesMertonProcess extends GeneralizedBlackScholesProcess {
     public BlackScholesMertonProcess(final Handle<Quote> x0,
                                      final Handle<YieldTermStructure> dividendTS,
                                      final Handle<YieldTermStructure> riskFreeTS,
+                                     final Handle<BlackVolTermStructure> blackVolTS) {
+        this(x0, dividendTS, riskFreeTS, blackVolTS, new EulerDiscretization(), false);
+    }
+
+    public BlackScholesMertonProcess(final Handle<Quote> x0,
+                                     final Handle<YieldTermStructure> dividendTS,
+                                     final Handle<YieldTermStructure> riskFreeTS,
                                      final Handle<BlackVolTermStructure> blackVolTS,
                                      final StochasticProcess1DImpl d,
                                      boolean forceDiscretization) {
