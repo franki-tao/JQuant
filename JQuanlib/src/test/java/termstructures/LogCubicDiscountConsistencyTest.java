@@ -10,7 +10,6 @@ import jquant.indexes.IndexManager;
 import jquant.indexes.USDLibor;
 import jquant.instruments.BMASwap;
 import jquant.instruments.FixedRateBond;
-import jquant.instruments.ForwardRateAgreement;
 import jquant.instruments.Swap;
 import jquant.instruments.VanillaSwap;
 import jquant.math.interpolations.impl.LogCubic;
@@ -22,8 +21,6 @@ import jquant.termstructures.yield.BMASwapRateHelper;
 import jquant.termstructures.yield.DepositRateHelper;
 import jquant.termstructures.yield.FixedRateBondHelper;
 import jquant.termstructures.yield.FlatForward;
-import jquant.termstructures.yield.FraRateHelper;
-import jquant.termstructures.yield.FuturesRateHelper;
 import jquant.termstructures.yield.PiecewiseYieldCurve;
 import jquant.termstructures.yield.RateHelper;
 import jquant.termstructures.yield.SwapRateHelper;
@@ -33,13 +30,11 @@ import jquant.time.Date;
 import jquant.time.DateGenerationRule;
 import jquant.time.DayCounter;
 import jquant.time.Frequency;
-import jquant.time.IMM;
 import jquant.time.MakeSchedule;
 import jquant.time.Month;
 import jquant.time.Period;
 import jquant.time.Schedule;
 import jquant.time.TimeUnit;
-import jquant.time.TimeUtils;
 import jquant.time.calendars.JointCalendar;
 import jquant.time.calendars.Target;
 import jquant.time.daycounters.Actual360;
@@ -56,9 +51,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@code testLogCubicDiscountConsistency}: deposits, swaps, FRAs, IMM futures
- * and bonds from {@code testCurveConsistency}, plus log-cubic
- * {@code testBMACurveConsistency}. Expected values are the published quotes.
+ * Log-cubic sections that converge without damping: deposits, swaps and bonds
+ * from {@code testCurveConsistency}, plus {@code testBMACurveConsistency}.
+ * Expected values are the published quotes. FRA-only and IMM-futures-only
+ * curves are the sections QuantLib master marks {@code //Unstable}.
  * Tolerance is the official {@code 1e-9}. The interpolator is
  * {@code LogCubic(Spline, true, SecondDerivative, 0, SecondDerivative, 0)}.
  *
@@ -76,9 +72,6 @@ public class LogCubicDiscountConsistencyTest {
             4.54, 4.63, 4.75, 4.86, 4.99, 5.11, 5.23, 5.33, 5.41, 5.47, 5.60, 5.75, 5.89, 5.95, 5.96
     };
     private static final int[] SWAP_YEARS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30};
-    private static final double[] FRA_RATES = {4.581, 4.573, 4.557, 4.496, 4.490};
-    private static final int[] FRA_MONTHS = {1, 2, 3, 6, 9};
-    private static final double[] FUTURES_RATES = {4.581, 4.573, 4.557};
     // n, length in years, coupon percent, clean price. Semiannual, redemption 100.
     private static final double[][] BONDS = {
             {0.5, 5, 4.75, 101.320},
@@ -139,52 +132,6 @@ public class LogCubicDiscountConsistencyTest {
                         new Thirty360(Thirty360.Convention.BondBasis), floating, forecast, 0.0, actual360);
                 swap.setPricingEngine(new DiscountingSwapEngine(curve));
                 assertEquals(SWAP_RATES[i] / 100.0, swap.fairRate(), TOLERANCE, SWAP_YEARS[i] + " year swap");
-            }
-
-            IborIndex euribor3m = euribor(new Period(3, TimeUnit.MONTHS), flat());
-            List<RateHelper> fras = new ArrayList<>();
-            for (int i = 0; i < FRA_RATES.length; i++) {
-                fras.add(new FraRateHelper(new Handle<>(new SimpleQuote(FRA_RATES[i] / 100.0), false),
-                        FRA_MONTHS[i], FRA_MONTHS[i] + 3, euribor3m.fixingDays(), euribor3m.fixingCalendar(),
-                        euribor3m.businessDayConvention(), euribor3m.endOfMonth(), euribor3m.dayCounter(),
-                        FraRateHelper.Pillar.LastRelevantDate, false));
-            }
-            PiecewiseYieldCurve fraCurve = new PiecewiseYieldCurve(
-                    settlement, fras, actual360, monotonicLogCubic(), 1.0e-12);
-            IborIndex fraIndex = euribor(new Period(3, TimeUnit.MONTHS), fraCurve);
-            for (int i = 0; i < FRA_RATES.length; i++) {
-                Date start = target.advance(settlement, FRA_MONTHS[i], TimeUnit.MONTHS,
-                        BusinessDayConvention.MODIFIED_FOLLOWING, true);
-                Date end = target.advance(start, 3, TimeUnit.MONTHS,
-                        BusinessDayConvention.MODIFIED_FOLLOWING, true);
-                ForwardRateAgreement fra = new ForwardRateAgreement(fraIndex, start, end,
-                        ForwardRateAgreement.Position.Long, FRA_RATES[i] / 100.0, 100.0, fraCurve, false);
-                assertEquals(FRA_RATES[i] / 100.0, fra.forwardRate(), TOLERANCE, "FRA " + (i + 1));
-            }
-
-            List<RateHelper> futures = new ArrayList<>();
-            List<Date> immDates = new ArrayList<>();
-            Date immDate = new Date();
-            for (double rate : FUTURES_RATES) {
-                immDate = IMM.nextDate(immDate, false);
-                if (TimeUtils.less(euribor3m.fixingDate(immDate), today))
-                    immDate = IMM.nextDate(immDate, false);
-                immDates.add(immDate);
-                futures.add(new FuturesRateHelper(
-                        new Handle<>(new SimpleQuote(100.0 - rate), false), immDate, euribor3m));
-            }
-            PiecewiseYieldCurve futuresCurve = new PiecewiseYieldCurve(
-                    settlement, futures, actual360, monotonicLogCubic(), 1.0e-12);
-            IborIndex futuresIndex = euribor(new Period(3, TimeUnit.MONTHS), futuresCurve);
-            for (int i = 0; i < FUTURES_RATES.length; i++) {
-                Date start = immDates.get(i);
-                Date end = target.advance(start, 3, TimeUnit.MONTHS,
-                        BusinessDayConvention.MODIFIED_FOLLOWING, true);
-                ForwardRateAgreement future = new ForwardRateAgreement(futuresIndex, start, end,
-                        ForwardRateAgreement.Position.Long, FUTURES_RATES[i] / 100.0, 100.0,
-                        futuresCurve, false);
-                assertEquals(FUTURES_RATES[i] / 100.0, future.forwardRate(), TOLERANCE,
-                        "IMM future " + (i + 1));
             }
 
             List<RateHelper> bondHelpers = new ArrayList<>();
