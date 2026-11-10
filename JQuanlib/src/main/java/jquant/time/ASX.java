@@ -1,5 +1,7 @@
 package jquant.time;
 
+import jquant.Settings;
+
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -97,9 +99,7 @@ public class ASX {
         QL_REQUIRE(isASXcode(asxCode, false),
                 asxCode + " is not a valid ASX code");
 
-        final Date referenceDate = (refDate != null ?
-                refDate :
-                Date.todaysDate());
+        final Date referenceDate = referenceOrEvaluation(refDate);
 
         final char ms = Character.toUpperCase(asxCode.charAt(0));
         int idxZeroBased = All_MONTH_CODES.indexOf(ms);
@@ -126,9 +126,8 @@ public class ASX {
         Australian Securities Exchange
     */
     public static Date nextDate(Date date, boolean mainCycle) {
-        Date refDate = (date == null ?
-                Date.todaysDate() :
-        date);
+        // A null date, including the default Date(), is the evaluation date.
+        Date refDate = referenceOrEvaluation(date);
         int y = refDate.year();
         jquant.time.Month m = refDate.month();
 
@@ -175,6 +174,12 @@ public class ASX {
     public static String nextCode(String asxCode, boolean mainCycle, Date refDate) {
         Date date = nextDate(asxCode, mainCycle, refDate);
         return code(date);
+    }
+
+    private static Date referenceOrEvaluation(Date date) {
+        if (date == null || date.serialNumber() == 0)
+            return Settings.instance.evaluationDate().Date();
+        return date;
     }
 
     public static void main(String[] args) {
