@@ -238,6 +238,12 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
                 : new Brent();
         try {
             double discount = solver.solve(error, accuracy_, guess, min, max);
+            // On a short monotonic log-cubic (FRA or futures), the neighbour
+            // pillar moves a quote more than that quote's own node. Undamped
+            // Gauss-Seidel then runs away from a 2e-5 residual into a 0.01 cycle.
+            // Half the undamped step keeps the same root and contracts.
+            if (interpolator_.global() && validData)
+                discount = guess + 0.5 * (discount - guess);
             data_[node] = discount;
             refreshInterpolation(node, validData);
         } catch (IllegalArgumentException e) {
