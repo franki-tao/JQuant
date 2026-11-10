@@ -40,6 +40,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
     private Interpolation interpolation_;
     private int bootstrapIterations_;
     private boolean loopRequired;
+    private boolean stale_ = false;
+    private boolean bootstrapping_ = false;
 
     public PiecewiseYieldCurve(Date referenceDate,
                                List<RateHelper> instruments,
@@ -59,7 +61,17 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         instruments_ = new ArrayList<>(instruments);
         interpolator_ = interpolator;
         accuracy_ = accuracy;
+        for (RateHelper helper : instruments_)
+            registerWith(helper.quote().getValue());
         bootstrap();
+    }
+
+    @Override
+    public void update() {
+        // Quote changed. Rebuild on the next discount, and tell instruments
+        // now so a cached NPV is not reused.
+        stale_ = true;
+        super.update();
     }
 
     public List<Date> dates() {
@@ -78,10 +90,24 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
 
     @Override
     protected double discountImpl(double t) {
+        if (stale_ && !bootstrapping_)
+            bootstrap();
         return interpolation_.value(t, true);
     }
 
     private void bootstrap() {
+        // Helpers call discount while the pillars are still moving. A second
+        // entry would bootstrap forever on the half-built nodes.
+        bootstrapping_ = true;
+        try {
+            bootstrapPillars();
+            stale_ = false;
+        } finally {
+            bootstrapping_ = false;
+        }
+    }
+
+    private void bootstrapPillars() {
         instruments_.sort((a, b) -> {
             if (TimeUtils.less(a.pillarDate(), b.pillarDate()))
                 return -1;
