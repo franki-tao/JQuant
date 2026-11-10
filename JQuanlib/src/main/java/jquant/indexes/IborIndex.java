@@ -26,7 +26,8 @@ public class IborIndex extends InterestRateIndex {
         convention_ = convention;
         termStructure_ = h;
         endOfMonth_ = endOfMonth;
-        registerWith(termStructure_.currentLink());
+        if (h != null && !h.empty())
+            registerWith(h.currentLink());
     }
 
     @Override
