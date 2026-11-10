@@ -86,7 +86,7 @@ public class ForwardRateAgreement extends Instrument {
         DayCounter dayCounter = index_.dayCounter();
         double tau = dayCounter.yearFraction(valueDate_, maturityDate_, new Date(), new Date());
         if (useIndexedCoupon_)
-            forwardRate_ = index_.forecastFixing(index_.fixingDate(valueDate_));
+            forwardRate_ = index_.fixing(index_.fixingDate(valueDate_), false);
         else
             forwardRate_ = (forecast.discount(valueDate_, false) / forecast.discount(maturityDate_, false) - 1.0)
                     / tau;

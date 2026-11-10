@@ -59,6 +59,7 @@ public class VanillaSwap extends Instrument {
         iborIndex_ = iborIndex;
         spread_ = spread;
         floatingDayCount_ = floatingDayCount;
+        registerWith(iborIndex_);
     }
 
     public Type type() {
@@ -147,9 +148,8 @@ public class VanillaSwap extends Instrument {
             Date start = floatSchedule_.date(i);
             Date end = floatSchedule_.date(i + 1);
             Date pay = floatSchedule_.calendar().adjust(end, paymentConvention);
-            Date indexEnd = iborIndex_.maturityDate(start);
-            double spanning = iborIndex_.dayCounter().yearFraction(start, indexEnd, new Date(), new Date());
-            double forward = iborIndex_.forecastFixing(start, indexEnd, spanning);
+            // Past fixing dates read the stored history. Future dates forecast.
+            double forward = iborIndex_.fixing(iborIndex_.fixingDate(start), false);
             double accrual = floatingDayCount_.yearFraction(start, end, new Date(), new Date());
             double amount = nominal_ * (forward + spread_) * accrual;
             arguments.floatingLeg.add(new SimpleCashFlow(amount, pay));
