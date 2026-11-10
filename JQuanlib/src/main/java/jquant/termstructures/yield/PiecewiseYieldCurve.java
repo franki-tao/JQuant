@@ -2,8 +2,12 @@ package jquant.termstructures.yield;
 
 import jquant.math.Function;
 import jquant.math.Interpolation;
+import jquant.math.interpolations.impl.Interpolator;
+import jquant.math.interpolations.impl.Linear;
 import jquant.math.interpolations.impl.LogLinear;
+import jquant.math.Solver1D;
 import jquant.math.solvers1d.Brent;
+import jquant.math.solvers1d.FiniteDifferenceNewtonSafe;
 import jquant.termstructures.YieldTermStructure;
 import jquant.time.Date;
 import jquant.time.DayCounter;
@@ -11,16 +15,17 @@ import jquant.time.TimeUtils;
 import jquant.time.calendars.NullCalendar;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 /**
- * Log-linear discount curve bootstrapped one pillar at a time.
- * This is {@code PiecewiseYieldCurve<Discount, LogLinear, IterativeBootstrap>}
- * for helpers whose pillar date is the latest relevant date. The interpolated
- * values are discount factors. The reference-date discount is 1.
+ * Discount curve bootstrapped on log-interpolated discount factors.
+ * Log-linear interpolation is local. Log-cubic is global, so every pillar is
+ * solved again until the whole discount vector stops moving. The reference-date
+ * discount is 1.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/piecewiseyieldcurve.hpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/iterativebootstrap.hpp
@@ -31,7 +36,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
     private static final double MAX_RATE = 1.0;
 
     private final List<RateHelper> instruments_;
-    private final LogLinear interpolator_;
+    private final Interpolator interpolator_;
     private final double accuracy_;
     private final List<Date> dates_ = new ArrayList<>();
     private double[] times_;
@@ -52,7 +57,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
     public PiecewiseYieldCurve(Date referenceDate,
                                List<RateHelper> instruments,
                                DayCounter dayCounter,
-                               LogLinear interpolator,
+                               Interpolator interpolator,
                                double accuracy) {
         super(referenceDate, new NullCalendar(), dayCounter, new ArrayList<>(), new ArrayList<>());
         QL_REQUIRE(instruments != null && !instruments.isEmpty(), "no bootstrap helpers given");
@@ -124,10 +129,12 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         while (!TimeUtils.greater(instruments_.get(firstAlive).pillarDate(), firstDate))
             ++firstAlive;
         int alive = instruments_.size() - firstAlive;
-        QL_REQUIRE(alive + 1 >= new LogLinear().getRequiredPoints(),
+        QL_REQUIRE(alive + 1 >= interpolator_.getRequiredPoints(),
                 "not enough alive instruments: " + alive + " provided");
 
-        loopRequired = false;
+        // A global scheme such as a cubic spline changes every node when one
+        // pillar moves, so the pass repeats until the discount vector settles.
+        loopRequired = interpolator_.global();
         dates_.clear();
         dates_.add(firstDate);
         times_ = new double[alive + 1];
@@ -145,9 +152,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
             Date latestRelevantDate = helper.latestRelevantDate();
             QL_REQUIRE(TimeUtils.greater(latestRelevantDate, maxDate),
                     "instrument has latestRelevantDate before or equal to the previous one");
-            // Log-linear is local, so a pillar that is also the latest
-            // relevant date does not need another pass. A swap whose last
-            // floating fixing ends after its maturity pillar does.
+            // A local interpolator still needs another pass when a helper's
+            // latest relevant date is after its pillar.
             if (TimeUtils.less(dates_.get(i), latestRelevantDate))
                 loopRequired = true;
             maxDate = TimeUtils.greater(dates_.get(i), latestRelevantDate)
@@ -163,11 +169,18 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         int iteration = 0;
         while (true) {
             iteration++;
+            boolean firstPass = !validData;
             double[] previous = null;
             if (loopRequired && validData)
                 previous = data_.clone();
             for (int i = 1, j = firstAlive; j < instruments_.size(); ++i, ++j)
                 solvePillar(i, j, validData);
+            // The first global pass may have used a prefix or a linear stand-in.
+            // Later passes update the cubic built on the live discount vector.
+            if (interpolator_.global() && firstPass) {
+                interpolation_ = interpolator_.interpolate(times_, data_);
+                interpolation_.update();
+            }
             if (!loopRequired) {
                 bootstrapIterations_ = iteration;
                 break;
@@ -215,14 +228,18 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         int node = i;
         Function error = x -> {
             data_[node] = x;
-            interpolation_.update();
+            refreshInterpolation(node, validData);
             return helper.quoteError();
         };
-        Brent solver = new Brent();
+        // Later global passes stay near the previous pillar, as QuantLib's
+        // FiniteDifferenceNewtonSafe does. Brent is used to bracket the first pass.
+        Solver1D solver = interpolator_.global() && validData
+                ? new FiniteDifferenceNewtonSafe()
+                : new Brent();
         try {
             double discount = solver.solve(error, accuracy_, guess, min, max);
             data_[node] = discount;
-            interpolation_.update();
+            refreshInterpolation(node, validData);
         } catch (IllegalArgumentException e) {
             QL_FAIL("failed at alive instrument " + i
                     + ", pillar " + helper.pillarDate()
@@ -230,5 +247,25 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
                     + ", reference date " + dates_.get(0)
                     + ": " + e.getMessage());
         }
+    }
+
+    /**
+     * A global interpolator is built only on pillars already solved. If that
+     * spline cannot be formed yet, the first pass uses a linear stand-in,
+     * as {@code IterativeBootstrap} does.
+     */
+    private void refreshInterpolation(int node, boolean validData) {
+        if (!interpolator_.global() || validData) {
+            interpolation_.update();
+            return;
+        }
+        double[] x = Arrays.copyOf(times_, node + 1);
+        double[] y = Arrays.copyOf(data_, node + 1);
+        try {
+            interpolation_ = interpolator_.interpolate(x, y);
+        } catch (RuntimeException ex) {
+            interpolation_ = new Linear().interpolate(x, y);
+        }
+        interpolation_.update();
     }
 }
