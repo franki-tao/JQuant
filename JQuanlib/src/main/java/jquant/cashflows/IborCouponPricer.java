@@ -84,9 +84,7 @@ public abstract class IborCouponPricer extends FloatingRateCouponPricer {
         if (coupon.cachedDataIsInitialized_)
             return;
 
-        coupon.fixingValueDate_ = coupon.iborIndex().fixingCalendar().advance(
-                coupon.fixingDate_, coupon.iborIndex().fixingDays(), TimeUnit.DAYS,
-                BusinessDayConvention.FOLLOWING, false);
+        coupon.fixingValueDate_ = coupon.iborIndex().valueDate(coupon.fixingDate_);
         coupon.fixingMaturityDate_ = coupon.iborIndex().maturityDate(coupon.fixingValueDate_);
 
         if (useIndexedCoupon_) {

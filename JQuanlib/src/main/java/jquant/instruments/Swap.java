@@ -64,6 +64,15 @@ public class Swap extends Instrument {
         }
     }
 
+    /** Clears cached leg and swap results so the next NPV reads current fixings and curves. */
+    public void deepUpdate() {
+        for (List<CashFlow> leg : legs_) {
+            for (CashFlow cashflow : leg)
+                cashflow.update();
+        }
+        calculated_ = false;
+    }
+
     public int numberOfLegs() {
         return legs_.size();
     }
