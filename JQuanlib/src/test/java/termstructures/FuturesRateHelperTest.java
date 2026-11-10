@@ -104,15 +104,19 @@ public class FuturesRateHelperTest {
             assertEquals(0.001, adjusted.convexityAdjustment(), 0.0);
             PiecewiseYieldCurve adjustedCurve = new PiecewiseYieldCurve(
                     settlement, List.of(adjusted), new Actual360(false));
-            Date end = euribor3m.maturityDate(immDates.get(0));
-            double tau = euribor3m.dayCounter().yearFraction(immDates.get(0), end, new Date(), new Date());
-            double forward = (adjustedCurve.discount(immDates.get(0), false)
+            Date start = immDates.get(0);
+            Date end = euribor3m.fixingCalendar().advance(start, euribor3m.tenor(),
+                    euribor3m.businessDayConvention(), false);
+            double tau = euribor3m.dayCounter().yearFraction(start, end, start, end);
+            double forward = (adjustedCurve.discount(start, false)
                     / adjustedCurve.discount(end, false) - 1.0) / tau;
-            assertEquals(FUTURES_RATES[0] / 100.0 + 0.001, forward, TOLERANCE);
+            // forward = 0.04581 - 0.001
+            assertEquals(0.04481, forward, TOLERANCE);
             adjustment.setValue(0.002);
-            double bumped = (adjustedCurve.discount(immDates.get(0), false)
+            double bumped = (adjustedCurve.discount(start, false)
                     / adjustedCurve.discount(end, false) - 1.0) / tau;
-            assertEquals(FUTURES_RATES[0] / 100.0 + 0.002, bumped, TOLERANCE);
+            // forward = 0.04581 - 0.002
+            assertEquals(0.04381, bumped, TOLERANCE);
         } finally {
             Settings.instance.evaluationDate().equal(saved);
         }

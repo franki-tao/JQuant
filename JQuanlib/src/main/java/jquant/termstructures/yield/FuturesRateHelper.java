@@ -15,8 +15,10 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 
 /**
  * Bootstraps a discount curve from an Ibor futures price. The quote is
- * {@code 100 * (1 - futuresRate)}. The futures rate is the simply compounded
- * forward over the index tenor minus the convexity adjustment.
+ * {@code 100 * (1 - futureRate)} and {@code futureRate = forward + convexityAdjustment},
+ * so the curve forward is the futures rate minus the adjustment. Maturity is
+ * the index calendar advanced by the index tenor with {@code endOfMonth} false,
+ * and the year fraction uses the index day counter over that same period.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/ratehelpers.cpp
  */
@@ -34,11 +36,13 @@ public class FuturesRateHelper extends RateHelper {
         QL_REQUIRE(IMM.isIMMdate(iborStartDate, false),
                 iborStartDate + " is not a valid IMM date");
         earliestDate_ = iborStartDate;
-        maturityDate_ = iborIndex.maturityDate(earliestDate_);
+        // QuantLib advances the tenor with endOfMonth false, not IborIndex::maturityDate.
+        maturityDate_ = iborIndex.fixingCalendar().advance(iborStartDate, iborIndex.tenor(),
+                iborIndex.businessDayConvention(), false);
         QL_REQUIRE(TimeUtils.greater(maturityDate_, earliestDate_),
                 "futures maturity is not after the start date");
         yearFraction_ = iborIndex.dayCounter().yearFraction(earliestDate_, maturityDate_,
-                new Date(), new Date());
+                earliestDate_, maturityDate_);
         QL_REQUIRE(yearFraction_ > 0.0, "non positive futures year fraction");
         pillarDate_ = maturityDate_;
         latestRelevantDate_ = maturityDate_;
@@ -57,10 +61,11 @@ public class FuturesRateHelper extends RateHelper {
     @Override
     public double impliedQuote() {
         QL_REQUIRE(termStructure_ != null, "term structure not set");
-        double forward = (termStructure_.discount(earliestDate_, false)
+        double forwardRate = (termStructure_.discount(earliestDate_, false)
                 / termStructure_.discount(maturityDate_, false) - 1.0) / yearFraction_;
-        double futuresRate = forward - convexityAdjustment();
-        return 100.0 * (1.0 - futuresRate);
+        // futureRate = forwardRate + convexityAdjustment, so forward = futuresRate - adjustment.
+        double futureRate = forwardRate + convexityAdjustment();
+        return 100.0 * (1.0 - futureRate);
     }
 
     public double convexityAdjustment() {
