@@ -2,14 +2,15 @@ package jquant.indexes;
 
 import jquant.TimeSeries;
 import jquant.indexes.util.FuncDateValid;
-import jquant.math.MathUtils;
 import jquant.patterns.Observable;
+import jquant.patterns.ObservableSettings;
+import jquant.patterns.Observer;
 import jquant.patterns.Singleton;
 import jquant.time.Date;
 
-import java.util.Arrays;
-import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.TreeMap;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -30,10 +31,9 @@ public class IndexManager implements Singleton<IndexManager> {
     }
     //! clears all stored fixings
     public void clearHistories() {
-        for(String s : data_.keySet()) {
-            notifiers_.get(s).notifyObservers();
-        }
         data_.clear();
+        for (Observable notifier : notifiers_.values())
+            notifier.notifyObservers();
     }
     // deprecated in order to be moved into the private section
     /*! \deprecated Use Index::hasHistoricalFixing instead.
@@ -46,78 +46,120 @@ public class IndexManager implements Singleton<IndexManager> {
                     Deprecated in version 1.37.
     */
     public final TimeSeries<Double> getHistory(final String name) {
-        return data_.get(name);
+        TimeSeries<Double> history = data_.get(name);
+        return history == null ? new TimeSeries<>() : history;
     }
     /*! \deprecated Use Index::clearFixings instead.
                     Deprecated in version 1.37.
     */
     public void clearHistory(final String name) {
         data_.remove(name);
-        notifiers_.get(name).notifyObservers();
+        Observable notifier = notifiers_.get(name);
+        if (notifier != null)
+            notifier.notifyObservers();
     }
     /*! \deprecated Use Index::hasHistoricalFixing instead.
                     Deprecated in version 1.37.
     */
     public boolean hasHistoricalFixing(final String name, final Date fixingDate) {
-        return data_.get(name).getValue(fixingDate) != null;
+        TimeSeries<Double> history = data_.get(name);
+        return history != null && history.getValue(fixingDate) != null;
     }
     /*! \deprecated Use Index::addFixings instead.
                     Deprecated in version 1.37.
     */
     public void setHistory(final String name, final TimeSeries<Double> fixing) {
+        QL_REQUIRE(fixing != null, "null fixing history");
         data_.put(name, fixing);
-        notifiers_.get(name).notifyObservers();
+        notifier(name).notifyObservers();
     }
     /*! \deprecated Register with the relevant index instead.
                     Deprecated in version 1.37.
     */
     public Observable notifier(final String name) {
-        return notifiers_.get(name);
+        return notifiers_.computeIfAbsent(name, key -> new IndexNotifier());
     }
-    //! add fixings
+
     public void addFixing(final String name,
-                                 final Date fixingDate,
+                          final Date fixingDate,
                           double fixing,
                           boolean forceOverwrite) {
-        List<Date> dates = Arrays.asList(fixingDate, fixingDate.add(1));
-        List<Double> values = List.of(fixing);
-        addFixings(name, dates, values, forceOverwrite, null);
+        addFixings(name, List.of(fixingDate), List.of(fixing), forceOverwrite, null);
     }
+
     public void addFixings(final String name, List<Date> dates, List<Double> values,
                            boolean forceOverwrite, FuncDateValid isValidFixingDate) {
-        TimeSeries<Double> h = data_.get(name);
-        boolean noInvalidFixing = true, noDuplicatedFixing = true;
-        Date invalidDate = new Date(), duplicatedDate = new Date();
-        double nullValue = MathUtils.NULL_REAL;
-        double invalidValue = MathUtils.NULL_REAL;
-        double duplicatedValue = MathUtils.NULL_REAL;
+        QL_REQUIRE(dates != null && values != null && dates.size() == values.size(),
+                "dates and values must have the same size");
+        TimeSeries<Double> history = data_.computeIfAbsent(name, key -> new TimeSeries<>());
+        boolean updated = false;
+        boolean invalid = false;
+        boolean duplicated = false;
+        Date invalidDate = new Date();
+        Date duplicatedDate = new Date();
+        double invalidValue = Double.NaN;
+        double duplicatedValue = Double.NaN;
         for (int i = 0; i < dates.size(); ++i) {
-            boolean validFixing = isValidFixingDate == null || isValidFixingDate.value(dates.get(i));
-            double currentValue = h.getValue(dates.get(i));
-            boolean missingFixing = forceOverwrite || currentValue == nullValue;
-            if (validFixing) {
-                if (missingFixing)
-                    h.insert(dates.get(i), values.get(i));
-                else if (close(currentValue, values.get(i))) {
-                    continue;
-                } else {
-                    noDuplicatedFixing = false;
-                    duplicatedDate = dates.get(i);
-                    duplicatedValue = values.get(i);
-                }
+            Date date = dates.get(i);
+            double value = values.get(i);
+            boolean validFixing = isValidFixingDate == null || isValidFixingDate.value(date);
+            if (!validFixing) {
+                invalid = true;
+                invalidDate = date;
+                invalidValue = value;
+                continue;
+            }
+            Double current = history.getValue(date);
+            if (current == null) {
+                history.insert(date, value);
+                updated = true;
+            } else if (close(current, value)) {
+                continue;
+            } else if (forceOverwrite) {
+                history.insert(date, value);
+                updated = true;
             } else {
-                noInvalidFixing = false;
-                invalidDate = dates.get(i);
-                invalidValue = values.get(i);
+                duplicated = true;
+                duplicatedDate = date;
+                duplicatedValue = value;
             }
         }
-        notifier(name).notifyObservers();
-        QL_REQUIRE(noInvalidFixing, "At least one invalid fixing provided: "
-                + invalidDate.weekday() + " " + invalidDate + ", "
-                + invalidValue);
-        QL_REQUIRE(noDuplicatedFixing, "At least one duplicated fixing provided: "
+        if (updated)
+            notifier(name).notifyObservers();
+        QL_REQUIRE(!invalid, "At least one invalid fixing provided: "
+                + invalidDate.weekday() + " " + invalidDate + ", " + invalidValue);
+        QL_REQUIRE(!duplicated, "At least one duplicated fixing provided: "
                 + duplicatedDate + ", " + duplicatedValue
-                + " while " + h.getValue(duplicatedDate)
+                + " while " + history.getValue(duplicatedDate)
                 + " value is already present");
+    }
+
+    private static final class IndexNotifier implements Observable {
+        private final Set<Observer> observers = new HashSet<>();
+
+        @Override
+        public void registerObserver(Observer o) {
+            observers.add(o);
+        }
+
+        @Override
+        public void unregisterObserver(Observer o) {
+            observers.remove(o);
+        }
+
+        @Override
+        public void notifyObservers() {
+            if (!ObservableSettings.getInstance().isUpdatesEnabled()) {
+                ObservableSettings.getInstance().registerDeferred(observers);
+            } else {
+                for (Observer observer : Set.copyOf(observers)) {
+                    try {
+                        observer.update();
+                    } catch (Exception e) {
+                        System.err.println("Error notifying observer: " + e.getMessage());
+                    }
+                }
+            }
+        }
     }
 }

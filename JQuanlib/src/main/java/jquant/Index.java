@@ -8,7 +8,6 @@ import jquant.patterns.Observer;
 import jquant.time.Calendar;
 import jquant.time.Date;
 
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -48,7 +47,11 @@ public abstract class Index implements Observer, Observable {
     */
     public double pastFixing(final Date fixingDate) {
         QL_REQUIRE(isValidFixingDate(fixingDate), fixingDate + " is not a valid fixing date");
-        return timeSeries().getValue(fixingDate);
+        TimeSeries<Double> series = timeSeries();
+        if (series == null)
+            return Double.NaN;
+        Double stored = series.getValue(fixingDate);
+        return stored == null ? Double.NaN : stored;
     }
     //! returns the fixing TimeSeries
     public final TimeSeries<Double> timeSeries() {
@@ -70,9 +73,7 @@ public abstract class Index implements Observer, Observable {
     //default forceOverwrite = false
     public void addFixing(final Date fixingDate, double fixing, boolean forceOverwrite) {
         checkNativeFixingsAllowed();
-        List<Date> dates = Arrays.asList(fixingDate, fixingDate.add(1));
-        List<Double> values = List.of(fixing);
-        addFixings(dates, values, forceOverwrite);
+        addFixings(List.of(fixingDate), List.of(fixing), forceOverwrite);
     }
     //! stores historical fixings from a TimeSeries
     /*! the dates in the TimeSeries must be the actual calendar
