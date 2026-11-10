@@ -33,7 +33,13 @@ public abstract class IborCouponPricer extends FloatingRateCouponPricer {
                             Optional<Boolean> useIndexedCoupon) {
         capletVol_ = v;
         useIndexedCoupon_ = useIndexedCoupon.orElseGet(() -> !IborCoupon.Settings.instance().usingAtParCoupons());
-        registerWith(capletVol_.currentLink());
+        if (capletVol_ != null && !capletVol_.empty())
+            registerWith(capletVol_.currentLink());
+    }
+
+    //! indexed coupon, no optionlet volatility
+    protected IborCouponPricer(boolean useIndexedCoupon) {
+        useIndexedCoupon_ = useIndexedCoupon;
     }
 
     public boolean useIndexedCoupon() {

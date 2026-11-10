@@ -18,7 +18,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 public class IborCoupon extends FloatingRateCoupon {
     @Override
     public boolean hasOccurred(Date refDate, Optional<Boolean> includeRefDate) {
-        return false;
+        return jquant.CashFlow.hasOccurred(date(), refDate, includeRefDate);
     }
 
     @Override
