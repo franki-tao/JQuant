@@ -61,8 +61,10 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         instruments_ = new ArrayList<>(instruments);
         interpolator_ = interpolator;
         accuracy_ = accuracy;
-        for (RateHelper helper : instruments_)
-            registerWith(helper.quote().getValue());
+        for (RateHelper helper : instruments_) {
+            for (jquant.Quote quote : helper.notifications())
+                registerWith(quote);
+        }
         bootstrap();
     }
 
