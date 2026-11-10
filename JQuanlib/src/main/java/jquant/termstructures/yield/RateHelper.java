@@ -5,6 +5,8 @@ import jquant.Quote;
 import jquant.termstructures.YieldTermStructure;
 import jquant.time.Date;
 
+import java.util.List;
+
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 /**
@@ -27,6 +29,11 @@ public abstract class RateHelper {
 
     public Handle<Quote> quote() {
         return quote_;
+    }
+
+    //! quotes whose changes must rebuild a curve that uses this helper
+    public List<Quote> notifications() {
+        return List.of(quote_.getValue());
     }
 
     public Date earliestDate() {
