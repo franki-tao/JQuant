@@ -108,7 +108,7 @@ public class Currency {
 
     //! is this a usable instance?
     public boolean empty() {
-        return data_ != null;
+        return data_ == null;
     }
 
     //! currency used for triangulated exchange when required
@@ -128,7 +128,7 @@ public class Currency {
     }
 
     private void checkNonEmpty() {
-        QL_REQUIRE(data_==null, "no currency data provided");
+        QL_REQUIRE(data_ != null, "no currency data provided");
     }
 
 }
