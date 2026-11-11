@@ -71,7 +71,20 @@ public enum BootstrapTraits {
 
         @Override
         public double discountImpl(PiecewiseYieldCurve curve, double t) {
-            return curve.interpolation().value(t, true);
+            double[] times = curve.times();
+            Interpolation interpolation = curve.interpolation();
+            double tMax = times[times.length - 1];
+            if (t <= tMax)
+                return interpolation.value(t, true);
+            // Flat-forward extrapolation past the last pillar, matching
+            // InterpolatedDiscountCurve::discountImpl in
+            // ql/termstructures/yield/discountcurve.hpp:
+            //   Rate instFwdMax = -interpolation_.derivative(tMax)/dMax;
+            //   return dMax * exp(-instFwdMax*(t-tMax));
+            double[] data = curve.data();
+            double dMax = data[data.length - 1];
+            double instFwdMax = -interpolation.derivative(tMax, true) / dMax;
+            return dMax * Math.exp(-instFwdMax * (t - tMax));
         }
     },
 
