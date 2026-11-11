@@ -23,10 +23,11 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 
 /**
  * Piecewise yield curve bootstrapped from rate helpers. Nodes are discount
- * factors by default ({@link BootstrapTraits.Discount}, the original behaviour)
- * or forward rates ({@link BootstrapTraits.ForwardRate}). Log-linear
- * interpolation is local. Log-cubic is global, so every pillar is solved again
- * until the whole node vector stops moving.
+ * factors by default ({@link BootstrapTraits.Discount}, the original behaviour),
+ * zero rates ({@link BootstrapTraits.ZeroYield}) or forward rates
+ * ({@link BootstrapTraits.ForwardRate}). Log-linear interpolation is local.
+ * Log-cubic is global, so every pillar is solved again until the whole node
+ * vector stops moving.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/piecewiseyieldcurve.hpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/iterativebootstrap.hpp
