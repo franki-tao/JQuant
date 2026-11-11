@@ -22,20 +22,20 @@ import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 /**
- * Discount curve bootstrapped on log-interpolated discount factors.
- * Log-linear interpolation is local. Log-cubic is global, so every pillar is
- * solved again until the whole discount vector stops moving. The reference-date
- * discount is 1.
+ * Piecewise yield curve bootstrapped from rate helpers. Nodes are discount
+ * factors by default ({@link BootstrapTraits.Discount}, the original behaviour)
+ * or forward rates ({@link BootstrapTraits.ForwardRate}). Log-linear
+ * interpolation is local. Log-cubic is global, so every pillar is solved again
+ * until the whole node vector stops moving.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/piecewiseyieldcurve.hpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/iterativebootstrap.hpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/bootstraptraits.hpp
+ * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/interpolatedforwardcurve.hpp
  */
 public class PiecewiseYieldCurve extends YieldTermStructure {
-    private static final double AVERAGE_RATE = 0.05;
-    private static final double MAX_RATE = 1.0;
-
     private final List<RateHelper> instruments_;
+    private final BootstrapTraits traits_;
     private final Interpolator interpolator_;
     private final double accuracy_;
     private final List<Date> dates_ = new ArrayList<>();
@@ -59,11 +59,38 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
                                DayCounter dayCounter,
                                Interpolator interpolator,
                                double accuracy) {
+        this(referenceDate, instruments, dayCounter, BootstrapTraits.Discount,
+                interpolator, accuracy);
+    }
+
+    /**
+     * Bootstraps a curve whose nodes follow {@code traits} (discount factors
+     * or forward rates), interpolated by {@code interpolator}. This mirrors
+     * {@code PiecewiseYieldCurve<Traits, Interpolator>} in QuantLib.
+     *
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/piecewiseyieldcurve.hpp
+     */
+    public PiecewiseYieldCurve(Date referenceDate,
+                               List<RateHelper> instruments,
+                               DayCounter dayCounter,
+                               BootstrapTraits traits,
+                               Interpolator interpolator) {
+        this(referenceDate, instruments, dayCounter, traits, interpolator, 1.0e-12);
+    }
+
+    public PiecewiseYieldCurve(Date referenceDate,
+                               List<RateHelper> instruments,
+                               DayCounter dayCounter,
+                               BootstrapTraits traits,
+                               Interpolator interpolator,
+                               double accuracy) {
         super(referenceDate, new NullCalendar(), dayCounter, new ArrayList<>(), new ArrayList<>());
         QL_REQUIRE(instruments != null && !instruments.isEmpty(), "no bootstrap helpers given");
+        QL_REQUIRE(traits != null, "null bootstrap traits");
         QL_REQUIRE(interpolator != null, "null interpolator");
         QL_REQUIRE(accuracy > 0.0, "accuracy must be positive");
         instruments_ = new ArrayList<>(instruments);
+        traits_ = traits;
         interpolator_ = interpolator;
         accuracy_ = accuracy;
         for (RateHelper helper : instruments_) {
@@ -85,6 +112,18 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         return List.copyOf(dates_);
     }
 
+    double[] data() {
+        return data_;
+    }
+
+    double[] times() {
+        return times_;
+    }
+
+    Interpolation interpolation() {
+        return interpolation_;
+    }
+
     /** How many pillar passes the iterative bootstrap used. */
     public int bootstrapIterations() {
         return bootstrapIterations_;
@@ -99,7 +138,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
     protected double discountImpl(double t) {
         if (stale_ && !bootstrapping_)
             bootstrap();
-        return interpolation_.value(t, true);
+        return traits_.discountImpl(this, t);
     }
 
     private void bootstrap() {
@@ -140,13 +179,13 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         times_ = new double[alive + 1];
         data_ = new double[alive + 1];
         times_[0] = timeFromReference(firstDate);
-        data_[0] = 1.0;
+        data_[0] = traits_.initialValue(this);
         Date maxDate = firstDate;
         for (int i = 1, j = firstAlive; j < instruments_.size(); ++i, ++j) {
             RateHelper helper = instruments_.get(j);
             dates_.add(helper.pillarDate());
             times_[i] = timeFromReference(helper.pillarDate());
-            data_[i] = 1.0;
+            data_[i] = traits_.initialValue(this);
             QL_REQUIRE(!TimeUtils.equals(dates_.get(i - 1), dates_.get(i)),
                     "more than one instrument with pillar " + dates_.get(i));
             Date latestRelevantDate = helper.latestRelevantDate();
@@ -194,31 +233,16 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
                     break;
                 }
             }
-            QL_REQUIRE(iteration < 100,
+            QL_REQUIRE(iteration < traits_.maxIterations(),
                     "convergence not reached after " + iteration + " iterations");
             validData = true;
         }
     }
 
     private void solvePillar(int i, int j, boolean validData) {
-        double dt = times_[i] - times_[i - 1];
-        double min;
-        if (validData) {
-            double smallest = data_[0];
-            for (double value : data_)
-                smallest = Math.min(smallest, value);
-            min = smallest / 2.0;
-        } else {
-            min = data_[i - 1] * Math.exp(-MAX_RATE * dt);
-        }
-        double max = data_[i - 1] * Math.exp(MAX_RATE * dt);
-        double guess;
-        if (validData)
-            guess = data_[i];
-        else if (i == 1)
-            guess = 1.0 / (1.0 + AVERAGE_RATE * times_[1]);
-        else
-            guess = Math.exp(-(-Math.log(data_[i - 1]) / times_[i - 1]) * times_[i]);
+        double min = traits_.minValueAfter(i, this, validData);
+        double max = traits_.maxValueAfter(i, this, validData);
+        double guess = traits_.guess(i, this, validData);
         if (guess >= max)
             guess = max - (max - min) / 5.0;
         else if (guess <= min)
@@ -227,7 +251,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         RateHelper helper = instruments_.get(j);
         int node = i;
         Function error = x -> {
-            data_[node] = x;
+            traits_.updateGuess(data_, x, node);
             refreshInterpolation(node, validData);
             return helper.quoteError();
         };
@@ -237,8 +261,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
                 ? new FiniteDifferenceNewtonSafe()
                 : new Brent();
         try {
-            double discount = solver.solve(error, accuracy_, guess, min, max);
-            data_[node] = discount;
+            double value = solver.solve(error, accuracy_, guess, min, max);
+            traits_.updateGuess(data_, value, node);
             refreshInterpolation(node, validData);
         } catch (IllegalArgumentException e) {
             QL_FAIL("failed at alive instrument " + i
