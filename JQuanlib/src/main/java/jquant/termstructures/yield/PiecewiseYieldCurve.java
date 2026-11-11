@@ -23,8 +23,9 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 
 /**
  * Piecewise yield curve bootstrapped from rate helpers. Nodes are discount
- * factors by default ({@link BootstrapTraits.Discount}, the original behaviour)
- * or forward rates ({@link BootstrapTraits.ForwardRate}). Log-linear
+ * factors by default ({@link BootstrapTraits.Discount}, the original behaviour),
+ * zero rates ({@link BootstrapTraits.ZeroYield}), or forward rates
+ * ({@link BootstrapTraits.ForwardRate}). Log-linear
  * interpolation is local. Log-cubic is global, so every pillar is solved again
  * until the whole node vector stops moving.
  *
@@ -32,6 +33,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/iterativebootstrap.hpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/bootstraptraits.hpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/interpolatedforwardcurve.hpp
+ * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/zerocurve.hpp
  */
 public class PiecewiseYieldCurve extends YieldTermStructure {
     private final List<RateHelper> instruments_;
@@ -64,8 +66,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
     }
 
     /**
-     * Bootstraps a curve whose nodes follow {@code traits} (discount factors
-     * or forward rates), interpolated by {@code interpolator}. This mirrors
+     * Bootstraps a curve whose nodes follow {@code traits} (discount factors,
+     * zero rates, or forward rates), interpolated by {@code interpolator}. This mirrors
      * {@code PiecewiseYieldCurve<Traits, Interpolator>} in QuantLib.
      *
      * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/piecewiseyieldcurve.hpp
