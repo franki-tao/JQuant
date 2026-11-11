@@ -8,10 +8,18 @@ import jquant.time.Frequency;
 /**
  * Bootstrap traits of {@link PiecewiseYieldCurve}, mirroring QuantLib's
  * {@code bootstraptraits.hpp}. Each trait decides what a curve node holds
- * (a discount factor or a forward rate), how the root-finding guess and
- * bracket are built, and how a time {@code t} maps back to a discount factor.
+ * (a discount factor, a zero rate or a forward rate), how the root-finding
+ * guess and bracket are built, and how a time {@code t} maps back to a
+ * discount factor.
+ *
+ * <p>{@link #ZeroYield} mirrors QuantLib's {@code ZeroYield} traits with an
+ * {@code InterpolatedZeroCurve}: nodes are continuously compounded zero rates
+ * interpolated directly, and discounts follow
+ * {@code ZeroYieldStructure::discountImpl}.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/bootstraptraits.hpp
+ * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/zerocurve.hpp
+ * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/zeroyieldstructure.hpp
  */
 public enum BootstrapTraits {
     /**
@@ -145,6 +153,90 @@ public enum BootstrapTraits {
             double zero = integral / t;
             return Math.exp(-zero * t);
         }
+    },
+
+    /**
+     * Nodes are (continuously compounded) zero rates; the curve is an
+     * {@code InterpolatedZeroCurve}. The reference-date node is the average
+     * rate and is also updated when the first pillar is solved. Discounts
+     * follow {@code ZeroYieldStructure::discountImpl}, {@code exp(-r*t)},
+     * with flat instantaneous-forward extrapolation past the last node.
+     *
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/bootstraptraits.hpp
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/zerocurve.hpp
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/zeroyieldstructure.hpp
+     */
+    ZeroYield {
+        @Override
+        public double initialValue(PiecewiseYieldCurve curve) {
+            // dummy value at reference date
+            return AVERAGE_RATE;
+        }
+
+        @Override
+        public double guess(int i, PiecewiseYieldCurve curve, boolean validData) {
+            if (validData) // previous iteration value
+                return curve.data()[i];
+            if (i == 1) // first pillar
+                return AVERAGE_RATE;
+            // extrapolate the zero rate at the pillar date
+            Date d = curve.dates().get(i);
+            return curve.zeroRate(d, curve.dayCounter(),
+                    Compounding.Continuous, Frequency.ANNUAL, true).rate();
+        }
+
+        @Override
+        public double minValueAfter(int i, PiecewiseYieldCurve curve, boolean validData) {
+            if (validData) {
+                double r = min(curve.data());
+                return r < 0.0 ? r * 2.0 : r / 2.0;
+            }
+            // no constraints; a value very unlikely to be exceeded
+            return -MAX_RATE;
+        }
+
+        @Override
+        public double maxValueAfter(int i, PiecewiseYieldCurve curve, boolean validData) {
+            if (validData) {
+                double r = max(curve.data());
+                return r < 0.0 ? r / 2.0 : r * 2.0;
+            }
+            // no constraints; a value very unlikely to be exceeded
+            return MAX_RATE;
+        }
+
+        @Override
+        public void updateGuess(double[] data, double value, int i) {
+            data[i] = value;
+            if (i == 1)
+                data[0] = value; // first point is updated as well
+        }
+
+        @Override
+        public int maxIterations() {
+            return 100;
+        }
+
+        @Override
+        public double discountImpl(PiecewiseYieldCurve curve, double t) {
+            // zeroYieldImpl of InterpolatedZeroCurve + ZeroYieldStructure.
+            if (t == 0.0)
+                return 1.0;
+            double[] times = curve.times();
+            double[] data = curve.data();
+            Interpolation interpolation = curve.interpolation();
+            double tMax = times[times.length - 1];
+            double r;
+            if (t <= tMax) {
+                r = interpolation.value(t, true);
+            } else {
+                // flat instantaneous-forward extrapolation
+                double zMax = data[data.length - 1];
+                double instFwdMax = zMax + tMax * interpolation.derivative(tMax, true);
+                r = (zMax * tMax + instFwdMax * (t - tMax)) / t;
+            }
+            return Math.exp(-r * t);
+        }
     };
 
     private static final double AVERAGE_RATE = 0.05;
@@ -176,7 +268,7 @@ public enum BootstrapTraits {
 
     /**
      * Root-finding update: stores the solved node value (and, for forward
-     * rates, the reference-date node on the first pillar).
+     * and zero rates, the reference-date node on the first pillar).
      * https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/bootstraptraits.hpp
      */
     public abstract void updateGuess(double[] data, double value, int i);
@@ -189,7 +281,10 @@ public enum BootstrapTraits {
 
     /**
      * Discount factor at time {@code t}, as computed by the matching curve
-     * ({@code InterpolatedDiscountCurve} or {@code InterpolatedForwardCurve}).
+     * ({@code InterpolatedDiscountCurve}, {@code InterpolatedZeroCurve} or
+     * {@code InterpolatedForwardCurve}).
+     * https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/zerocurve.hpp
+     * https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/zeroyieldstructure.hpp
      * https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/interpolatedforwardcurve.hpp
      * https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/discountcurve.hpp
      */
