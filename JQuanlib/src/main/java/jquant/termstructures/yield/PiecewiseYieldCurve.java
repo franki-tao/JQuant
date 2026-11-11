@@ -35,15 +35,18 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/interpolatedforwardcurve.hpp
  */
 public class PiecewiseYieldCurve extends YieldTermStructure {
-    private final List<RateHelper> instruments_;
-    private final BootstrapTraits traits_;
-    private final Interpolator interpolator_;
-    private final double accuracy_;
-    private final List<Date> dates_ = new ArrayList<>();
-    private double[] times_;
-    private double[] data_;
-    private Date maxDate_;
-    private Interpolation interpolation_;
+    // Package-visible to LocalBootstrap, as the friend declaration in
+    // localbootstrap.hpp allows.
+    final List<RateHelper> instruments_;
+    final BootstrapTraits traits_;
+    final Interpolator interpolator_;
+    final double accuracy_;
+    final List<Date> dates_ = new ArrayList<>();
+    double[] times_;
+    double[] data_;
+    Date maxDate_;
+    Interpolation interpolation_;
+    private final LocalBootstrap localBootstrap_;
     private int bootstrapIterations_;
     private boolean loopRequired;
     private boolean stale_ = false;
@@ -85,6 +88,37 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
                                BootstrapTraits traits,
                                Interpolator interpolator,
                                double accuracy) {
+        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy, null);
+    }
+
+    /**
+     * Builds the curve with QuantLib's {@code LocalBootstrap} algorithm instead
+     * of the iterative one. Only the localised-interpolation solvers (currently
+     * {@link jquant.math.interpolations.impl.ConvexMonotone}) are supported.
+     *
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/localbootstrap.hpp
+     */
+    public PiecewiseYieldCurve(Date referenceDate,
+                               List<RateHelper> instruments,
+                               DayCounter dayCounter,
+                               BootstrapTraits traits,
+                               Interpolator interpolator,
+                               LocalBootstrap bootstrap) {
+        this(referenceDate, instruments, dayCounter, traits, interpolator, 1.0e-12, bootstrap);
+    }
+
+    /**
+     * @param bootstrap {@code null} keeps the existing iterative bootstrap;
+     *                  otherwise {@code calculate()} replaces the iterative
+     *                  pillar loop.
+     */
+    public PiecewiseYieldCurve(Date referenceDate,
+                               List<RateHelper> instruments,
+                               DayCounter dayCounter,
+                               BootstrapTraits traits,
+                               Interpolator interpolator,
+                               double accuracy,
+                               LocalBootstrap bootstrap) {
         super(referenceDate, new NullCalendar(), dayCounter, new ArrayList<>(), new ArrayList<>());
         QL_REQUIRE(instruments != null && !instruments.isEmpty(), "no bootstrap helpers given");
         QL_REQUIRE(traits != null, "null bootstrap traits");
@@ -94,10 +128,13 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         traits_ = traits;
         interpolator_ = interpolator;
         accuracy_ = accuracy;
+        localBootstrap_ = bootstrap;
         for (RateHelper helper : instruments_) {
             for (jquant.Quote quote : helper.notifications())
                 registerWith(quote);
         }
+        if (localBootstrap_ != null)
+            localBootstrap_.setup(this);
         bootstrap();
     }
 
@@ -147,7 +184,10 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         // entry would bootstrap forever on the half-built nodes.
         bootstrapping_ = true;
         try {
-            bootstrapPillars();
+            if (localBootstrap_ != null)
+                localBootstrap_.calculate(this);
+            else
+                bootstrapPillars();
             stale_ = false;
         } finally {
             bootstrapping_ = false;
