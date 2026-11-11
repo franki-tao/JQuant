@@ -46,4 +46,9 @@ public class Cubic extends Interpolator{
     public int getRequiredPoints() {
         return requiredPoints;
     }
+
+    @Override
+    public boolean global() {
+        return true;
+    }
 }
