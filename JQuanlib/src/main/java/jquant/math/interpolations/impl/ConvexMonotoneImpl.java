@@ -22,7 +22,7 @@ public class ConvexMonotoneImpl extends templateImpl {
 
     ;
 
-    private TreeMap<Double, SectionHelper> sectionHelpers_;
+    private TreeMap<Double, SectionHelper> sectionHelpers_ = new TreeMap<>();
     private TreeMap<Double, SectionHelper> preSectionHelpers_;
     private SectionHelper extrapolationHelper_;
     private boolean forcePositive_, constantLastPeriod_;
@@ -36,13 +36,30 @@ public class ConvexMonotoneImpl extends templateImpl {
                               boolean forcePositive,
                               boolean constantLastPeriod,
                               TreeMap<Double, SectionHelper> preExistingHelpers) {
+        this(x, y, x.length, quadraticity, monotonicity, forcePositive,
+                constantLastPeriod, preExistingHelpers);
+    }
+
+    /**
+     * Builds the interpolation on the first {@code length} entries of the
+     * arrays. QuantLib's iterators carry the same range boundary; keeping the
+     * arrays by reference lets {@link #update()} see later changes to the
+     * curve nodes, as in {@code localbootstrap.hpp}.
+     */
+    public ConvexMonotoneImpl(double[] x, double[] y, int length,
+                              double quadraticity,
+                              double monotonicity,
+                              boolean forcePositive,
+                              boolean constantLastPeriod,
+                              TreeMap<Double, SectionHelper> preExistingHelpers) {
         super(x, y, ConvexMonotone.requiredPoints);
-        preSectionHelpers_ = preExistingHelpers;
+        // QuantLib's map members are values and are therefore copied.
+        preSectionHelpers_ = new TreeMap<>(preExistingHelpers);
         forcePositive_ = forcePositive;
         constantLastPeriod_ = constantLastPeriod;
         quadraticity_ = quadraticity;
         monotonicity_ = monotonicity;
-        length_ = x.length;
+        length_ = length;
         QL_REQUIRE(monotonicity_ >= 0 && monotonicity_ <= 1,
                 "Monotonicity must lie between 0 and 1");
         QL_REQUIRE(quadraticity_ >= 0 && quadraticity_ <= 1,
@@ -65,8 +82,9 @@ public class ConvexMonotoneImpl extends templateImpl {
             return;
         }
 
-        List<Double> f = CommonUtil.ArrayInit(length_);
-        sectionHelpers_ = preSectionHelpers_;
+        // std::vector<Real> f(length_) zero-initialises in QuantLib.
+        List<Double> f = CommonUtil.ArrayInit(length_, 0.0);
+        sectionHelpers_ = new TreeMap<>(preSectionHelpers_);
         int startPoint = sectionHelpers_.size() + 1;
 
         //first derive the boundary forwards.
@@ -255,9 +273,9 @@ public class ConvexMonotoneImpl extends templateImpl {
             extrapolationHelper_ = sectionHelpers_.get(xValue[length_ - 1]);
         } else {
             extrapolationHelper_ = new EverywhereConstantHelper(
-                    sectionHelpers_.lastEntry().getValue().value(xValue[xValue.length-1]),
+                    sectionHelpers_.lastEntry().getValue().value(xValue[length_-1]),
                     primitive,
-                    xValue[xValue.length-1]
+                    xValue[length_-1]
             );
 
         }
@@ -265,7 +283,7 @@ public class ConvexMonotoneImpl extends templateImpl {
 
     @Override
     public double value(double x) {
-        if (x >= xValue[xValue.length-1]) {
+        if (x >= xValue[length_-1]) {
             return extrapolationHelper_.value(x);
         }
         return upper_bound(sectionHelpers_, x).value(x);
@@ -273,7 +291,7 @@ public class ConvexMonotoneImpl extends templateImpl {
 
     @Override
     public double primitive(double x) {
-        if (x >= xValue[xValue.length-1]) {
+        if (x >= xValue[length_-1]) {
             return extrapolationHelper_.primitive(x);
         }
 
@@ -294,9 +312,9 @@ public class ConvexMonotoneImpl extends templateImpl {
     }
 
     public TreeMap<Double, SectionHelper> getExistingHelpers() {
-        TreeMap<Double, SectionHelper> retArray = (sectionHelpers_);
+        TreeMap<Double, SectionHelper> retArray = new TreeMap<>(sectionHelpers_);
         if (constantLastPeriod_)
-            retArray.remove(xValue[xValue.length-1]);
+            retArray.remove(xValue[length_-1]);
         return retArray;
     }
 

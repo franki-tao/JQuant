@@ -14,7 +14,20 @@ public class ConvexMonotoneInterpolation extends Interpolation {
                                        double monotonicity, boolean forcePositive,
                                        boolean flatFinalPeriod,
                                     TreeMap<Double, SectionHelper> preExistingHelpers) {
-        derived = new ConvexMonotoneImpl(x,y,quadraticity,
+        this(x, y, x.length, quadraticity, monotonicity, forcePositive,
+                flatFinalPeriod, preExistingHelpers);
+    }
+
+    /**
+     * Uses only the first {@code length} entries of {@code x}/{@code y}, whose
+     * arrays stay referenced so that {@link #update()} sees node changes.
+     */
+    public ConvexMonotoneInterpolation(double[] x, double[] y, int length,
+                                       double quadraticity,
+                                       double monotonicity, boolean forcePositive,
+                                       boolean flatFinalPeriod,
+                                    TreeMap<Double, SectionHelper> preExistingHelpers) {
+        derived = new ConvexMonotoneImpl(x,y,length,quadraticity,
                 monotonicity,
                 forcePositive,
                 flatFinalPeriod,

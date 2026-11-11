@@ -101,8 +101,10 @@ public class Qrfact {
         minmn = min0(params.m, params.n);
         for (j = 0; j < minmn; j++) {
             if (params.pivot == 0) {
+                // MINPACK: "if (.not.pivot) go to 40" continues the j loop
+                // after the Householder reduction, it does not return.
                 L40();
-                return;
+                continue;
             }
 
             /*
@@ -114,8 +116,9 @@ public class Qrfact {
                     kmax = k;
             }
             if (kmax == j) {
+                // MINPACK: "if (kmax .eq. j) go to 40" continues the j loop.
                 L40();
-                return;
+                continue;
             }
 
             ij = params.m * j;
