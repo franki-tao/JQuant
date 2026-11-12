@@ -92,14 +92,25 @@ public class SwapRateHelper extends RateHelper {
 
     private void initializeDates(IborIndex index) {
         Date evaluation = Settings.instance.evaluationDate().Date();
-        Date start = calendar_.advance(evaluation, index.fixingDays(), TimeUnit.DAYS,
-                BusinessDayConvention.FOLLOWING, false);
-        Date maturity = calendar_.advance(start, tenor_, index.businessDayConvention(), index.endOfMonth());
+        // Mirrors MakeVanillaSwap: the spot date comes from the index's
+        // valueDate interface, and the termination date is the unadjusted
+        // start + tenor.  The schedule then adjusts the termination date
+        // with its termination-date convention; advancing the maturity
+        // here instead would create spurious stubs whenever the
+        // anniversary falls on a weekend.
+        Date refDate = index.fixingCalendar().adjust(evaluation,
+                BusinessDayConvention.FOLLOWING);
+        Date start = index.fixingCalendar().advance(refDate, index.fixingDays(),
+                TimeUnit.DAYS, BusinessDayConvention.FOLLOWING, false);
+        Date maturity = start.add(tenor_);
+        // MakeVanillaSwap uses fixedConvention_ for both the fixed leg's
+        // business-day convention and its termination-date convention.
         Schedule fixed = new Schedule(start, maturity, new Period(fixedFrequency_), calendar_,
-                fixedConvention_, fixedConvention_, DateGenerationRule.FORWARD, false, new Date(), new Date());
+                fixedConvention_, fixedConvention_,
+                DateGenerationRule.BACKWARD, false, new Date(), new Date());
         Schedule floating = new Schedule(start, maturity, index.tenor(), calendar_,
                 index.businessDayConvention(), index.businessDayConvention(),
-                DateGenerationRule.FORWARD, false, new Date(), new Date());
+                DateGenerationRule.BACKWARD, false, new Date(), new Date());
         swap_ = new VanillaSwap(VanillaSwap.Type.Payer, 1.0, fixed, 0.0, fixedDayCount_,
                 floating, index, 0.0, index.dayCounter());
         maturityDate_ = swap_.maturityDate();

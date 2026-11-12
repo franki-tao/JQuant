@@ -146,8 +146,11 @@ public class SplineZeroConsistencyTest {
                         DEPOSIT_LENGTHS[i] + " " + DEPOSIT_UNITS[i] + " deposit");
             }
             for (int i = 0; i < SWAP_RATES.length; i++) {
-                Date maturity = target.advance(settlement, SWAP_YEARS[i], TimeUnit.YEARS,
-                        BusinessDayConvention.MODIFIED_FOLLOWING, true);
+                // MakeVanillaSwap uses the unadjusted start + tenor as the
+                // schedule end; the termination-date convention then adjusts
+                // each leg separately (unadjusted fixed, modified following
+                // floating).
+                Date maturity = settlement.add(new Period(SWAP_YEARS[i], TimeUnit.YEARS));
                 Schedule fixed = new Schedule(settlement, maturity, new Period(Frequency.ANNUAL), target,
                         BusinessDayConvention.UNADJUSTED, BusinessDayConvention.UNADJUSTED,
                         DateGenerationRule.FORWARD, false, new Date(), new Date());

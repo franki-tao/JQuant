@@ -3,30 +3,38 @@ package termstructures;
 import jquant.Compounding;
 import jquant.Currency;
 import jquant.Handle;
+import jquant.Quote;
 import jquant.Settings;
 import jquant.cashflows.IborCoupon;
 import jquant.indexes.IborIndex;
+import jquant.instruments.Futures;
 import jquant.math.Array;
 import jquant.math.interpolations.impl.BackwardFlat;
 import jquant.math.interpolations.impl.Linear;
+import jquant.math.interpolations.impl.LogLinear;
+import jquant.quotes.FuturesConvAdjustmentQuote;
 import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.yield.BootstrapTraits;
 import jquant.termstructures.yield.DepositRateHelper;
 import jquant.termstructures.yield.FlatForward;
 import jquant.termstructures.yield.FraRateHelper;
+import jquant.termstructures.yield.FuturesRateHelper;
 import jquant.termstructures.yield.GlobalBootstrap;
 import jquant.termstructures.yield.PiecewiseYieldCurve;
 import jquant.termstructures.yield.RateHelper;
+import jquant.termstructures.yield.SimpleQuoteVariables;
 import jquant.termstructures.yield.SwapRateHelper;
 import jquant.time.BusinessDayConvention;
 import jquant.time.Calendar;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.Frequency;
+import jquant.time.IMM;
 import jquant.time.Month;
 import jquant.time.Period;
 import jquant.time.TimeUnit;
+import jquant.time.TimeUtils;
 import jquant.time.calendars.Target;
 import jquant.time.daycounters.Actual360;
 import jquant.time.daycounters.Actual365Fixed;
@@ -35,8 +43,11 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * QuantLib {@code testGlobalBootstrap} and {@code testGlobalBootstrapPenalty}
@@ -52,13 +63,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * the official {@code PiecewiseYieldCurve(2, TARGET(), ...)} reference date is
  * reproduced explicitly as {@code TARGET.advance(today, 2, Days)}.
  *
- * <p><b>Not covered here:</b> the remaining official GlobalBootstrap tests
- * ({@code testGlobalBootstrapVariables}, {@code testGlobalBootstrapInitialGuessFn},
- * {@code testGlobalBootstrapInstrumentWeights}) are left unimplemented: they
- * need JQuant types or fixtures that do not exist yet
- * ({@code FuturesConvAdjustmentQuote}/{@code SimpleQuoteVariables}, the
- * {@code CommonVars} futures fixture, and a PiecewiseYieldCurve with an empty
- * regular helper set). Multi-curve joint bootstrap is also not ported.
+ * <p>The remaining official GlobalBootstrap tests are ported here as well:
+ * {@code testGlobalBootstrapVariables} (convexity-adjusted IMM futures and a
+ * {@code SimpleQuoteVariables} volatility variable), {@code
+ * testGlobalBootstrapInitialGuessFn} (exact official node dates and discount
+ * factors, tolerance 1E-10) and {@code testGlobalBootstrapInstrumentWeights}
+ * (weighted overdetermined deposits, tolerance 1E-13). Multi-curve joint
+ * bootstrap is not ported.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/test-suite/piecewiseyieldcurve.cpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/globalbootstrap.hpp
@@ -120,6 +131,49 @@ public class GlobalBootstrapTest {
 
     private static final int[] SWAP_TENORS = {
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 20, 25, 30, 35, 40, 45, 50
+    };
+
+    // Official CommonVars fixture (test-suite/piecewiseyieldcurve.cpp).
+    private static final double[] DEPOSIT_RATES = {
+            4.559, 4.581, 4.573, 4.557, 4.496, 4.490
+    };
+    private static final int[] DEPOSIT_LENGTHS = {1, 1, 2, 3, 6, 9};
+    private static final TimeUnit[] DEPOSIT_UNITS = {
+            TimeUnit.WEEKS, TimeUnit.MONTHS, TimeUnit.MONTHS, TimeUnit.MONTHS,
+            TimeUnit.MONTHS, TimeUnit.MONTHS
+    };
+    private static final double[] SWAP_RATES = {
+            4.54, 4.63, 4.75, 4.86, 4.99, 5.11, 5.23, 5.33, 5.41, 5.47, 5.60, 5.75,
+            5.89, 5.95, 5.96
+    };
+    private static final int[] SWAP_YEARS = {
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30
+    };
+    private static final double[] IMM_FUT_RATES = {4.581, 4.573, 4.557};
+
+    // Official expected nodes of testGlobalBootstrapInitialGuessFn.
+    private static final Date[] EXPECTED_DATES = {
+            new Date(27, Month.SEPTEMBER, 2019), new Date(1, Month.OCTOBER, 2019),
+            new Date(15, Month.NOVEMBER, 2019), new Date(30, Month.DECEMBER, 2019),
+            new Date(13, Month.FEBRUARY, 2020), new Date(30, Month.MARCH, 2020),
+            new Date(14, Month.MAY, 2020), new Date(29, Month.JUNE, 2020),
+            new Date(13, Month.AUGUST, 2020), new Date(28, Month.SEPTEMBER, 2020),
+            new Date(27, Month.SEPTEMBER, 2021), new Date(27, Month.SEPTEMBER, 2022),
+            new Date(27, Month.SEPTEMBER, 2023), new Date(27, Month.SEPTEMBER, 2024),
+            new Date(29, Month.SEPTEMBER, 2025), new Date(28, Month.SEPTEMBER, 2026),
+            new Date(27, Month.SEPTEMBER, 2027), new Date(27, Month.SEPTEMBER, 2028),
+            new Date(27, Month.SEPTEMBER, 2029), new Date(29, Month.SEPTEMBER, 2031),
+            new Date(27, Month.SEPTEMBER, 2034), new Date(27, Month.SEPTEMBER, 2039),
+            new Date(27, Month.SEPTEMBER, 2044), new Date(27, Month.SEPTEMBER, 2049)
+    };
+
+    private static final double[] EXPECTED_DFS = {
+            1.0,                0.9994923431162580, 0.9938069118457880, 0.9882401711181712,
+            0.9828381250775845, 0.9774079566030049, 0.9721182498392723, 0.9667951580943512,
+            0.9617336341824015, 0.9564548068987965, 0.9135007024272714, 0.8698607442445871,
+            0.8266650007699866, 0.7829682196126155, 0.7399209887960153, 0.6973589159124343,
+            0.6565792747227167, 0.6180250998622848, 0.5818438569698231, 0.5127051907762759,
+            0.4218543471337612, 0.3050840671400172, 0.2225943633033588, 0.165544906093695
     };
 
     @Test
@@ -262,6 +316,293 @@ public class GlobalBootstrapTest {
                 IborCoupon.Settings.instance().createAtParCoupons();
             else
                 IborCoupon.Settings.instance().createIndexedCoupons();
+        }
+    }
+
+    /**
+     * Official {@code testGlobalBootstrapVariables}: the futures convexity
+     * adjustment is re-priced through a {@link SimpleQuoteVariables} volatility
+     * until the deposit and swap pillars match the plain curve.
+     */
+    @Test
+    public void testGlobalBootstrapVariables() {
+        boolean savedAtPar = IborCoupon.Settings.instance().usingAtParCoupons();
+        Date saved = Settings.instance.evaluationDate().Date().copy();
+        try {
+            IborCoupon.Settings.instance().createAtParCoupons();
+            CommonVars vars = commonVars(new Date(25, Month.SEPTEMBER, 2019));
+
+            // First, build the curve without futures.
+            PiecewiseYieldCurve curve = new PiecewiseYieldCurve(
+                    vars.settlement, vars.instruments, new Actual365Fixed(),
+                    BootstrapTraits.Discount, new LogLinear(), new GlobalBootstrap());
+
+            // Now build the curve with futures adjusted to the same level as
+            // swaps. Remove the first swap so it does not create a pillar.
+            List<RateHelper> helpers = new ArrayList<>(vars.instruments);
+            RateHelper firstSwap = helpers.remove(vars.deposits);
+
+            IborIndex euribor3m = euribor(new Period(3, TimeUnit.MONTHS), vars.settlement);
+            Date immDate = vars.today;
+            // Optimize vol as an additional variable during bootstrapping.
+            SimpleQuote vol = new SimpleQuote(Double.NaN);
+            Handle<Quote> mr = new Handle<>(new SimpleQuote(0.03), true);
+            for (int i = 0; i < vars.immFuts; ++i) {
+                Handle<Quote> r = new Handle<>(vars.immFutPrices.get(i), true);
+                // Official test: IMM::nextDate(immDate) uses mainCycle=true.
+                immDate = IMM.nextDate(immDate, true);
+                // if the fixing is before today, jump by one future maturity
+                if (TimeUtils.less(euribor3m.fixingDate(immDate), vars.today))
+                    immDate = IMM.nextDate(immDate, true);
+                FuturesConvAdjustmentQuote convAdj = new FuturesConvAdjustmentQuote(
+                        euribor3m, immDate, r, new Handle<>(vol, true), mr);
+                // registerAsObserver = false, as in the official test.
+                helpers.add(new FuturesRateHelper(r, immDate, euribor3m,
+                        new Handle<>(convAdj, false), Futures.Type.IMM));
+            }
+
+            Supplier<Array> penalties =
+                    () -> new Array(new double[]{1e4 * firstSwap.quoteError()});
+            SimpleQuoteVariables variables = new SimpleQuoteVariables(
+                    List.of(vol), List.of(1.0), List.of(0.0));
+            PiecewiseYieldCurve curveFutures = new PiecewiseYieldCurve(
+                    vars.settlement, helpers, new Actual365Fixed(),
+                    BootstrapTraits.Discount, new LogLinear(),
+                    new GlobalBootstrap(List.of(firstSwap), null, penalties, 1e-12,
+                            null, null, variables, null, null));
+
+            // Check that the pillars are not the same.
+            assertFalse(sameDates(curve.dates(), curveFutures.dates()));
+
+            // Check that all deposit and swap rates are the same in both curves.
+            for (RateHelper helper : vars.instruments) {
+                assertRelativeClose(curve.discount(helper.pillarDate(), false),
+                        curveFutures.discount(helper.pillarDate(), false), 1e-6,
+                        "discount at pillar " + helper.pillarDate());
+            }
+        } finally {
+            Settings.instance.evaluationDate().equal(saved);
+            if (savedAtPar)
+                IborCoupon.Settings.instance().createAtParCoupons();
+            else
+                IborCoupon.Settings.instance().createIndexedCoupons();
+        }
+    }
+
+    /**
+     * Official {@code testGlobalBootstrapInitialGuessFn}: an empty regular
+     * helper list, all instruments as additional helpers, official expected
+     * node dates and discount factors checked at the official 1E-10.
+     */
+    @Test
+    public void testGlobalBootstrapInitialGuessFn() {
+        boolean savedAtPar = IborCoupon.Settings.instance().usingAtParCoupons();
+        Date saved = Settings.instance.evaluationDate().Date().copy();
+        try {
+            // Official precondition: usingAtParCoupons().
+            IborCoupon.Settings.instance().createAtParCoupons();
+            CommonVars vars = commonVars(new Date(25, Month.SEPTEMBER, 2019));
+
+            Calendar calendar = euribor(new Period(6, TimeUnit.MONTHS),
+                    vars.settlement).fixingCalendar();
+            List<Date> pillarDates = new ArrayList<>();
+            pillarDates.add(new Date(1, Month.OCTOBER, 2019));
+            for (int i = 0; i < 8; ++i) {
+                Date last = pillarDates.get(pillarDates.size() - 1);
+                pillarDates.add(calendar.adjust(last.add(45),
+                        BusinessDayConvention.FOLLOWING));
+            }
+            for (RateHelper helper : vars.instruments) {
+                if (TimeUtils.greater(helper.pillarDate(),
+                        pillarDates.get(pillarDates.size() - 1)))
+                    pillarDates.add(helper.pillarDate());
+            }
+
+            GlobalBootstrap.AdditionalPenalties penalties = (times, data) -> {
+                int nInst = vars.instruments.size();
+                Array errors = new Array(nInst + times.length - 2);
+                // instrument errors
+                for (int i = 0; i < nInst; ++i)
+                    errors.set(i, vars.instruments.get(i).quoteError());
+                // gradient penalties
+                double[] rates = new double[times.length - 1];
+                for (int i = 0; i < times.length - 1; ++i) {
+                    rates[i] = (data[i] / data[i + 1] - 1.0)
+                            / (times[i + 1] - times[i]);
+                }
+                for (int i = 0; i < times.length - 2; ++i) {
+                    errors.set(nInst + i, 1e-2 * (rates[i + 1] - rates[i])
+                            / (times[i + 1] - times[i]));
+                }
+                return errors;
+            };
+
+            int[] initialGuessCalls = {0};
+            GlobalBootstrap.InitialGuessFn initialGuessFn = (times, data) -> {
+                ++initialGuessCalls[0];
+                return new Array(times.length - 1, 1.0);
+            };
+
+            PiecewiseYieldCurve curve = new PiecewiseYieldCurve(
+                    vars.settlement, new ArrayList<>(), new Actual365Fixed(),
+                    BootstrapTraits.Discount, new LogLinear(),
+                    new GlobalBootstrap(vars.instruments, () -> pillarDates, penalties,
+                            1e-12, null, null, null, new ArrayList<>(), initialGuessFn));
+
+            List<Date> nodes = curve.dates();
+            assertEquals(EXPECTED_DATES.length, nodes.size(), "node count");
+            for (int i = 0; i < EXPECTED_DATES.length; ++i) {
+                assertEquals(EXPECTED_DATES[i].serialNumber(), nodes.get(i).serialNumber(),
+                        "node date " + i);
+                assertEquals(EXPECTED_DFS[i], curve.discount(nodes.get(i), false),
+                        1e-10, "node discount " + i);
+            }
+            assertEquals(1, initialGuessCalls[0], "initial guess calls");
+        } finally {
+            Settings.instance.evaluationDate().equal(saved);
+            if (savedAtPar)
+                IborCoupon.Settings.instance().createAtParCoupons();
+            else
+                IborCoupon.Settings.instance().createIndexedCoupons();
+        }
+    }
+
+    /**
+     * Official {@code testGlobalBootstrapInstrumentWeights}: two deposits with
+     * the same pillar weighted {@code 0.1}/{@code 0.9} must price the same
+     * whether expressed through instrument weights or through additional dates
+     * and penalties. Official tolerance 1E-13.
+     */
+    @Test
+    public void testGlobalBootstrapInstrumentWeights() {
+        boolean savedAtPar = IborCoupon.Settings.instance().usingAtParCoupons();
+        Date saved = Settings.instance.evaluationDate().Date().copy();
+        try {
+            IborCoupon.Settings.instance().createAtParCoupons();
+            Calendar target = new Target();
+            Date today = target.adjust(new Date(23, Month.OCTOBER, 2025),
+                    BusinessDayConvention.FOLLOWING);
+            Settings.instance.evaluationDate().equal(today);
+
+            DayCounter actual360 = new Actual360(false);
+            List<RateHelper> helpers = new ArrayList<>();
+            helpers.add(new DepositRateHelper(
+                    new Handle<>(new SimpleQuote(0.01), false),
+                    new Period(6, TimeUnit.MONTHS), 2, target,
+                    BusinessDayConvention.MODIFIED_FOLLOWING, true, actual360));
+            helpers.add(new DepositRateHelper(
+                    new Handle<>(new SimpleQuote(0.02), false),
+                    new Period(6, TimeUnit.MONTHS), 2, target,
+                    BusinessDayConvention.MODIFIED_FOLLOWING, true, actual360));
+
+            double w1 = 0.1, w2 = 0.9;
+
+            // curve1 uses traditional helpers with weights w1 and w2
+            PiecewiseYieldCurve curve1 = new PiecewiseYieldCurve(
+                    today, helpers, actual360, BootstrapTraits.Discount, new LogLinear(),
+                    new GlobalBootstrap(1e-10, null, null, List.of(w1, w2), null));
+
+            // curve2 uses custom dates and penalties with the same weights
+            Supplier<List<Date>> addDates = () -> List.of(
+                    helpers.get(0).pillarDate(), helpers.get(1).pillarDate());
+            Supplier<Array> addPenalties = () -> new Array(new double[]{
+                    w1 * helpers.get(0).quoteError(), w2 * helpers.get(1).quoteError()});
+            PiecewiseYieldCurve curve2 = new PiecewiseYieldCurve(
+                    today, new ArrayList<>(), actual360, BootstrapTraits.Discount,
+                    new LogLinear(),
+                    new GlobalBootstrap(helpers, addDates, addPenalties, 1e-10));
+
+            // check that both approaches result in the same curve
+            assertRelativeClose(curve1.discount(0.3, false),
+                    curve2.discount(0.3, false), 1e-13, "discount at 0.3");
+        } finally {
+            Settings.instance.evaluationDate().equal(saved);
+            if (savedAtPar)
+                IborCoupon.Settings.instance().createAtParCoupons();
+            else
+                IborCoupon.Settings.instance().createIndexedCoupons();
+        }
+    }
+
+    private static void assertRelativeClose(double expected, double actual,
+                                            double tolerance, String message) {
+        double scale = Math.max(Math.abs(expected), Math.abs(actual));
+        double error = scale == 0.0 ? Math.abs(expected - actual)
+                : Math.abs(expected - actual) / scale;
+        assertTrue(error <= tolerance,
+                message + ": expected " + expected + " but was " + actual
+                        + " (relative error " + error + " > " + tolerance + ")");
+    }
+
+    private static boolean sameDates(List<Date> a, List<Date> b) {
+        if (a.size() != b.size())
+            return false;
+        for (int i = 0; i < a.size(); ++i) {
+            if (!TimeUtils.equals(a.get(i), b.get(i)))
+                return false;
+        }
+        return true;
+    }
+
+    /** Official CommonVars fixture, with the evaluation date already set. */
+    private static CommonVars commonVars(Date evaluationDate) {
+        Calendar calendar = new Target();
+        Date today = calendar.adjust(evaluationDate, BusinessDayConvention.FOLLOWING);
+        Settings.instance.evaluationDate().equal(today);
+        Date settlement = calendar.advance(today, 2, TimeUnit.DAYS,
+                BusinessDayConvention.FOLLOWING, false);
+
+        DayCounter actual360 = new Actual360(false);
+        IborIndex euribor6m = euribor(new Period(6, TimeUnit.MONTHS), settlement);
+
+        List<RateHelper> instruments = new ArrayList<>();
+        for (int i = 0; i < DEPOSIT_RATES.length; ++i) {
+            instruments.add(new DepositRateHelper(
+                    new Handle<>(new SimpleQuote(DEPOSIT_RATES[i] / 100.0), false),
+                    new Period(DEPOSIT_LENGTHS[i], DEPOSIT_UNITS[i]), 2, calendar,
+                    BusinessDayConvention.MODIFIED_FOLLOWING, true, actual360));
+        }
+        for (int i = 0; i < SWAP_RATES.length; ++i) {
+            instruments.add(new SwapRateHelper(
+                    new Handle<>(new SimpleQuote(SWAP_RATES[i] / 100.0), false),
+                    new Period(SWAP_YEARS[i], TimeUnit.YEARS), calendar, Frequency.ANNUAL,
+                    BusinessDayConvention.UNADJUSTED,
+                    new Thirty360(Thirty360.Convention.BondBasis), euribor6m));
+        }
+
+        List<SimpleQuote> immFutPrices = new ArrayList<>();
+        for (double rate : IMM_FUT_RATES)
+            immFutPrices.add(new SimpleQuote(100.0 - rate));
+
+        return new CommonVars(today, settlement, instruments, immFutPrices,
+                DEPOSIT_RATES.length, IMM_FUT_RATES.length);
+    }
+
+    private static IborIndex euribor(Period tenor, Date referenceDate) {
+        DayCounter actual360 = new Actual360(false);
+        YieldTermStructure flat = new FlatForward(referenceDate, 0.04, actual360,
+                Compounding.Continuous, Frequency.ANNUAL);
+        return new IborIndex("Euribor", tenor, 2, new Currency(), new Target(),
+                BusinessDayConvention.MODIFIED_FOLLOWING, true, actual360,
+                new Handle<>(flat, false));
+    }
+
+    private static final class CommonVars {
+        final Date today;
+        final Date settlement;
+        final List<RateHelper> instruments;
+        final List<SimpleQuote> immFutPrices;
+        final int deposits;
+        final int immFuts;
+
+        CommonVars(Date today, Date settlement, List<RateHelper> instruments,
+                   List<SimpleQuote> immFutPrices, int deposits, int immFuts) {
+            this.today = today;
+            this.settlement = settlement;
+            this.instruments = instruments;
+            this.immFutPrices = immFutPrices;
+            this.deposits = deposits;
+            this.immFuts = immFuts;
         }
     }
 
