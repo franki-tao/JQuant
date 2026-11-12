@@ -47,6 +47,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
     Date maxDate_;
     Interpolation interpolation_;
     private final LocalBootstrap localBootstrap_;
+    private final GlobalBootstrap globalBootstrap_;
     private int bootstrapIterations_;
     private boolean loopRequired;
     private boolean stale_ = false;
@@ -88,7 +89,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
                                BootstrapTraits traits,
                                Interpolator interpolator,
                                double accuracy) {
-        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy, null);
+        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy,
+                (LocalBootstrap) null);
     }
 
     /**
@@ -119,6 +121,47 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
                                Interpolator interpolator,
                                double accuracy,
                                LocalBootstrap bootstrap) {
+        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy, bootstrap, null);
+    }
+
+    /**
+     * Builds the curve with QuantLib's {@code GlobalBootstrap} algorithm
+     * instead of the iterative one.
+     *
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/globalbootstrap.hpp
+     */
+    public PiecewiseYieldCurve(Date referenceDate,
+                               List<RateHelper> instruments,
+                               DayCounter dayCounter,
+                               BootstrapTraits traits,
+                               Interpolator interpolator,
+                               GlobalBootstrap bootstrap) {
+        this(referenceDate, instruments, dayCounter, traits, interpolator, 1.0e-12, bootstrap);
+    }
+
+    /**
+     * @param bootstrap {@code null} keeps the existing iterative bootstrap;
+     *                  otherwise {@code calculate()} replaces the iterative
+     *                  pillar loop.
+     */
+    public PiecewiseYieldCurve(Date referenceDate,
+                               List<RateHelper> instruments,
+                               DayCounter dayCounter,
+                               BootstrapTraits traits,
+                               Interpolator interpolator,
+                               double accuracy,
+                               GlobalBootstrap bootstrap) {
+        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy, null, bootstrap);
+    }
+
+    private PiecewiseYieldCurve(Date referenceDate,
+                                List<RateHelper> instruments,
+                                DayCounter dayCounter,
+                                BootstrapTraits traits,
+                                Interpolator interpolator,
+                                double accuracy,
+                                LocalBootstrap localBootstrap,
+                                GlobalBootstrap globalBootstrap) {
         super(referenceDate, new NullCalendar(), dayCounter, new ArrayList<>(), new ArrayList<>());
         QL_REQUIRE(instruments != null && !instruments.isEmpty(), "no bootstrap helpers given");
         QL_REQUIRE(traits != null, "null bootstrap traits");
@@ -128,12 +171,15 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         traits_ = traits;
         interpolator_ = interpolator;
         accuracy_ = accuracy;
-        localBootstrap_ = bootstrap;
+        localBootstrap_ = localBootstrap;
+        globalBootstrap_ = globalBootstrap;
         for (RateHelper helper : instruments_) {
             for (jquant.Quote quote : helper.notifications())
                 registerWith(quote);
         }
-        if (localBootstrap_ != null)
+        if (globalBootstrap_ != null)
+            globalBootstrap_.setup(this);
+        else if (localBootstrap_ != null)
             localBootstrap_.setup(this);
         bootstrap();
     }
@@ -167,6 +213,11 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         return bootstrapIterations_;
     }
 
+    /** Package-visible {@code moving_} for GlobalBootstrap, as a friend would see. */
+    boolean moving() {
+        return moving_;
+    }
+
     @Override
     public Date maxDate() {
         return maxDate_;
@@ -184,7 +235,9 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
         // entry would bootstrap forever on the half-built nodes.
         bootstrapping_ = true;
         try {
-            if (localBootstrap_ != null)
+            if (globalBootstrap_ != null)
+                globalBootstrap_.calculate(this);
+            else if (localBootstrap_ != null)
                 localBootstrap_.calculate(this);
             else
                 bootstrapPillars();

@@ -1,6 +1,7 @@
 package jquant.termstructures.yield;
 
 import jquant.Compounding;
+import jquant.math.Array;
 import jquant.math.Interpolation;
 import jquant.time.Date;
 import jquant.time.Frequency;
@@ -86,6 +87,38 @@ public enum BootstrapTraits {
             double instFwdMax = -interpolation.derivative(tMax, true) / dMax;
             return dMax * Math.exp(-instFwdMax * (t - tMax));
         }
+
+        // GlobalBootstrap support, from Discount::globalGuess() and
+        // Discount::transformDirect()/transformInverse() in bootstraptraits.hpp.
+
+        @Override
+        public GlobalGuess globalGuess(PiecewiseYieldCurve curve, boolean validData) {
+            double[] data = curve.data();
+            if (validData)
+                return new GlobalGuess(tail(data), true);
+            double[] times = curve.times();
+            Array guess = new Array(times.length - 1);
+            for (int i = 1; i < times.length; ++i)
+                guess.set(i - 1, -AVERAGE_RATE * times[i]);
+            // Discount::transformInverse() is log(), so we simply don't call
+            // exp() here and return false for needsTransform.
+            return new GlobalGuess(guess, false);
+        }
+
+        @Override
+        public boolean hasTransform() {
+            return true;
+        }
+
+        @Override
+        public double transformDirect(double x, int i, PiecewiseYieldCurve curve) {
+            return Math.exp(x);
+        }
+
+        @Override
+        public double transformInverse(double x, int i, PiecewiseYieldCurve curve) {
+            return Math.log(x);
+        }
     },
 
     /**
@@ -165,6 +198,15 @@ public enum BootstrapTraits {
             }
             double zero = integral / t;
             return Math.exp(-zero * t);
+        }
+
+        // GlobalBootstrap support, from ForwardRate::globalGuess() in
+        // bootstraptraits.hpp.
+        @Override
+        public GlobalGuess globalGuess(PiecewiseYieldCurve curve, boolean validData) {
+            if (validData)
+                return new GlobalGuess(tail(curve.data()), true);
+            return new GlobalGuess(new Array(curve.times().length - 1, AVERAGE_RATE), true);
         }
     },
 
@@ -250,10 +292,135 @@ public enum BootstrapTraits {
             }
             return Math.exp(-r * t);
         }
+
+        // GlobalBootstrap support, from ZeroYield::globalGuess() in
+        // bootstraptraits.hpp.
+        @Override
+        public GlobalGuess globalGuess(PiecewiseYieldCurve curve, boolean validData) {
+            if (validData)
+                return new GlobalGuess(tail(curve.data()), true);
+            return new GlobalGuess(new Array(curve.times().length - 1, AVERAGE_RATE), true);
+        }
+    },
+
+    /**
+     * Nodes are simply compounded zero rates; the curve is an
+     * {@code InterpolatedSimpleZeroCurve}. This follows QuantLib's
+     * {@code SimpleZeroYield} traits, whose {@code discountImpl} is
+     * {@code 1/(1+R*t)} (with flat-forward extrapolation past the last
+     * pillar) rather than {@link #ZeroYield}'s {@code exp(-R*t)}.
+     *
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/bootstraptraits.hpp
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/interpolatedsimplezerocurve.hpp
+     */
+    SimpleZeroYield {
+        @Override
+        public double initialValue(PiecewiseYieldCurve curve) {
+            // dummy value at reference date
+            return AVERAGE_RATE;
+        }
+
+        @Override
+        public double guess(int i, PiecewiseYieldCurve curve, boolean validData) {
+            if (validData) // previous iteration value
+                return curve.data()[i];
+            if (i == 1) // first pillar
+                return AVERAGE_RATE;
+            // extrapolate
+            Date d = curve.dates().get(i);
+            return curve.zeroRate(d, curve.dayCounter(),
+                    Compounding.Simple, Frequency.ANNUAL, true).rate();
+        }
+
+        @Override
+        public double minValueAfter(int i, PiecewiseYieldCurve curve, boolean validData) {
+            double result;
+            if (validData) {
+                double r = min(curve.data());
+                result = r < 0.0 ? r * 2.0 : r / 2.0;
+            } else {
+                // no constraints; a value very unlikely to be exceeded
+                result = -MAX_RATE;
+            }
+            return Math.max(result, -1.0 / curve.times()[i] + 1E-8);
+        }
+
+        @Override
+        public double maxValueAfter(int i, PiecewiseYieldCurve curve, boolean validData) {
+            if (validData) {
+                double r = max(curve.data());
+                return r < 0.0 ? r / 2.0 : r * 2.0;
+            }
+            // no constraints; a value very unlikely to be exceeded
+            return MAX_RATE;
+        }
+
+        @Override
+        public void updateGuess(double[] data, double value, int i) {
+            data[i] = value;
+            if (i == 1)
+                data[0] = value; // first point is updated as well
+        }
+
+        @Override
+        public int maxIterations() {
+            return 100;
+        }
+
+        @Override
+        public double discountImpl(PiecewiseYieldCurve curve, double t) {
+            // InterpolatedSimpleZeroCurve::discountImpl.
+            double[] times = curve.times();
+            double[] data = curve.data();
+            Interpolation interpolation = curve.interpolation();
+            double r;
+            if (t <= times[times.length - 1]) {
+                r = interpolation.value(t, true);
+            } else {
+                // flat fwd extrapolation after last pillar
+                double tMax = times[times.length - 1];
+                double zMax = data[data.length - 1];
+                double instFwdMax = zMax + tMax * interpolation.derivative(tMax, true);
+                r = (zMax * tMax + instFwdMax * (t - tMax)) / t;
+            }
+            return 1.0 / (1.0 + r * t);
+        }
+
+        // GlobalBootstrap support, from SimpleZeroYield::globalGuess() and
+        // SimpleZeroYield::transformDirect()/transformInverse().
+        @Override
+        public GlobalGuess globalGuess(PiecewiseYieldCurve curve, boolean validData) {
+            if (validData)
+                return new GlobalGuess(tail(curve.data()), true);
+            return new GlobalGuess(new Array(curve.times().length - 1, AVERAGE_RATE), true);
+        }
+
+        @Override
+        public boolean hasTransform() {
+            return true;
+        }
+
+        @Override
+        public double transformDirect(double x, int i, PiecewiseYieldCurve curve) {
+            return Math.exp(x) + (-1.0 / curve.times()[i] + 1E-8);
+        }
+
+        @Override
+        public double transformInverse(double x, int i, PiecewiseYieldCurve curve) {
+            return Math.log(x - (-1.0 / curve.times()[i] + 1E-8));
+        }
     };
 
     private static final double AVERAGE_RATE = 0.05;
     private static final double MAX_RATE = 1.0;
+
+    /**
+     * Start of curve data. All QL traits use the curve's reference date.
+     * https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/bootstraptraits.hpp
+     */
+    public Date initialDate(PiecewiseYieldCurve curve) {
+        return curve.referenceDate();
+    }
 
     /**
      * Dummy value at the reference date.
@@ -302,6 +469,48 @@ public enum BootstrapTraits {
      * https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/discountcurve.hpp
      */
     public abstract double discountImpl(PiecewiseYieldCurve curve, double t);
+
+    /**
+     * Guess for the whole curve and whether it still needs to be passed
+     * through {@link #transformInverse}. Mirrors
+     * {@code Traits::globalGuess()} in QuantLib's GlobalBootstrap.
+     */
+    public abstract GlobalGuess globalGuess(PiecewiseYieldCurve curve, boolean validData);
+
+    /**
+     * Whether this trait provides {@code transformDirect}/{@code transformInverse}.
+     * Mirrors the {@code hasTransform} detection in globalbootstrap.hpp.
+     */
+    public boolean hasTransform() {
+        return false;
+    }
+
+    public double transformDirect(double x, int i, PiecewiseYieldCurve curve) {
+        throw new UnsupportedOperationException(name() + " has no transform");
+    }
+
+    public double transformInverse(double x, int i, PiecewiseYieldCurve curve) {
+        throw new UnsupportedOperationException(name() + " has no transform");
+    }
+
+    /** Container for the result of {@link #globalGuess}. */
+    public static final class GlobalGuess {
+        public final Array guess;
+        public final boolean needsTransform;
+
+        public GlobalGuess(Array guess, boolean needsTransform) {
+            this.guess = guess;
+            this.needsTransform = needsTransform;
+        }
+    }
+
+    /** Elements 1..n-1 of {@code data}, as a fresh Array. */
+    private static Array tail(double[] data) {
+        Array result = new Array(data.length - 1);
+        for (int i = 1; i < data.length; ++i)
+            result.set(i - 1, data[i]);
+        return result;
+    }
 
     private static double min(double[] values) {
         double result = values[0];
