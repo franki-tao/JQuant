@@ -2,6 +2,8 @@ package jquant.instruments;
 
 import jquant.Instrument;
 import jquant.PricingEngine;
+import jquant.Settings;
+import jquant.cashflows.IborCoupon;
 import jquant.cashflows.SimpleCashFlow;
 import jquant.indexes.IborIndex;
 import jquant.pricingengines.DiscountingSwapEngine;
@@ -9,6 +11,7 @@ import jquant.time.BusinessDayConvention;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.Schedule;
+import jquant.time.TimeUnit;
 import jquant.time.TimeUtils;
 
 import java.util.ArrayList;
@@ -18,9 +21,10 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 
 /**
  * Spot fixed-vs-ibor vanilla swap. The floating coupon is
- * {@code nominal * (forecastFixing + spread) * yearFraction}. The fixing is
- * the index forward from the coupon start to the index maturity, read off the
- * forwarding curve. It is not the quoted fair rate.
+ * {@code nominal * (forecastFixing + spread) * yearFraction}. As in
+ * {@code IborCoupon}, the fixing is forecast over the coupon's estimation
+ * period: at-par coupons end at the accrual end, indexed coupons at the index
+ * maturity. It is not the quoted fair rate.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/instruments/vanillaswap.cpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/test-suite/swap.cpp
@@ -91,13 +95,45 @@ public class VanillaSwap extends Instrument {
     }
 
     /**
-     * Index end of the last floating coupon. This can fall after the fixed
+     * End of the estimation period of the last floating coupon, mirroring
+     * {@code IborCoupon::fixingEndDate()}. This can fall after the fixed
      * maturity when the ibor date is rolled and the fixed leg is not.
      */
     public Date lastFloatingFixingEnd() {
-        int last = floatSchedule_.size() - 2;
-        Date start = floatSchedule_.date(Math.max(last, 0));
-        return iborIndex_.maturityDate(start);
+        int last = floatSchedule_.size() - 1;
+        Date start = floatSchedule_.date(Math.max(last - 1, 0));
+        Date end = floatSchedule_.date(last);
+        return floatingFixingEndDate(start, end);
+    }
+
+    /**
+     * Mirrors {@code IborCouponPricer::initializeCachedData}: indexed coupons
+     * end at the index maturity, while at-par coupons end at the accrual end
+     * rolled through the index fixing calendar.
+     */
+    private Date floatingFixingEndDate(Date start, Date end) {
+        Date fixingDate = iborIndex_.fixingDate(start);
+        Date fixingValueDate = iborIndex_.valueDate(fixingDate);
+        if (!IborCoupon.Settings.instance().usingAtParCoupons())
+            return iborIndex_.maturityDate(fixingValueDate);
+        Date nextFixingDate = iborIndex_.fixingCalendar().advance(end,
+                -iborIndex_.fixingDays(), TimeUnit.DAYS, BusinessDayConvention.FOLLOWING, false);
+        Date fixingEnd = iborIndex_.fixingCalendar().advance(nextFixingDate,
+                iborIndex_.fixingDays(), TimeUnit.DAYS, BusinessDayConvention.FOLLOWING, false);
+        // make sure the estimation period contains at least one day
+        return TimeUtils.max(fixingEnd, fixingValueDate.add(1));
+    }
+
+    /** Mirrors {@code IborCoupon::hasFixed()}. */
+    private boolean hasFixed(Date fixingDate) {
+        Date today = Settings.instance.evaluationDate().Date();
+        if (TimeUtils.greater(fixingDate, today))
+            return false;
+        if (TimeUtils.less(fixingDate, today))
+            return true;
+        if (Settings.instance.enforcesTodaysHistoricFixings())
+            return true;
+        return iborIndex_.hasHistoricalFixing(fixingDate);
     }
 
     public double fairRate() {
@@ -148,8 +184,23 @@ public class VanillaSwap extends Instrument {
             Date start = floatSchedule_.date(i);
             Date end = floatSchedule_.date(i + 1);
             Date pay = floatSchedule_.calendar().adjust(end, paymentConvention);
-            // Past fixing dates read the stored history. Future dates forecast.
-            double forward = iborIndex_.fixing(iborIndex_.fixingDate(start), false);
+            Date fixingDate = iborIndex_.fixingDate(start);
+            Date fixingValueDate = iborIndex_.valueDate(fixingDate);
+            Date fixingEnd = floatingFixingEndDate(start, end);
+            // Past fixing dates read the stored history. Future dates forecast
+            // over the coupon's estimation period, as IborCoupon does: at-par
+            // coupons end at the accrual end, indexed coupons at the index
+            // maturity.
+            double forward;
+            if (hasFixed(fixingDate)) {
+                forward = iborIndex_.pastFixing(fixingDate);
+                QL_REQUIRE(!Double.isNaN(forward),
+                        "Missing " + iborIndex_.name() + " fixing for " + fixingDate);
+            } else {
+                double spanningTime = iborIndex_.dayCounter().yearFraction(
+                        fixingValueDate, fixingEnd, new Date(), new Date());
+                forward = iborIndex_.forecastFixing(fixingValueDate, fixingEnd, spanningTime);
+            }
             double accrual = floatingDayCount_.yearFraction(start, end, new Date(), new Date());
             double amount = nominal_ * (forward + spread_) * accrual;
             arguments.floatingLeg.add(new SimpleCashFlow(amount, pay));

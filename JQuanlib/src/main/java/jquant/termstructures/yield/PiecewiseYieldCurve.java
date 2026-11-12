@@ -163,7 +163,11 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
                                 LocalBootstrap localBootstrap,
                                 GlobalBootstrap globalBootstrap) {
         super(referenceDate, new NullCalendar(), dayCounter, new ArrayList<>(), new ArrayList<>());
-        QL_REQUIRE(instruments != null && !instruments.isEmpty(), "no bootstrap helpers given");
+        // GlobalBootstrap may take all its helpers in additionalHelpers, so the
+        // regular helper list can be empty (official IterativeBootstrap and
+        // LocalBootstrap still reject that).
+        QL_REQUIRE(instruments != null && (!instruments.isEmpty() || globalBootstrap != null),
+                "no bootstrap helpers given");
         QL_REQUIRE(traits != null, "null bootstrap traits");
         QL_REQUIRE(interpolator != null, "null interpolator");
         QL_REQUIRE(accuracy > 0.0, "accuracy must be positive");
