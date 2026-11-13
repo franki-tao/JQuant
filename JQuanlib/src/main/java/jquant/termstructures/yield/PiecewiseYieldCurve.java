@@ -50,6 +50,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure
     Interpolation interpolation_;
     private final LocalBootstrap localBootstrap_;
     private final GlobalBootstrap globalBootstrap_;
+    private final IterativeBootstrap iterativeBootstrap_;
     private int bootstrapIterations_;
     private boolean loopRequired;
     private boolean stale_ = false;
@@ -123,7 +124,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure
                                Interpolator interpolator,
                                double accuracy,
                                LocalBootstrap bootstrap) {
-        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy, bootstrap, null);
+        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy, bootstrap, null, null);
     }
 
     /**
@@ -153,7 +154,34 @@ public class PiecewiseYieldCurve extends YieldTermStructure
                                Interpolator interpolator,
                                double accuracy,
                                GlobalBootstrap bootstrap) {
-        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy, null, bootstrap);
+        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy, null, bootstrap, null);
+    }
+
+    /**
+     * Builds the curve with an explicit {@link IterativeBootstrap}, as
+     * {@code PiecewiseYieldCurve<T, I, IterativeBootstrap>::bootstrap_type()}
+     * does in QuantLib.
+     *
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/iterativebootstrap.hpp
+     */
+    public PiecewiseYieldCurve(Date referenceDate,
+                               List<RateHelper> instruments,
+                               DayCounter dayCounter,
+                               BootstrapTraits traits,
+                               Interpolator interpolator,
+                               IterativeBootstrap bootstrap) {
+        this(referenceDate, instruments, dayCounter, traits, interpolator, 1.0e-12, bootstrap);
+    }
+
+    public PiecewiseYieldCurve(Date referenceDate,
+                               List<RateHelper> instruments,
+                               DayCounter dayCounter,
+                               BootstrapTraits traits,
+                               Interpolator interpolator,
+                               double accuracy,
+                               IterativeBootstrap bootstrap) {
+        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy,
+                null, null, bootstrap);
     }
 
     private PiecewiseYieldCurve(Date referenceDate,
@@ -163,7 +191,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure
                                 Interpolator interpolator,
                                 double accuracy,
                                 LocalBootstrap localBootstrap,
-                                GlobalBootstrap globalBootstrap) {
+                                GlobalBootstrap globalBootstrap,
+                                IterativeBootstrap iterativeBootstrap) {
         super(referenceDate, new NullCalendar(), dayCounter, new ArrayList<>(), new ArrayList<>());
         // GlobalBootstrap may take all its helpers in additionalHelpers, so the
         // regular helper list can be empty (official IterativeBootstrap and
@@ -179,6 +208,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure
         accuracy_ = accuracy;
         localBootstrap_ = localBootstrap;
         globalBootstrap_ = globalBootstrap;
+        iterativeBootstrap_ = iterativeBootstrap;
         for (RateHelper helper : instruments_) {
             for (jquant.Quote quote : helper.notifications())
                 registerWith(quote);
@@ -192,6 +222,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure
         } else {
             if (localBootstrap_ != null)
                 localBootstrap_.setup(this);
+            if (iterativeBootstrap_ != null)
+                iterativeBootstrap_.setup(this);
             bootstrap();
         }
     }
@@ -335,6 +367,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure
         for (int j = firstAlive; j < instruments_.size(); ++j)
             instruments_.get(j).setTermStructure(this);
 
+        double accuracy = bootstrapAccuracy();
         boolean validData = false;
         int iteration = 0;
         while (true) {
@@ -359,25 +392,34 @@ public class PiecewiseYieldCurve extends YieldTermStructure
                 double change = 0.0;
                 for (int i = 1; i < data_.length; i++)
                     change = Math.max(change, Math.abs(data_[i] - previous[i]));
-                if (change <= accuracy_) {
+                if (change <= accuracy) {
                     bootstrapIterations_ = iteration;
                     break;
                 }
             }
-            QL_REQUIRE(iteration < traits_.maxIterations(),
-                    "convergence not reached after " + iteration + " iterations");
+            if (iteration >= traits_.maxIterations()) {
+                if (iterativeBootstrap_ != null && iterativeBootstrap_.dontThrow()) {
+                    bootstrapIterations_ = iteration;
+                    break;
+                }
+                QL_FAIL("convergence not reached after " + iteration + " iterations");
+            }
             validData = true;
         }
     }
 
     private void solvePillar(int i, int j, boolean validData) {
-        double min = traits_.minValueAfter(i, this, validData);
-        double max = traits_.maxValueAfter(i, this, validData);
+        Double minOverride = iterativeBootstrap_ != null ? iterativeBootstrap_.minValue() : null;
+        Double maxOverride = iterativeBootstrap_ != null ? iterativeBootstrap_.maxValue() : null;
+        double min = minOverride != null
+                ? minOverride : traits_.minValueAfter(i, this, validData);
+        double max = maxOverride != null
+                ? maxOverride : traits_.maxValueAfter(i, this, validData);
         double guess = traits_.guess(i, this, validData);
-        if (guess >= max)
-            guess = max - (max - min) / 5.0;
-        else if (guess <= min)
-            guess = min + (max - min) / 5.0;
+
+        int maxAttempts = iterativeBootstrap_ != null ? iterativeBootstrap_.maxAttempts() : 1;
+        double minFactor = iterativeBootstrap_ != null ? iterativeBootstrap_.minFactor() : 2.0;
+        double maxFactor = iterativeBootstrap_ != null ? iterativeBootstrap_.maxFactor() : 2.0;
 
         RateHelper helper = instruments_.get(j);
         int node = i;
@@ -391,17 +433,72 @@ public class PiecewiseYieldCurve extends YieldTermStructure
         Solver1D solver = interpolator_.global() && validData
                 ? new FiniteDifferenceNewtonSafe()
                 : new Brent();
-        try {
-            double value = solver.solve(error, accuracy_, guess, min, max);
-            traits_.updateGuess(data_, value, node);
-            refreshInterpolation(node, validData);
-        } catch (IllegalArgumentException e) {
-            QL_FAIL("failed at alive instrument " + i
-                    + ", pillar " + helper.pillarDate()
-                    + ", maturity " + helper.maturityDate()
-                    + ", reference date " + dates_.get(0)
-                    + ": " + e.getMessage());
+        if (iterativeBootstrap_ != null)
+            solver.setMaxEvaluations(iterativeBootstrap_.maxEvaluations());
+        double accuracy = bootstrapAccuracy();
+
+        for (int attempt = 1; ; attempt++) {
+            double adjustedGuess = guess;
+            if (adjustedGuess >= max)
+                adjustedGuess = max - (max - min) / 5.0;
+            else if (adjustedGuess <= min)
+                adjustedGuess = min + (max - min) / 5.0;
+            try {
+                double value = solver.solve(error, accuracy, adjustedGuess, min, max);
+                traits_.updateGuess(data_, value, node);
+                refreshInterpolation(node, validData);
+                return;
+            } catch (IllegalArgumentException e) {
+                // IterativeBootstrap widens the bracket on each retry.
+                if (attempt < maxAttempts) {
+                    min = min < 0.0 ? min * minFactor : min / minFactor;
+                    max = max > 0.0 ? max * maxFactor : max / maxFactor;
+                    guess = traits_.guess(i, this, validData);
+                    continue;
+                }
+                if (iterativeBootstrap_ != null && iterativeBootstrap_.dontThrow()) {
+                    double value = dontThrowFallback(error, min, max,
+                            iterativeBootstrap_.dontThrowSteps());
+                    traits_.updateGuess(data_, value, node);
+                    refreshInterpolation(node, validData);
+                    return;
+                }
+                QL_FAIL("failed at alive instrument " + i
+                        + ", pillar " + helper.pillarDate()
+                        + ", maturity " + helper.maturityDate()
+                        + ", reference date " + dates_.get(0)
+                        + ": " + e.getMessage());
+            }
         }
+    }
+
+    /**
+     * {@code detail::dontThrowFallback} from iterativebootstrap.hpp: the point
+     * of the bracket with the smallest absolute helper error.
+     */
+    private double dontThrowFallback(Function error, double xMin, double xMax, int steps) {
+        QL_REQUIRE(xMin < xMax, "Expected xMin to be less than xMax");
+        double result = xMin;
+        double absError = Math.abs(error.value(xMin));
+        double minError = absError;
+        double stepSize = (xMax - xMin) / steps;
+        for (int i = 0; i < steps; i++) {
+            xMin += stepSize;
+            absError = Math.abs(error.value(xMin));
+            if (absError < minError) {
+                result = xMin;
+                minError = absError;
+            }
+        }
+        return result;
+    }
+
+    /** Bootstrap accuracy: the explicit {@link IterativeBootstrap} override
+     *  ({@code Null} by default), otherwise the curve's accuracy. */
+    private double bootstrapAccuracy() {
+        if (iterativeBootstrap_ != null && iterativeBootstrap_.accuracy() != null)
+            return iterativeBootstrap_.accuracy();
+        return accuracy_;
     }
 
     /**
