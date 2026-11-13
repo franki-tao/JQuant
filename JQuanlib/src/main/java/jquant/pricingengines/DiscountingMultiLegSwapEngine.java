@@ -1,6 +1,7 @@
 package jquant.pricingengines;
 
 import jquant.CashFlow;
+import jquant.Handle;
 import jquant.Instrument;
 import jquant.PricingEngine;
 import jquant.cashflows.Coupon;
@@ -28,15 +29,33 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 public class DiscountingMultiLegSwapEngine implements PricingEngine {
     private static final double BASIS_POINT = 1.0e-4;
     private final YieldTermStructure discountCurve_;
+    private final Handle<YieldTermStructure> discountHandle_;
     private final arguments arguments_ = new arguments();
     private final results results_ = new results();
     private final Set<Observer> observers_ = new HashSet<>();
 
     public DiscountingMultiLegSwapEngine(YieldTermStructure discountCurve) {
-        QL_REQUIRE(discountCurve != null, "null discount curve");
+        this(discountCurve, null);
+    }
+
+    /**
+     * Handle overload. The curve is resolved at calculation time, so a later
+     * link of a relinkable handle is seen by the engine.
+     */
+    public DiscountingMultiLegSwapEngine(Handle<YieldTermStructure> discountCurve) {
+        this(null, discountCurve);
+        QL_REQUIRE(discountCurve != null, "null discounting term structure handle");
+    }
+
+    private DiscountingMultiLegSwapEngine(YieldTermStructure discountCurve,
+                                          Handle<YieldTermStructure> discountHandle) {
+        QL_REQUIRE(discountCurve != null || discountHandle != null,
+                "null discount curve");
         discountCurve_ = discountCurve;
+        discountHandle_ = discountHandle;
         results_.additionalResults = new HashMap<>();
-        discountCurve_.registerObserver(new Observer() {
+        Observable source = discountHandle != null ? discountHandle.get() : discountCurve;
+        source.registerObserver(new Observer() {
             @Override
             public void registerWith(Observable observable) {
             }
@@ -54,6 +73,10 @@ public class DiscountingMultiLegSwapEngine implements PricingEngine {
                 notifyObservers();
             }
         });
+    }
+
+    private YieldTermStructure discountCurve() {
+        return discountHandle_ != null ? discountHandle_.currentLink() : discountCurve_;
     }
 
     @Override
@@ -79,8 +102,9 @@ public class DiscountingMultiLegSwapEngine implements PricingEngine {
 
     @Override
     public void calculate() {
-        Date settlement = discountCurve_.referenceDate();
-        double settlementDiscount = discountCurve_.discount(settlement, false);
+        YieldTermStructure discount = discountCurve();
+        Date settlement = discount.referenceDate();
+        double settlementDiscount = discount.discount(settlement, false);
         int n = arguments_.legs.size();
         results_.legNPV = new double[n];
         results_.legBPS = new double[n];
@@ -91,7 +115,7 @@ public class DiscountingMultiLegSwapEngine implements PricingEngine {
             for (CashFlow cashflow : arguments_.legs.get(i)) {
                 if (cashflow.hasOccurred(settlement, Optional.empty()) || cashflow.tradingExCoupon(settlement))
                     continue;
-                double df = discountCurve_.discount(cashflow.date(), false) / settlementDiscount;
+                double df = discount.discount(cashflow.date(), false) / settlementDiscount;
                 npv += cashflow.amount() * df;
                 if (cashflow instanceof Coupon coupon)
                     bps += coupon.nominal() * coupon.accrualPeriod() * df;

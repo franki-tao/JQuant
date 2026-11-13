@@ -17,6 +17,11 @@ public class RelinkableHandle <T extends Observable & HandleImpl> extends Handle
     public RelinkableHandle(T p, boolean registerAsObserver) {
         super(p, registerAsObserver);
     }
+    /*! An empty relinkable handle (null link), as in the official
+        {@code RelinkableHandle<T>()} default constructor. */
+    public RelinkableHandle() {
+        super(null, false);
+    }
     /*! \deprecated Use one of the constructors taking shared_ptr.
                     Deprecated in version 1.35.
     */

@@ -41,6 +41,15 @@ public class IborLeg {
         schedule_ = schedule;
         index_ = index;
         notionals_ = new ArrayList<>();
+        // Official defaults: Following payment adjustment, the index day
+        // counter, the schedule calendar and an empty ex-coupon period.
+        paymentDayCounter_ = index.dayCounter();
+        paymentAdjustment_ = BusinessDayConvention.FOLLOWING;
+        paymentCalendar_ = schedule.calendar();
+        exCouponPeriod_ = new Period();
+        exCouponCalendar_ = schedule.calendar();
+        exCouponAdjustment_ = BusinessDayConvention.UNADJUSTED;
+        useIndexedCoupons_ = Optional.empty();
         fixingDays_ = new ArrayList<>();
         gearings_ = new ArrayList<>();
         spreads_ = new ArrayList<>();

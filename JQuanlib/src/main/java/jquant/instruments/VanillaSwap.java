@@ -44,6 +44,8 @@ public class VanillaSwap extends Instrument {
     private double fairRate_ = Double.NaN;
     private double fixedLegNpv_ = Double.NaN;
     private double floatingLegNpv_ = Double.NaN;
+    private double fixedLegBps_ = Double.NaN;
+    private double floatingLegBps_ = Double.NaN;
 
     public VanillaSwap(Type type,
                        double nominal,
@@ -152,6 +154,16 @@ public class VanillaSwap extends Instrument {
         return floatingLegNpv_;
     }
 
+    public double fixedLegBPS() {
+        calculate();
+        return fixedLegBps_;
+    }
+
+    public double floatingLegBPS() {
+        calculate();
+        return floatingLegBps_;
+    }
+
     @Override
     public boolean isExpired() {
         Date ref = iborIndex_.forwardingTermStructure().empty()
@@ -179,6 +191,7 @@ public class VanillaSwap extends Instrument {
             arguments.fixedYearFractions.add(fixedDayCount_.yearFraction(start, end, new Date(), new Date()));
         }
         arguments.floatingLeg = new ArrayList<>();
+        arguments.floatingNominalAccruals = new ArrayList<>();
         int floatPeriods = floatSchedule_.size() - 1;
         for (int i = 0; i < floatPeriods; i++) {
             Date start = floatSchedule_.date(i);
@@ -204,6 +217,7 @@ public class VanillaSwap extends Instrument {
             double accrual = floatingDayCount_.yearFraction(start, end, new Date(), new Date());
             double amount = nominal_ * (forward + spread_) * accrual;
             arguments.floatingLeg.add(new SimpleCashFlow(amount, pay));
+            arguments.floatingNominalAccruals.add(nominal_ * accrual);
         }
     }
 
@@ -215,5 +229,7 @@ public class VanillaSwap extends Instrument {
         fairRate_ = results.fairRate;
         fixedLegNpv_ = results.fixedLegNpv;
         floatingLegNpv_ = results.floatingLegNpv;
+        fixedLegBps_ = results.fixedLegBPS;
+        floatingLegBps_ = results.floatingLegBPS;
     }
 }
