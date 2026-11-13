@@ -320,6 +320,98 @@ public class MultiCurveBootstrapTest {
     }
 
     /**
+     * Observability of the joint system, following the official
+     * {@code testObservability} pattern in test-suite/piecewiseyieldcurve.cpp
+     * (bump a helper quote by 1% and require a recalculation). The bumped
+     * quote here is the spread of the non-bootstrapped OIS curve: the 3M
+     * member curve only becomes stale if the MultiCurve registered with the
+     * OIS curve's observables and re-bootstraps both curves jointly.
+     */
+    @Test
+    public void testMultiCurveObservability() {
+        boolean savedAtPar = IborCoupon.Settings.instance().usingAtParCoupons();
+        Date saved = Settings.instance.evaluationDate().Date().copy();
+        try {
+            IborCoupon.Settings.instance().createAtParCoupons();
+
+            Calendar calendar = new Target();
+            Date today = calendar.adjust(new Date(23, Month.OCTOBER, 2025),
+                    BusinessDayConvention.FOLLOWING);
+            Settings.instance.evaluationDate().equal(today);
+
+            RelinkableHandle<YieldTermStructure> intcurveois = new RelinkableHandle<>();
+            RelinkableHandle<YieldTermStructure> intcurve3m = new RelinkableHandle<>();
+
+            IborIndex euribor3m = euribor(new Period(3, TimeUnit.MONTHS), intcurve3m);
+
+            Handle<Quote> q = new Handle<>(new SimpleQuote(0.03), false);
+            Handle<Quote> b = new Handle<>(new SimpleQuote(-0.01), false);
+
+            List<RateHelper> helpers3m = new ArrayList<>();
+            for (int i = 1; i <= 10; ++i) {
+                helpers3m.add(new SwapRateHelper(q, new Period(i, TimeUnit.YEARS),
+                        euribor3m.fixingCalendar(), Frequency.ANNUAL,
+                        BusinessDayConvention.FOLLOWING,
+                        new Thirty360(Thirty360.Convention.BondBasis), euribor3m,
+                        new Handle<>(null, false), new Period(0, TimeUnit.DAYS),
+                        intcurveois));
+            }
+
+            MultiCurve multiCurve = new MultiCurve(ACCURACY);
+
+            YieldTermStructure ptr3m = new PiecewiseYieldCurve(today, helpers3m,
+                    new Actual360(false), BootstrapTraits.Discount, new LogLinear(),
+                    new GlobalBootstrap(ACCURACY));
+            Handle<YieldTermStructure> curve3m =
+                    multiCurve.addBootstrappedCurve(intcurve3m, ptr3m);
+
+            YieldTermStructure ptrois = new ZeroSpreadedTermStructure(intcurve3m, b);
+            Handle<YieldTermStructure> curveois =
+                    multiCurve.addNonBootstrappedCurve(intcurveois, ptrois);
+
+            // Initial reading forces the joint bootstrap.
+            double initialDiscount3m = curve3m.currentLink().discount(1.0, true);
+            double initialZero3m = curve3m.currentLink().zeroRate(1.0,
+                    Compounding.Continuous, Frequency.ANNUAL, false).rate();
+            double initialZeroOis = curveois.currentLink().zeroRate(1.0,
+                    Compounding.Continuous, Frequency.ANNUAL, false).rate();
+            assertRelativeClose(b.getValue().value(), initialZeroOis - initialZero3m,
+                    TOLERANCE, "initial ois 3m zero-rate spread");
+
+            // Official testObservability bump.
+            SimpleQuote spreadQuote = (SimpleQuote) b.getValue();
+            spreadQuote.setValue(spreadQuote.value() * 1.01);
+            double newSpread = spreadQuote.value();
+
+            // The 3M curve bootstraps against the OIS curve, so it must have
+            // been recalculated as well.
+            double bumpedDiscount3m = curve3m.currentLink().discount(1.0, true);
+            assertTrue(bumpedDiscount3m != initialDiscount3m,
+                    "spread change did not trigger recalculation of the member curve");
+
+            double zero3m = curve3m.currentLink().zeroRate(1.0,
+                    Compounding.Continuous, Frequency.ANNUAL, false).rate();
+            double zeroOis = curveois.currentLink().zeroRate(1.0,
+                    Compounding.Continuous, Frequency.ANNUAL, false).rate();
+            assertRelativeClose(newSpread, zeroOis - zero3m, TOLERANCE,
+                    "bumped ois 3m zero-rate spread");
+
+            // The joint system must still be calibrated to the new market.
+            for (int i = 1; i <= 10; ++i) {
+                VanillaSwap swap = vanillaSwap(i, euribor3m, q.getValue().value());
+                swap.setPricingEngine(new DiscountingSwapEngine(curveois));
+                assertSmall(swap.NPV(), TOLERANCE, "bumped vanilla swap " + i);
+            }
+        } finally {
+            Settings.instance.evaluationDate().equal(saved);
+            if (savedAtPar)
+                IborCoupon.Settings.instance().createAtParCoupons();
+            else
+                IborCoupon.Settings.instance().createIndexedCoupons();
+        }
+    }
+
+    /**
      * JQuant has no {@code MakeVanillaSwap}, so this reproduces the official
      * builder with the parameters used by the tests: payer, unit nominal,
      * settlement days equal to the index fixing days, unadjusted

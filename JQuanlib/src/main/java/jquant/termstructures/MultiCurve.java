@@ -35,6 +35,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 public class MultiCurve implements Observer {
     private final MultiCurveBootstrap multiCurveBootstrap_;
     private final List<YieldTermStructure> curves_ = new ArrayList<>();
+    private final Set<Observable> registeredObservables = new HashSet<>();
     private final Set<Observer> observers_ = new HashSet<>();
 
     public MultiCurve(double accuracy) {
@@ -75,6 +76,10 @@ public class MultiCurve implements Observer {
             YieldTermStructure curve) {
         internalHandle.linkTo(curve, false);
         Handle<YieldTermStructure> externalHandle = new OwnedHandle(curve, this);
+        // As in official MultiCurve::addCurve: observe the member curve's
+        // observables (quotes, evaluation date, ...), but not the curve
+        // itself, to avoid notification cycles.
+        registerWithObservables(curve);
         curves_.add(curve);
         return externalHandle;
     }
@@ -85,18 +90,39 @@ public class MultiCurve implements Observer {
             c.update();
     }
 
-    // The member curves are intentionally not observed by the MultiCurve (see
-    // the class comment); these remain available for explicit use.
+    /**
+     * Mirrors {@code Observer::registerWithObservables}: registers with every
+     * observable the given curve already observes. It deliberately does not
+     * register with the curve itself.
+     */
+    private void registerWithObservables(YieldTermStructure curve) {
+        if (curve == null)
+            return;
+        for (Observable observable : curve.observables())
+            registerWith(observable);
+    }
+
     @Override
     public void registerWith(Observable observable) {
+        if (observable != null) {
+            observable.registerObserver(this);
+            registeredObservables.add(observable);
+        }
     }
 
     @Override
     public void unregisterWith(Observable observable) {
+        if (observable != null) {
+            observable.unregisterObserver(this);
+            registeredObservables.remove(observable);
+        }
     }
 
     @Override
     public void unregisterWithAll() {
+        for (Observable observable : registeredObservables)
+            observable.unregisterObserver(this);
+        registeredObservables.clear();
     }
 
     public void registerObserver(Observer o) {

@@ -7,6 +7,7 @@ import jquant.patterns.ObservableSettings;
 import jquant.patterns.Observer;
 import jquant.time.*;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -148,6 +149,17 @@ public abstract class TermStructure extends Extrapolator implements Observer, Ob
             o.unregisterObserver(this);
         }
         registeredObservables.clear();
+    }
+
+    /**
+     * The observables this term structure registered with, as the official
+     * {@code Observer::observables_} would expose them. Callers can use this
+     * to mirror {@code Observer::registerWithObservables}, which registers
+     * with every observable of another observer (not with the observer
+     * itself).
+     */
+    public Iterable<Observable> observables() {
+        return Collections.unmodifiableSet(registeredObservables);
     }
 
     @Override
