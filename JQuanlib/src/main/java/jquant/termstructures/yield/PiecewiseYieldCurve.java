@@ -8,6 +8,7 @@ import jquant.math.interpolations.impl.LogLinear;
 import jquant.math.Solver1D;
 import jquant.math.solvers1d.Brent;
 import jquant.math.solvers1d.FiniteDifferenceNewtonSafe;
+import jquant.termstructures.MultiCurveBootstrapProvider;
 import jquant.termstructures.YieldTermStructure;
 import jquant.time.Date;
 import jquant.time.DayCounter;
@@ -34,7 +35,8 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/bootstraptraits.hpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/interpolatedforwardcurve.hpp
  */
-public class PiecewiseYieldCurve extends YieldTermStructure {
+public class PiecewiseYieldCurve extends YieldTermStructure
+        implements MultiCurveBootstrapProvider {
     // Package-visible to LocalBootstrap, as the friend declaration in
     // localbootstrap.hpp allows.
     final List<RateHelper> instruments_;
@@ -181,11 +183,37 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
             for (jquant.Quote quote : helper.notifications())
                 registerWith(quote);
         }
-        if (globalBootstrap_ != null)
+        if (globalBootstrap_ != null) {
+            // As in QuantLib, setup() does not calculate. Defer the actual
+            // bootstrap until the curve is first used, so that a MultiCurve
+            // can install itself as the parent bootstrapper first.
             globalBootstrap_.setup(this);
-        else if (localBootstrap_ != null)
-            localBootstrap_.setup(this);
-        bootstrap();
+            stale_ = true;
+        } else {
+            if (localBootstrap_ != null)
+                localBootstrap_.setup(this);
+            bootstrap();
+        }
+    }
+
+    @Override
+    public MultiCurveBootstrapContributor multiCurveBootstrapContributor() {
+        return globalBootstrap_;
+    }
+
+    /**
+     * Mirrors {@code LazyObject::setCalculated}. A calculated curve is not
+     * stale, which prevents a member curve from re-entering a nested
+     * bootstrap while the joint multi-curve solve is running.
+     */
+    void setCalculated(boolean calculated) {
+        stale_ = !calculated;
+    }
+
+    /** Re-run a deferred bootstrap if the curve is stale. */
+    private void calculateIfNeeded() {
+        if (stale_ && !bootstrapping_)
+            bootstrap();
     }
 
     @Override
@@ -197,18 +225,22 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
     }
 
     public List<Date> dates() {
+        calculateIfNeeded();
         return List.copyOf(dates_);
     }
 
     double[] data() {
+        calculateIfNeeded();
         return data_;
     }
 
     double[] times() {
+        calculateIfNeeded();
         return times_;
     }
 
     Interpolation interpolation() {
+        calculateIfNeeded();
         return interpolation_;
     }
 
@@ -224,6 +256,7 @@ public class PiecewiseYieldCurve extends YieldTermStructure {
 
     @Override
     public Date maxDate() {
+        calculateIfNeeded();
         return maxDate_;
     }
 

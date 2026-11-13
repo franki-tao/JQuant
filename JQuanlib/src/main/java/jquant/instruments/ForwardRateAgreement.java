@@ -32,6 +32,21 @@ public class ForwardRateAgreement extends Instrument {
     private double forwardRate_ = Double.NaN;
     private double amount_ = Double.NaN;
 
+    /**
+     * Official short constructor: the forward rate is forecast by the index,
+     * i.e. {@code useIndexedCoupon=true}, and the maturity is the index
+     * maturity of the value date.
+     */
+    public ForwardRateAgreement(IborIndex index,
+                                Date valueDate,
+                                Position position,
+                                double strike,
+                                double notional,
+                                YieldTermStructure discountCurve) {
+        this(index, valueDate, index.maturityDate(valueDate),
+                position, strike, notional, discountCurve, true);
+    }
+
     public ForwardRateAgreement(IborIndex index,
                                 Date valueDate,
                                 Date maturityDate,

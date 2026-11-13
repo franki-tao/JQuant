@@ -4,6 +4,7 @@ import jquant.*;
 import jquant.math.CommonUtil;
 import jquant.time.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -32,6 +33,10 @@ public abstract class YieldTermStructure extends TermStructure {
     //@{
     public YieldTermStructure(final DayCounter dc) {
         super(dc);
+        jumps_ = new ArrayList<>();
+        jumpDates_ = new ArrayList<>();
+        jumpTimes_ = new ArrayList<>();
+        nJumps_ = 0;
     }
 
     public YieldTermStructure(final Date referenceDate,

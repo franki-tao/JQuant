@@ -42,7 +42,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/globalbootstrap.hpp
  */
-public class GlobalBootstrap {
+public class GlobalBootstrap implements MultiCurveBootstrapContributor {
     /** Additional error terms, as a function of (times, curve data). */
     @FunctionalInterface
     public interface AdditionalPenalties {
@@ -83,6 +83,8 @@ public class GlobalBootstrap {
     private boolean validCurve_ = false;
     /** Set when {@link #initialize()} had to replace the times array. */
     private boolean interpolationDirty_ = false;
+    /** Non-null when this bootstrap is part of a joint multi-curve solve. */
+    private MultiCurveBootstrap parentBootstrapper_ = null;
 
     /** Mirrors {@code GlobalBootstrap(Real accuracy = Null<Real>(), ...)}. */
     public GlobalBootstrap() {
@@ -307,7 +309,14 @@ public class GlobalBootstrap {
         return true;
     }
 
-    private Array setupCostFunction() {
+    @Override
+    public Array setupCostFunction() {
+        // For single-curve bootstrap this was done by LazyObject::calculate()
+        // already, but for multi-curve bootstrap we have to do this manually
+        // for all contributing curves except the main one, because calculate()
+        // is never triggered for them.
+        ts_.setCalculated(true);
+
         // We might have to call initialize even if the curve is initialized and
         // not moving, just because helpers might be date relative and change
         // with evaluation date change.
@@ -372,7 +381,8 @@ public class GlobalBootstrap {
         return guess;
     }
 
-    private void setCostFunctionArgument(Array x) {
+    @Override
+    public void setCostFunctionArgument(Array x) {
         // x has the same layout as guess above: the first numberPillars values
         // go into the curve, while the rest are new values for the additional
         // variables.
@@ -391,7 +401,8 @@ public class GlobalBootstrap {
         }
     }
 
-    private Array evaluateCostFunction() {
+    @Override
+    public Array evaluateCostFunction() {
         Array additionalErrors;
         if (additionalPenalties_ != null)
             additionalErrors = additionalPenalties_.apply(ts_.times_, ts_.data_);
@@ -408,13 +419,27 @@ public class GlobalBootstrap {
         return result;
     }
 
+    @Override
+    public void setParentBootstrapper(MultiCurveBootstrap b) {
+        parentBootstrapper_ = b;
+    }
+
+    @Override
+    public void setToValid() {
+        validCurve_ = true;
+    }
+
     /**
-     * Mirrors {@code GlobalBootstrap::calculate} for a single curve.
-     *
-     * <p>Multi-curve joint bootstrap is not implemented; there is no
-     * {@code MultiCurveBootstrap} parent in this port.
+     * Mirrors {@code GlobalBootstrap::calculate}. If this bootstrap belongs
+     * to a {@link MultiCurveBootstrap}, only the joint solve is run; otherwise
+     * this is the single-curve bootstrap.
      */
     public void calculate() {
+        if (parentBootstrapper_ != null) {
+            parentBootstrapper_.runMultiCurveBootstrap();
+            return;
+        }
+
         Array guess = setupCostFunction();
 
         NoConstraint noConstraint = new NoConstraint();

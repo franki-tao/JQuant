@@ -5,6 +5,7 @@ import jquant.indexes.IborIndex;
 import jquant.math.CommonUtil;
 import jquant.time.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -50,7 +51,7 @@ public class CashflowUtil {
         QL_REQUIRE(!isZero || !isInArrears,
                 "in-arrears and zero features are not compatible");
 
-        List<CashFlow> leg = CommonUtil.ArrayInit(n);
+        List<CashFlow> leg = new ArrayList<>(n);
 
         // the following is not always correct
         final Calendar calendar = schedule.calendar();
@@ -126,7 +127,10 @@ public class CashflowUtil {
     public static void setCouponPricer(final List<CashFlow> leg, final FloatingRateCouponPricer pricer) {
         // PricerSetter setter(pricer);
         for (CashFlow i : leg) {
-            i.accept(pricer);
+            if (i instanceof FloatingRateCoupon coupon)
+                coupon.setPricer(pricer);
+            else
+                i.accept(pricer);
         }
     }
 }
