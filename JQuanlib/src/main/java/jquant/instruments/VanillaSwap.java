@@ -1,10 +1,12 @@
 package jquant.instruments;
 
+import jquant.CashFlow;
 import jquant.Instrument;
 import jquant.PricingEngine;
 import jquant.Settings;
+import jquant.cashflows.Coupon;
 import jquant.cashflows.IborCoupon;
-import jquant.cashflows.SimpleCashFlow;
+import jquant.cashflows.IborLeg;
 import jquant.indexes.IborIndex;
 import jquant.pricingengines.DiscountingSwapEngine;
 import jquant.time.BusinessDayConvention;
@@ -16,6 +18,7 @@ import jquant.time.TimeUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
@@ -41,6 +44,8 @@ public class VanillaSwap extends Instrument {
     private final IborIndex iborIndex_;
     private final double spread_;
     private final DayCounter floatingDayCount_;
+    private final BusinessDayConvention paymentConvention_;
+    private final List<CashFlow> floatingLeg_;
     private double fairRate_ = Double.NaN;
     private double fixedLegNpv_ = Double.NaN;
     private double floatingLegNpv_ = Double.NaN;
@@ -56,6 +61,30 @@ public class VanillaSwap extends Instrument {
                        IborIndex iborIndex,
                        double spread,
                        DayCounter floatingDayCount) {
+        this(type, nominal, fixedSchedule, fixedRate, fixedDayCount, floatSchedule,
+                iborIndex, spread, floatingDayCount, Optional.empty(), Optional.empty());
+    }
+
+    /**
+     * Constructor matching QuantLib's {@code VanillaSwap} including the
+     * optional payment convention and the per-swap indexed/at-par coupon
+     * override. As in the official class, a missing payment convention means
+     * the floating schedule's convention, and a missing coupon override means
+     * the global {@link IborCoupon.Settings} value.
+     *
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/instruments/vanillaswap.cpp
+     */
+    public VanillaSwap(Type type,
+                       double nominal,
+                       Schedule fixedSchedule,
+                       double fixedRate,
+                       DayCounter fixedDayCount,
+                       Schedule floatSchedule,
+                       IborIndex iborIndex,
+                       double spread,
+                       DayCounter floatingDayCount,
+                       Optional<BusinessDayConvention> paymentConvention,
+                       Optional<Boolean> useIndexedCoupons) {
         type_ = type;
         nominal_ = nominal;
         fixedSchedule_ = fixedSchedule;
@@ -65,7 +94,24 @@ public class VanillaSwap extends Instrument {
         iborIndex_ = iborIndex;
         spread_ = spread;
         floatingDayCount_ = floatingDayCount;
+        paymentConvention_ = paymentConvention != null && paymentConvention.isPresent()
+                ? paymentConvention.get()
+                : floatSchedule.businessDayConvention();
+        // As in ql/instruments/vanillaswap.cpp, the floating leg is built by
+        // IborLeg so that each coupon carries a pricer and so that the
+        // useIndexedCoupons override can reach the coupon estimation.
+        floatingLeg_ = new IborLeg(floatSchedule, iborIndex)
+                .withNotionals(nominal)
+                .withPaymentDayCounter(floatingDayCount)
+                .withPaymentAdjustment(paymentConvention_)
+                .withPaymentCalendar(floatSchedule.calendar())
+                .withSpreads(spread)
+                .withIndexedCoupons(useIndexedCoupons != null
+                        ? useIndexedCoupons : Optional.empty())
+                .leg();
         registerWith(iborIndex_);
+        for (CashFlow cashflow : floatingLeg_)
+            registerWith(cashflow);
     }
 
     public Type type() {
@@ -92,8 +138,17 @@ public class VanillaSwap extends Instrument {
         return floatSchedule_;
     }
 
+    public Date startDate() {
+        return fixedSchedule_.startDate();
+    }
+
     public Date maturityDate() {
         return fixedSchedule_.endDate();
+    }
+
+    /** Floating leg coupons, as {@code VanillaSwap::floatingLeg()} in QuantLib. */
+    public List<CashFlow> floatingLeg() {
+        return List.copyOf(floatingLeg_);
     }
 
     /**
@@ -102,40 +157,17 @@ public class VanillaSwap extends Instrument {
      * maturity when the ibor date is rolled and the fixed leg is not.
      */
     public Date lastFloatingFixingEnd() {
-        int last = floatSchedule_.size() - 1;
-        Date start = floatSchedule_.date(Math.max(last - 1, 0));
-        Date end = floatSchedule_.date(last);
-        return floatingFixingEndDate(start, end);
+        return ((IborCoupon) floatingLeg_.get(floatingLeg_.size() - 1)).fixingEndDate();
     }
 
     /**
-     * Mirrors {@code IborCouponPricer::initializeCachedData}: indexed coupons
-     * end at the index maturity, while at-par coupons end at the accrual end
-     * rolled through the index fixing calendar.
+     * Mirrors {@code Swap::deepUpdate()}: clears the cached amounts of the
+     * floating coupons so that their forecast uses the current curve.
      */
-    private Date floatingFixingEndDate(Date start, Date end) {
-        Date fixingDate = iborIndex_.fixingDate(start);
-        Date fixingValueDate = iborIndex_.valueDate(fixingDate);
-        if (!IborCoupon.Settings.instance().usingAtParCoupons())
-            return iborIndex_.maturityDate(fixingValueDate);
-        Date nextFixingDate = iborIndex_.fixingCalendar().advance(end,
-                -iborIndex_.fixingDays(), TimeUnit.DAYS, BusinessDayConvention.FOLLOWING, false);
-        Date fixingEnd = iborIndex_.fixingCalendar().advance(nextFixingDate,
-                iborIndex_.fixingDays(), TimeUnit.DAYS, BusinessDayConvention.FOLLOWING, false);
-        // make sure the estimation period contains at least one day
-        return TimeUtils.max(fixingEnd, fixingValueDate.add(1));
-    }
-
-    /** Mirrors {@code IborCoupon::hasFixed()}. */
-    private boolean hasFixed(Date fixingDate) {
-        Date today = Settings.instance.evaluationDate().Date();
-        if (TimeUtils.greater(fixingDate, today))
-            return false;
-        if (TimeUtils.less(fixingDate, today))
-            return true;
-        if (Settings.instance.enforcesTodaysHistoricFixings())
-            return true;
-        return iborIndex_.hasHistoricalFixing(fixingDate);
+    public void deepUpdate() {
+        for (CashFlow cashflow : floatingLeg_)
+            cashflow.update();
+        calculated_ = false;
     }
 
     public double fairRate() {
@@ -181,43 +213,25 @@ public class VanillaSwap extends Instrument {
         arguments.payerSign = type_ == Type.Payer ? 1.0 : -1.0;
         arguments.fixedPayDates = new ArrayList<>();
         arguments.fixedYearFractions = new ArrayList<>();
-        // No explicit payment convention: QuantLib uses the floating schedule's.
-        BusinessDayConvention paymentConvention = floatSchedule_.businessDayConvention();
+        // As in FixedVsFloatingSwap, the fixed leg pays on the fixed calendar
+        // using the swap payment convention (the floating schedule's
+        // convention when none was passed).
         int fixedPeriods = fixedSchedule_.size() - 1;
         for (int i = 0; i < fixedPeriods; i++) {
             Date start = fixedSchedule_.date(i);
             Date end = fixedSchedule_.date(i + 1);
-            arguments.fixedPayDates.add(floatSchedule_.calendar().adjust(end, paymentConvention));
+            arguments.fixedPayDates.add(fixedSchedule_.calendar().adjust(end, paymentConvention_));
             arguments.fixedYearFractions.add(fixedDayCount_.yearFraction(start, end, new Date(), new Date()));
         }
-        arguments.floatingLeg = new ArrayList<>();
+        arguments.floatingLeg = new ArrayList<>(floatingLeg_);
         arguments.floatingNominalAccruals = new ArrayList<>();
-        int floatPeriods = floatSchedule_.size() - 1;
-        for (int i = 0; i < floatPeriods; i++) {
-            Date start = floatSchedule_.date(i);
-            Date end = floatSchedule_.date(i + 1);
-            Date pay = floatSchedule_.calendar().adjust(end, paymentConvention);
-            Date fixingDate = iborIndex_.fixingDate(start);
-            Date fixingValueDate = iborIndex_.valueDate(fixingDate);
-            Date fixingEnd = floatingFixingEndDate(start, end);
-            // Past fixing dates read the stored history. Future dates forecast
-            // over the coupon's estimation period, as IborCoupon does: at-par
-            // coupons end at the accrual end, indexed coupons at the index
-            // maturity.
-            double forward;
-            if (hasFixed(fixingDate)) {
-                forward = iborIndex_.pastFixing(fixingDate);
-                QL_REQUIRE(!Double.isNaN(forward),
-                        "Missing " + iborIndex_.name() + " fixing for " + fixingDate);
-            } else {
-                double spanningTime = iborIndex_.dayCounter().yearFraction(
-                        fixingValueDate, fixingEnd, new Date(), new Date());
-                forward = iborIndex_.forecastFixing(fixingValueDate, fixingEnd, spanningTime);
-            }
-            double accrual = floatingDayCount_.yearFraction(start, end, new Date(), new Date());
-            double amount = nominal_ * (forward + spread_) * accrual;
-            arguments.floatingLeg.add(new SimpleCashFlow(amount, pay));
-            arguments.floatingNominalAccruals.add(nominal_ * accrual);
+        // Make sure each coupon reads the current curve before it caches its
+        // amount; the helper links its curve without observation so that
+        // bootstrapping does not create a notification cycle.
+        for (CashFlow cashflow : floatingLeg_) {
+            cashflow.update();
+            Coupon coupon = (Coupon) cashflow;
+            arguments.floatingNominalAccruals.add(nominal_ * coupon.accrualPeriod());
         }
     }
 
