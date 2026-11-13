@@ -143,16 +143,16 @@ public class LinearZeroConsistencyTest {
             }
             for (int i = 0; i < SWAP_RATES.length; i++) {
                 // MakeVanillaSwap uses the unadjusted start + tenor as the
-                // schedule end; the termination-date convention then adjusts
-                // each leg separately (unadjusted fixed, modified following
-                // floating).
+                // schedule end and its default Backward date generation; the
+                // termination-date convention then adjusts each leg separately
+                // (unadjusted fixed, modified following floating).
                 Date maturity = settlement.add(new Period(SWAP_YEARS[i], TimeUnit.YEARS));
                 Schedule fixed = new Schedule(settlement, maturity, new Period(Frequency.ANNUAL), target,
                         BusinessDayConvention.UNADJUSTED, BusinessDayConvention.UNADJUSTED,
-                        DateGenerationRule.FORWARD, false, new Date(), new Date());
+                        DateGenerationRule.BACKWARD, false, new Date(), new Date());
                 Schedule floating = new Schedule(settlement, maturity, new Period(6, TimeUnit.MONTHS), target,
                         BusinessDayConvention.MODIFIED_FOLLOWING, BusinessDayConvention.MODIFIED_FOLLOWING,
-                        DateGenerationRule.FORWARD, false, new Date(), new Date());
+                        DateGenerationRule.BACKWARD, false, new Date(), new Date());
                 VanillaSwap swap = new VanillaSwap(VanillaSwap.Type.Payer, 1.0, fixed, 0.0,
                         new Thirty360(Thirty360.Convention.BondBasis), floating, forecast, 0.0, actual360);
                 swap.setPricingEngine(new DiscountingSwapEngine(curve));
