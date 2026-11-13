@@ -5,6 +5,7 @@ import jquant.Handle;
 import jquant.Option;
 import jquant.Quote;
 import jquant.Settings;
+import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.optionlet.OptionletVolatilityStructure;
 import jquant.time.Date;
@@ -28,6 +29,11 @@ public class BlackIborCouponPricer extends IborCouponPricer {
     protected double discount_;
     private TimingAdjustment timingAdjustment_;
     private Handle<Quote> correlation_;
+
+    /** Official default arguments: Black76 timing and unit correlation. */
+    public BlackIborCouponPricer(final Handle<OptionletVolatilityStructure> v) {
+        this(v, Black76, new Handle<>(new SimpleQuote(1.0), true), Optional.empty());
+    }
 
     public BlackIborCouponPricer(final Handle<OptionletVolatilityStructure> v, // = Handle<OptionletVolatilityStructure>(),
                                  final TimingAdjustment timingAdjustment, // = Black76,

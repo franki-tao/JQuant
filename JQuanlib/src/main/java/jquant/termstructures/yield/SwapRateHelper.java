@@ -1,10 +1,15 @@
 package jquant.termstructures.yield;
 
+import jquant.CashFlow;
 import jquant.Handle;
 import jquant.Quote;
 import jquant.RelinkableHandle;
 import jquant.Settings;
+import jquant.cashflows.CashflowUtil;
+import jquant.cashflows.FloatingRateCouponPricer;
+import jquant.cashflows.IborCoupon;
 import jquant.indexes.IborIndex;
+import jquant.indexes.SwapIndex;
 import jquant.instruments.VanillaSwap;
 import jquant.pricingengines.DiscountingSwapEngine;
 import jquant.termstructures.YieldTermStructure;
@@ -21,6 +26,7 @@ import jquant.time.TimeUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
@@ -34,21 +40,34 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * forecast on the curve being built while both legs are discounted on the
  * exogenous curve.
  *
+ * <p>This ports all three official constructors: the tenor one (including its
+ * optional settlement days, end-of-month flag, indexed-coupon override,
+ * floating convention override, coupon pricer and custom pillar), the dated
+ * one (explicit start and end dates, which rejects {@link Frequency#ONCE}),
+ * and the {@code SwapIndex} one.
+ *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/ratehelpers.cpp
  */
 public class SwapRateHelper extends RateHelper {
-    public enum Pillar { MaturityDate, LastRelevantDate }
+    public enum Pillar { MaturityDate, LastRelevantDate, CustomDate }
 
     private final Period tenor_;
+    private final Date startDate_, endDate_;
     private final Calendar calendar_;
     private final Frequency fixedFrequency_;
     private final BusinessDayConvention fixedConvention_;
     private final DayCounter fixedDayCount_;
-    private final IborIndex iborIndex_;
+    private IborIndex iborIndex_;
     private final Pillar pillarChoice_;
+    private final Date customPillarDate_;
     private final Handle<Quote> spread_;
     private final Period fwdStart_;
     private final Handle<YieldTermStructure> discountHandle_;
+    private final Integer settlementDays_;
+    private final boolean endOfMonth_;
+    private final Optional<Boolean> useIndexedCoupons_;
+    private final Optional<BusinessDayConvention> floatConvention_;
+    private final FloatingRateCouponPricer couponPricer_;
     private final RelinkableHandle<YieldTermStructure> termStructureHandle_ =
             new RelinkableHandle<>();
     private final RelinkableHandle<YieldTermStructure> discountRelinkableHandle_ =
@@ -64,7 +83,8 @@ public class SwapRateHelper extends RateHelper {
                           IborIndex iborIndex) {
         this(rate, tenor, calendar, fixedFrequency, fixedConvention, fixedDayCount,
                 iborIndex, null, new Period(0, TimeUnit.DAYS), null,
-                Pillar.LastRelevantDate);
+                null, Pillar.LastRelevantDate, new Date(), false,
+                Optional.empty(), Optional.empty(), null);
     }
 
     public SwapRateHelper(Handle<Quote> rate,
@@ -76,7 +96,9 @@ public class SwapRateHelper extends RateHelper {
                           IborIndex iborIndex,
                           Pillar pillarChoice) {
         this(rate, tenor, calendar, fixedFrequency, fixedConvention, fixedDayCount,
-                iborIndex, null, new Period(0, TimeUnit.DAYS), null, pillarChoice);
+                iborIndex, null, new Period(0, TimeUnit.DAYS), null,
+                null, pillarChoice, new Date(), false,
+                Optional.empty(), Optional.empty(), null);
     }
 
     /** Mirrors {@code SwapRateHelper(rate, tenor, ..., spread, fwdStart, discountingCurve)}. */
@@ -91,7 +113,9 @@ public class SwapRateHelper extends RateHelper {
                           Period fwdStart,
                           Handle<YieldTermStructure> discountingCurve) {
         this(rate, tenor, calendar, fixedFrequency, fixedConvention, fixedDayCount,
-                iborIndex, spread, fwdStart, discountingCurve, Pillar.LastRelevantDate);
+                iborIndex, spread, fwdStart, discountingCurve,
+                null, Pillar.LastRelevantDate, new Date(), false,
+                Optional.empty(), Optional.empty(), null);
     }
 
     public SwapRateHelper(Handle<Quote> rate,
@@ -105,23 +129,145 @@ public class SwapRateHelper extends RateHelper {
                           Period fwdStart,
                           Handle<YieldTermStructure> discountingCurve,
                           Pillar pillarChoice) {
+        this(rate, tenor, calendar, fixedFrequency, fixedConvention, fixedDayCount,
+                iborIndex, spread, fwdStart, discountingCurve,
+                null, pillarChoice, new Date(), false,
+                Optional.empty(), Optional.empty(), null);
+    }
+
+    /**
+     * Official tenor constructor with all optional arguments. {@code settlementDays}
+     * may be {@code null} (the official {@code Null<Natural>()}); in that case
+     * the spot date is the index value date, as in {@code MakeVanillaSwap}.
+     */
+    public SwapRateHelper(Handle<Quote> rate,
+                          Period tenor,
+                          Calendar calendar,
+                          Frequency fixedFrequency,
+                          BusinessDayConvention fixedConvention,
+                          DayCounter fixedDayCount,
+                          IborIndex iborIndex,
+                          Handle<Quote> spread,
+                          Period fwdStart,
+                          Handle<YieldTermStructure> discountingCurve,
+                          Integer settlementDays,
+                          Pillar pillarChoice,
+                          Date customPillarDate,
+                          boolean endOfMonth,
+                          Optional<Boolean> useIndexedCoupons,
+                          Optional<BusinessDayConvention> floatConvention,
+                          FloatingRateCouponPricer couponPricer) {
         super(rate);
         QL_REQUIRE(iborIndex != null, "null ibor index");
         tenor_ = tenor;
+        startDate_ = new Date();
+        endDate_ = new Date();
         calendar_ = calendar;
         fixedFrequency_ = fixedFrequency;
         fixedConvention_ = fixedConvention;
         fixedDayCount_ = fixedDayCount;
-        pillarChoice_ = pillarChoice;
+        pillarChoice_ = pillarChoice != null ? pillarChoice : Pillar.LastRelevantDate;
+        customPillarDate_ = customPillarDate != null ? customPillarDate : new Date();
         spread_ = spread != null ? spread : new Handle<>(null, false);
         fwdStart_ = fwdStart != null ? fwdStart : new Period(0, TimeUnit.DAYS);
         discountHandle_ = discountingCurve != null
                 ? discountingCurve : new Handle<>(null, false);
+        settlementDays_ = settlementDays;
+        endOfMonth_ = endOfMonth;
+        useIndexedCoupons_ = useIndexedCoupons != null ? useIndexedCoupons : Optional.empty();
+        floatConvention_ = floatConvention != null ? floatConvention : Optional.empty();
+        couponPricer_ = couponPricer;
+        initialize(iborIndex);
+    }
 
+    /**
+     * Official dated constructor. As in QuantLib, an explicit start and end
+     * date are incompatible with a {@link Frequency#ONCE} fixed leg.
+     */
+    public SwapRateHelper(Handle<Quote> rate,
+                          Date startDate,
+                          Date endDate,
+                          Calendar calendar,
+                          Frequency fixedFrequency,
+                          BusinessDayConvention fixedConvention,
+                          DayCounter fixedDayCount,
+                          IborIndex iborIndex) {
+        this(rate, startDate, endDate, calendar, fixedFrequency, fixedConvention,
+                fixedDayCount, iborIndex, null, null, Pillar.LastRelevantDate,
+                new Date(), false, Optional.empty(), Optional.empty(), null);
+    }
+
+    public SwapRateHelper(Handle<Quote> rate,
+                          Date startDate,
+                          Date endDate,
+                          Calendar calendar,
+                          Frequency fixedFrequency,
+                          BusinessDayConvention fixedConvention,
+                          DayCounter fixedDayCount,
+                          IborIndex iborIndex,
+                          Handle<Quote> spread,
+                          Handle<YieldTermStructure> discountingCurve,
+                          Pillar pillarChoice,
+                          Date customPillarDate,
+                          boolean endOfMonth,
+                          Optional<Boolean> useIndexedCoupons,
+                          Optional<BusinessDayConvention> floatConvention,
+                          FloatingRateCouponPricer couponPricer) {
+        super(rate);
+        QL_REQUIRE(iborIndex != null, "null ibor index");
+        QL_REQUIRE(fixedFrequency != Frequency.ONCE,
+                "fixedFrequency == Once is not supported when passing explicit "
+                        + "startDate and endDate");
+        tenor_ = null;
+        startDate_ = startDate != null ? startDate : new Date();
+        endDate_ = endDate != null ? endDate : new Date();
+        calendar_ = calendar;
+        fixedFrequency_ = fixedFrequency;
+        fixedConvention_ = fixedConvention;
+        fixedDayCount_ = fixedDayCount;
+        pillarChoice_ = pillarChoice != null ? pillarChoice : Pillar.LastRelevantDate;
+        customPillarDate_ = customPillarDate != null ? customPillarDate : new Date();
+        spread_ = spread != null ? spread : new Handle<>(null, false);
+        fwdStart_ = new Period(0, TimeUnit.DAYS);
+        discountHandle_ = discountingCurve != null
+                ? discountingCurve : new Handle<>(null, false);
+        settlementDays_ = null;
+        endOfMonth_ = endOfMonth;
+        useIndexedCoupons_ = useIndexedCoupons != null ? useIndexedCoupons : Optional.empty();
+        floatConvention_ = floatConvention != null ? floatConvention : Optional.empty();
+        couponPricer_ = couponPricer;
+        initialize(iborIndex);
+    }
+
+    /**
+     * Official constructor taking a {@code SwapIndex}. QuantLib delegates to
+     * the tenor constructor using the index's tenor, fixing calendar, fixed
+     * leg frequency/convention/day counter and ibor index, with null
+     * settlement days and no floating convention override.
+     */
+    public SwapRateHelper(Handle<Quote> rate,
+                          SwapIndex swapIndex,
+                          Handle<Quote> spread,
+                          Period fwdStart,
+                          Handle<YieldTermStructure> discountingCurve,
+                          Pillar pillarChoice,
+                          Date customPillarDate,
+                          boolean endOfMonth,
+                          Optional<Boolean> useIndexedCoupons,
+                          FloatingRateCouponPricer couponPricer) {
+        this(rate, swapIndex.tenor(), swapIndex.fixingCalendar(),
+                swapIndex.fixedLegTenor().frequency(), swapIndex.fixedLegConvention(),
+                swapIndex.dayCounter(), swapIndex.iborIndex(), spread, fwdStart,
+                discountingCurve, null, pillarChoice, customPillarDate, endOfMonth,
+                useIndexedCoupons, Optional.empty(), couponPricer);
+    }
+
+    private void initialize(IborIndex iborIndex) {
         // Clone the index and link it to the curve under construction.  The
         // relinkable handle must not register as an observer (it would create
         // a notification cycle while bootstrapping).
         iborIndex_ = iborIndex.clone(termStructureHandle_);
+        pillarDate_ = customPillarDate_;
         initializeDates();
     }
 
@@ -161,7 +307,9 @@ public class SwapRateHelper extends RateHelper {
     @Override
     public double impliedQuote() {
         QL_REQUIRE(termStructure_ != null, "term structure not set");
-        swap_.recalculate();
+        // The helper does not register as an observer of the curve, so force
+        // the coupons to recalculate against the current curve.
+        swap_.deepUpdate();
         double basisPoint = 1.0e-4;
         double floatingLegNPV = swap_.floatingLegNPV();
         double spreadNPV = swap_.floatingLegBPS() / basisPoint * spread();
@@ -170,40 +318,93 @@ public class SwapRateHelper extends RateHelper {
     }
 
     private void initializeDates() {
-        Date evaluation = Settings.instance.evaluationDate().Date();
-        // Mirrors MakeVanillaSwap: the spot date comes from the index's
-        // valueDate interface, and the termination date is the unadjusted
-        // start + tenor.  The schedule then adjusts the termination date
-        // with its termination-date convention; advancing the maturity
-        // here instead would create spurious stubs whenever the
-        // anniversary falls on a weekend.
-        Date refDate = iborIndex_.fixingCalendar().adjust(evaluation,
-                BusinessDayConvention.FOLLOWING);
-        Date spot = iborIndex_.fixingCalendar().advance(refDate, iborIndex_.fixingDays(),
-                TimeUnit.DAYS, BusinessDayConvention.FOLLOWING, false);
-        Date start = spot.add(fwdStart_);
-        if (fwdStart_.length() < 0)
-            start = calendar_.adjust(start, BusinessDayConvention.PRECEDING);
-        else if (fwdStart_.length() > 0)
-            start = calendar_.adjust(start, BusinessDayConvention.FOLLOWING);
-        Date maturity = start.add(tenor_);
-        // MakeVanillaSwap uses fixedConvention_ for both the fixed leg's
-        // business-day convention and its termination-date convention.
-        Schedule fixed = new Schedule(start, maturity, new Period(fixedFrequency_), calendar_,
+        Date start;
+        boolean explicitStart = TimeUtils.neq(startDate_, new Date());
+        if (explicitStart) {
+            start = startDate_;
+        } else {
+            Date evaluation = Settings.instance.evaluationDate().Date();
+            Date spot;
+            if (settlementDays_ == null) {
+                // Mirrors MakeVanillaSwap: the spot date comes from the index's
+                // valueDate interface, whose reference date is the evaluation
+                // date adjusted on the index fixing calendar.
+                Date refDate = iborIndex_.fixingCalendar().adjust(evaluation,
+                        BusinessDayConvention.FOLLOWING);
+                spot = iborIndex_.valueDate(refDate);
+            } else {
+                // Settlement days are counted from the actual evaluation date,
+                // even when it is not a business day (official issue #753).
+                Calendar settlementCalendar = calendar_;
+                spot = settlementCalendar.advance(evaluation, settlementDays_,
+                        TimeUnit.DAYS, BusinessDayConvention.FOLLOWING, false);
+            }
+            start = spot.add(fwdStart_);
+            if (fwdStart_.length() < 0)
+                start = calendar_.adjust(start, BusinessDayConvention.PRECEDING);
+            else if (fwdStart_.length() > 0)
+                start = calendar_.adjust(start, BusinessDayConvention.FOLLOWING);
+        }
+
+        Date end;
+        if (TimeUtils.neq(endDate_, new Date()))
+            end = endDate_;
+        else {
+            // Mirrors MakeVanillaSwap: termination date is the unadjusted
+            // start plus the swap tenor. The schedule then adjusts the
+            // termination date with its termination-date convention; advancing
+            // the maturity here instead would create spurious stubs whenever
+            // the anniversary falls on a weekend.
+            end = start.add(tenor_);
+        }
+
+        // MakeVanillaSwap uses fixedFrequency_ == Once ? tenor_ : Period(fixedFrequency_).
+        Period fixedTenor = fixedFrequency_ == Frequency.ONCE
+                ? tenor_ : new Period(fixedFrequency_);
+        BusinessDayConvention floatConvention = floatConvention_.orElse(
+                iborIndex_.businessDayConvention());
+
+        Schedule fixed = new Schedule(start, end, fixedTenor, calendar_,
                 fixedConvention_, fixedConvention_,
-                DateGenerationRule.BACKWARD, false, new Date(), new Date());
-        Schedule floating = new Schedule(start, maturity, iborIndex_.tenor(), calendar_,
-                iborIndex_.businessDayConvention(), iborIndex_.businessDayConvention(),
-                DateGenerationRule.BACKWARD, false, new Date(), new Date());
+                DateGenerationRule.BACKWARD, endOfMonth_, new Date(), new Date());
+        Schedule floating = new Schedule(start, end, iborIndex_.tenor(), calendar_,
+                floatConvention, floatConvention,
+                DateGenerationRule.BACKWARD, endOfMonth_, new Date(), new Date());
         swap_ = new VanillaSwap(VanillaSwap.Type.Payer, 1.0, fixed, 0.0, fixedDayCount_,
-                floating, iborIndex_, 0.0, iborIndex_.dayCounter());
+                floating, iborIndex_, 0.0, iborIndex_.dayCounter(),
+                Optional.empty(), useIndexedCoupons_);
         swap_.setPricingEngine(new DiscountingSwapEngine(discountRelinkableHandle_));
+
+        if (couponPricer_ != null)
+            CashflowUtil.setCouponPricer(swap_.floatingLeg(), couponPricer_);
+
+        earliestDate_ = swap_.startDate();
         maturityDate_ = swap_.maturityDate();
-        Date fixingEnd = swap_.lastFloatingFixingEnd();
-        latestRelevantDate_ = TimeUtils.greater(fixingEnd, maturityDate_) ? fixingEnd : maturityDate_;
-        earliestDate_ = start;
-        pillarDate_ = pillarChoice_ == Pillar.MaturityDate ? maturityDate_ : latestRelevantDate_;
-        QL_REQUIRE(!TimeUtils.greater(pillarDate_, latestRelevantDate_),
-                "pillar after the latest relevant date");
+        List<CashFlow> floatingLeg = swap_.floatingLeg();
+        Date lastFixingEnd = ((IborCoupon) floatingLeg.get(floatingLeg.size() - 1)).fixingEndDate();
+        latestRelevantDate_ = TimeUtils.greater(lastFixingEnd, maturityDate_)
+                ? lastFixingEnd : maturityDate_;
+
+        switch (pillarChoice_) {
+            case MaturityDate:
+                pillarDate_ = maturityDate_;
+                break;
+            case LastRelevantDate:
+                pillarDate_ = latestRelevantDate_;
+                break;
+            case CustomDate:
+                // pillarDate_ already assigned at construction time
+                QL_REQUIRE(!TimeUtils.less(pillarDate_, earliestDate_),
+                        "pillar date (" + pillarDate_ + ") must be later "
+                                + "than or equal to the instrument's earliest date ("
+                                + earliestDate_ + ")");
+                QL_REQUIRE(!TimeUtils.greater(pillarDate_, latestRelevantDate_),
+                        "pillar date (" + pillarDate_ + ") must be before "
+                                + "or equal to the instrument's latest relevant date ("
+                                + latestRelevantDate_ + ")");
+                break;
+            default:
+                QL_REQUIRE(false, "unknown Pillar::Choice");
+        }
     }
 }
