@@ -2,13 +2,10 @@ package jquant.indexes;
 
 import jquant.Currency;
 import jquant.Handle;
-import jquant.math.Rounding;
 import jquant.termstructures.YieldTermStructure;
 import jquant.time.Period;
 import jquant.time.calendars.UnitedStates;
 import jquant.time.daycounters.Actual360;
-
-import java.util.Set;
 
 /**
  * USD LIBOR fixed in London against the US Libor-impact calendar.
@@ -27,7 +24,6 @@ public class USDLibor extends Libor {
     }
 
     private static Currency usd() {
-        return new Currency("U.S. dollar", "USD", 840, "$", "\u00A2", 100,
-                new Rounding(), new Currency(), Set.of());
+        return Currencies.usd();
     }
 }

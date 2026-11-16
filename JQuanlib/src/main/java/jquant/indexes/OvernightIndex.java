@@ -19,7 +19,7 @@ public class OvernightIndex extends IborIndex {
 
     //! returns a copy of itself linked to a different forwarding curve
     @Override
-    public IborIndex clone(final Handle<YieldTermStructure> h) {
+    public OvernightIndex clone(final Handle<YieldTermStructure> h) {
         return new OvernightIndex(familyName(),
                 fixingDays(),
                 currency(),

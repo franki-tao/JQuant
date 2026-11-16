@@ -65,6 +65,8 @@ public class LocalBootstrap {
         for (RateHelper helper : ts.instruments_) {
             for (Quote quote : helper.notifications())
                 ts.registerWith(quote);
+            for (jquant.patterns.Observable observable : helper.notificationObservables())
+                ts.registerWith(observable);
         }
     }
 

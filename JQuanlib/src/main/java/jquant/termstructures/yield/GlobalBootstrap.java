@@ -188,12 +188,18 @@ public class GlobalBootstrap implements MultiCurveBootstrapContributor {
      */
     public void setup(PiecewiseYieldCurve ts) {
         ts_ = ts;
-        for (RateHelper helper : ts_.instruments_)
+        for (RateHelper helper : ts_.instruments_) {
             for (jquant.Quote quote : helper.notifications())
                 ts_.registerWith(quote);
-        for (RateHelper helper : additionalHelpers_)
+            for (jquant.patterns.Observable observable : helper.notificationObservables())
+                ts_.registerWith(observable);
+        }
+        for (RateHelper helper : additionalHelpers_) {
             for (jquant.Quote quote : helper.notifications())
                 ts_.registerWith(quote);
+            for (jquant.patterns.Observable observable : helper.notificationObservables())
+                ts_.registerWith(observable);
+        }
 
         // setup optimizer and EndCriteria
         double accuracy = accuracy_ != null ? accuracy_ : ts_.accuracy_;
