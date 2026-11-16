@@ -2,9 +2,16 @@ package jquant.methods.finitedifferences.solvers;
 
 import jquant.math.Array;
 import jquant.methods.finitedifferences.operators.FdmLinearOpComposite;
+import jquant.methods.finitedifferences.schemes.CraigSneydScheme;
+import jquant.methods.finitedifferences.schemes.CrankNicolsonScheme;
 import jquant.methods.finitedifferences.schemes.DouglasScheme;
+import jquant.methods.finitedifferences.schemes.ExplicitEulerScheme;
 import jquant.methods.finitedifferences.schemes.FdmScheme;
+import jquant.methods.finitedifferences.schemes.HundsdorferScheme;
 import jquant.methods.finitedifferences.schemes.ImplicitEulerScheme;
+import jquant.methods.finitedifferences.schemes.MethodOfLinesScheme;
+import jquant.methods.finitedifferences.schemes.ModifiedCraigSneydScheme;
+import jquant.methods.finitedifferences.schemes.TrBDF2Scheme;
 import jquant.methods.finitedifferences.stepconditions.FdmStepConditionComposite;
 import jquant.methods.finitedifferences.utilities.FdmBoundaryConditionSet;
 
@@ -19,8 +26,8 @@ import static jquant.math.MathUtils.QL_EPSILON;
  * Backward solver for finite-difference schemes.
  *
  * <p>Port of {@code ql/methods/finitedifferences/solvers/fdmbackwardsolver.{hpp,cpp}}.
- * Douglas is the supported scheme for this port; damping, when requested,
- * uses implicit Euler as in QuantLib.
+ * All scheme descriptions from {@link FdmSchemeDesc} are supported; damping,
+ * when requested, uses implicit Euler as in QuantLib.
  */
 public class FdmBackwardSolver {
     private final FdmLinearOpComposite map_;
@@ -57,15 +64,56 @@ public class FdmBackwardSolver {
         }
 
         switch (schemeDesc_.type) {
+            case HundsdorferType:
+                final HundsdorferScheme hsEvolver = new HundsdorferScheme(
+                        schemeDesc_.theta, schemeDesc_.mu, map_, bcSet_);
+                x = rollbackImpl(hsEvolver, x, dampingTo, to, steps);
+                break;
             case DouglasType:
                 final DouglasScheme dsEvolver =
                         new DouglasScheme(schemeDesc_.theta, map_, bcSet_);
                 x = rollbackImpl(dsEvolver, x, dampingTo, to, steps);
                 break;
+            case CrankNicolsonType:
+                final CrankNicolsonScheme cnEvolver = new CrankNicolsonScheme(
+                        schemeDesc_.theta, map_, bcSet_);
+                x = rollbackImpl(cnEvolver, x, dampingTo, to, steps);
+                break;
+            case CraigSneydType:
+                final CraigSneydScheme csEvolver = new CraigSneydScheme(
+                        schemeDesc_.theta, schemeDesc_.mu, map_, bcSet_);
+                x = rollbackImpl(csEvolver, x, dampingTo, to, steps);
+                break;
+            case ModifiedCraigSneydType:
+                final ModifiedCraigSneydScheme mcsEvolver =
+                        new ModifiedCraigSneydScheme(
+                                schemeDesc_.theta, schemeDesc_.mu, map_, bcSet_);
+                x = rollbackImpl(mcsEvolver, x, dampingTo, to, steps);
+                break;
             case ImplicitEulerType:
                 final ImplicitEulerScheme implicitEvolver =
                         new ImplicitEulerScheme(map_, bcSet_);
                 x = rollbackImpl(implicitEvolver, x, from, to, allSteps);
+                break;
+            case ExplicitEulerType:
+                final ExplicitEulerScheme explicitEvolver =
+                        new ExplicitEulerScheme(map_, bcSet_);
+                x = rollbackImpl(explicitEvolver, x, dampingTo, to, steps);
+                break;
+            case MethodOfLinesType:
+                final MethodOfLinesScheme methodOfLines =
+                        new MethodOfLinesScheme(schemeDesc_.theta,
+                                schemeDesc_.mu, map_, bcSet_);
+                x = rollbackImpl(methodOfLines, x, dampingTo, to, steps);
+                break;
+            case TrBDF2Type:
+                final FdmSchemeDesc trDesc = FdmSchemeDesc.CraigSneyd();
+                final CraigSneydScheme trapezoidalScheme =
+                        new CraigSneydScheme(trDesc.theta, trDesc.mu,
+                                map_, bcSet_);
+                final TrBDF2Scheme trBDF2 = new TrBDF2Scheme(
+                        schemeDesc_.theta, map_, trapezoidalScheme, bcSet_);
+                x = rollbackImpl(trBDF2, x, dampingTo, to, steps);
                 break;
             default:
                 QL_FAIL("scheme type " + schemeDesc_.type

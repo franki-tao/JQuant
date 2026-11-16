@@ -28,6 +28,11 @@ public class ImplicitEulerScheme implements FdmScheme {
 
     @Override
     public Array step(Array a, double t) {
+        return step(a, t, 1.0);
+    }
+
+    //! Visible to CrankNicolsonScheme, as in the official friend declaration.
+    Array step(Array a, double t, double theta) {
         QL_REQUIRE(t - dt_ > -1e-8, "a step towards negative time given");
         map_.setTime(Math.max(0.0, t - dt_), t);
         for (FdmBoundaryCondition bc : bcSet_) {
@@ -41,7 +46,7 @@ public class ImplicitEulerScheme implements FdmScheme {
         if (map_.size() != 1) {
             QL_FAIL("multi-dimensional implicit Euler is not supported by this port");
         }
-        a = map_.solve_splitting(0, a, -dt_);
+        a = map_.solve_splitting(0, a, -theta * dt_);
 
         for (FdmBoundaryCondition bc : bcSet_) {
             bc.applyAfterSolving(a);
