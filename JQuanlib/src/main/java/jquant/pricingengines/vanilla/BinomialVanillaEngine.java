@@ -31,12 +31,14 @@ import jquant.time.Calendar;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.Frequency;
+import jquant.time.TimeUtils;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
+import static jquant.math.MathUtils.close_enough;
 
 /**
  * Pricing engine for vanilla options using binomial trees.
@@ -131,8 +133,6 @@ public class BinomialVanillaEngine implements PricingEngine {
         double s0 = process_.stateVariable().getValue().value();
         QL_REQUIRE(s0 > 0.0, "negative or null underlying given");
         Date maturityDate = arguments_.exercise.lastDate();
-        QL_REQUIRE(arguments_.exercise.type() == Exercise.Type.European,
-                "not an European option");
         double v = process_.blackVolatility().getValue()
                 .blackVol(maturityDate, s0, false);
         double r = process_.riskFreeRate().getValue()
@@ -219,6 +219,12 @@ public class BinomialVanillaEngine implements PricingEngine {
         results_.gamma = gamma;
         if (Double.isNaN(delta) || Double.isNaN(gamma)) {
             results_.theta = Double.NaN;
+        } else if (arguments_.exercise.type() == Exercise.Type.American
+                && TimeUtils.leq(arguments_.exercise.date(0), referenceDate)
+                && close_enough(p0, payoff.value(s0))) {
+            // Allow for roundoff when identifying exercise at the root.
+            // The intrinsic value is time-independent; the PDE does not hold here.
+            results_.theta = 0.0;
         } else {
             results_.theta = Greeks.blackScholesTheta(
                     process_, results_.value, results_.delta, results_.gamma);

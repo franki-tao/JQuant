@@ -14,6 +14,14 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
           from earliestDate and not earlier
 */
 public class AmericanExercise extends EarlyExercise {
+    public AmericanExercise(final Date earliest, final Date latest) {
+        this(earliest, latest, false);
+    }
+
+    public AmericanExercise(final Date latest) {
+        this(latest, false);
+    }
+
     public AmericanExercise(final Date earliest,
                             final Date latest,
                             boolean payoffAtExpiry) {

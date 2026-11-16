@@ -1,6 +1,7 @@
 package jquant.pricingengines.vanilla;
 
 import jquant.Exercise;
+import jquant.Handle;
 import jquant.Option;
 import jquant.PricingEngine;
 import jquant.EuropeanOption;
@@ -31,14 +32,21 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  */
 public class AnalyticEuropeanEngine implements PricingEngine {
     private final GeneralizedBlackScholesProcess process_;
+    private final Handle<YieldTermStructure> discountCurve_;
     private final Option.arguments arguments_ = new Option.arguments();
     private final EuropeanOption.results results_ = new EuropeanOption.results();
     private final Set<Observer> observers_ = new HashSet<>();
 
     public AnalyticEuropeanEngine(GeneralizedBlackScholesProcess process) {
+        this(process, new Handle<>(null, false));
+    }
+
+    public AnalyticEuropeanEngine(GeneralizedBlackScholesProcess process,
+                                  Handle<YieldTermStructure> discountCurve) {
         process_ = process;
+        discountCurve_ = discountCurve;
         results_.additionalResults = new HashMap<>();
-        process_.registerObserver(new Observer() {
+        Observer observer = new Observer() {
             @Override
             public void registerWith(Observable observable) {
             }
@@ -55,7 +63,9 @@ public class AnalyticEuropeanEngine implements PricingEngine {
             public void update() {
                 notifyObservers();
             }
-        });
+        };
+        process_.registerObserver(observer);
+        discountCurve_.get().registerObserver(observer);
     }
 
     public GeneralizedBlackScholesProcess process() {
@@ -98,23 +108,30 @@ public class AnalyticEuropeanEngine implements PricingEngine {
         StrikedTypePayoff payoff = (StrikedTypePayoff) arguments_.payoff;
         Date exerciseDate = arguments_.exercise.lastDate();
 
+        // if the discount curve is not specified, we default to the
+        // risk free rate curve embedded within the GBM process
+        YieldTermStructure discount = discountCurve_.empty()
+                ? process_.riskFreeRate().getValue()
+                : discountCurve_.getValue();
+
         double variance = process_.blackVolatility().getValue()
                 .blackVariance(exerciseDate, payoff.strike(), false);
         double dividendDiscount = process_.dividendYield().getValue().discount(exerciseDate, false);
         YieldTermStructure riskFree = process_.riskFreeRate().getValue();
-        double riskFreeDiscount = riskFree.discount(exerciseDate, false);
+        double df = discount.discount(exerciseDate, false);
+        double riskFreeDiscountForFwdEstimation = riskFree.discount(exerciseDate, false);
         double spot = process_.stateVariable().getValue().value();
         QL_REQUIRE(spot > 0.0, "negative or null underlying given");
-        double forwardPrice = spot * dividendDiscount / riskFreeDiscount;
+        double forwardPrice = spot * dividendDiscount / riskFreeDiscountForFwdEstimation;
 
         BlackCalculator black = new BlackCalculator(
-                payoff, forwardPrice, Math.sqrt(variance), riskFreeDiscount);
+                payoff, forwardPrice, Math.sqrt(variance), df);
         results_.value = black.value();
         results_.delta = black.delta(spot);
         results_.gamma = black.gamma(spot);
         results_.elasticity = black.elasticity(spot);
 
-        DayCounter rfdc = riskFree.dayCounter();
+        DayCounter rfdc = discount.dayCounter();
         double t = rfdc.yearFraction(riskFree.referenceDate(), exerciseDate, new Date(), new Date());
         results_.rho = black.rho(t);
 

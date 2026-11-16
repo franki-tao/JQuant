@@ -16,6 +16,7 @@ public class Joshi4 extends BinomialTree<Joshi4> {
         double d2 = (Math.log(x0 / strike) + driftPerStep * oddSteps) /
                 Math.sqrt(variance);
         pu_ = computeUpProb((oddSteps - 1.0) / 2.0, d2);
+        QL_REQUIRE(pu_ > 0.0 && pu_ < 1.0, "invalid up probability: " + pu_);
         pd_ = 1.0 - pu_;
         double pdash = computeUpProb((oddSteps - 1.0) / 2.0, d2 + Math.sqrt(variance));
         up_ = ermqdt * pdash / pu_;

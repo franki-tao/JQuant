@@ -1,7 +1,9 @@
 package jquant;
 
+import jquant.cashflows.Dividend;
 import jquant.math.Function;
 import jquant.math.solvers1d.Brent;
+import jquant.pricingengines.vanilla.AnalyticDividendEuropeanEngine;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
 import jquant.processes.BlackScholesMertonProcess;
 import jquant.processes.GeneralizedBlackScholesProcess;
@@ -11,6 +13,9 @@ import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
 import jquant.time.Date;
 import jquant.time.TimeUtils;
 
+import java.util.List;
+
+import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 import static jquant.math.MathUtils.QL_EPSILON;
 
@@ -144,6 +149,66 @@ public class EuropeanOption extends Option {
     }
 
     /**
+     * Black volatility that reprices {@code targetValue}, with QuantLib
+     * defaults for accuracy, evaluation limit and bracket.
+     */
+    public double impliedVolatility(double targetValue,
+                                    GeneralizedBlackScholesProcess process,
+                                    List<? extends Dividend> dividends) {
+        return impliedVolatility(targetValue, process, dividends,
+                1.0e-4, 100, 1.0e-7, 4.0);
+    }
+
+    public double impliedVolatility(double targetValue,
+                                    GeneralizedBlackScholesProcess process,
+                                    List<? extends Dividend> dividends,
+                                    double accuracy, int maxEvaluations) {
+        return impliedVolatility(targetValue, process, dividends,
+                accuracy, maxEvaluations, 1.0e-7, 4.0);
+    }
+
+    /**
+     * QuantLib {@code VanillaOption::impliedVolatility} with a discrete
+     * dividend schedule. European options use {@link AnalyticEuropeanEngine}
+     * for an empty schedule and {@link AnalyticDividendEuropeanEngine}
+     * otherwise; American and Bermudan exercise require the finite-difference
+     * engine, which is not available here.
+     */
+    public double impliedVolatility(double targetValue,
+                                    GeneralizedBlackScholesProcess process,
+                                    List<? extends Dividend> dividends,
+                                    double accuracy, int maxEvaluations,
+                                    double minVol, double maxVol) {
+        QL_REQUIRE(process != null, "no process given");
+        QL_REQUIRE(!isExpired(), "option expired");
+        QL_REQUIRE(minVol >= 0.0, "minimum volatility must be non-negative");
+        QL_REQUIRE(maxEvaluations > 0, "maximum number of evaluations must be positive");
+        SimpleQuote volQuote = new SimpleQuote((minVol + maxVol) / 2.0);
+        GeneralizedBlackScholesProcess newProcess =
+                cloneWithFlatVolatility(process, volQuote);
+
+        PricingEngine solverEngine;
+        switch (exercise_.type()) {
+            case European:
+                solverEngine = (dividends == null || dividends.isEmpty())
+                        ? new AnalyticEuropeanEngine(newProcess)
+                        : new AnalyticDividendEuropeanEngine(newProcess, dividends);
+                break;
+            case American:
+            case Bermudan:
+                QL_FAIL("implied volatility for " + exercise_.type()
+                        + " exercise requires a finite-difference engine, "
+                        + "which is not implemented");
+                return Double.NaN;
+            default:
+                QL_FAIL("unknown exercise type");
+                return Double.NaN;
+        }
+        return solveImpliedVolatility(targetValue, solverEngine, volQuote,
+                accuracy, maxEvaluations, minVol, maxVol);
+    }
+
+    /**
      * Solves {@code engine price - targetValue = 0} with Brent.
      *
      * <p>The spot, dividend and risk-free handles of {@code engine} are shared.
@@ -170,7 +235,7 @@ public class EuropeanOption extends Option {
     }
 
     private double solveImpliedVolatility(double targetValue,
-                                          AnalyticEuropeanEngine solverEngine,
+                                          PricingEngine solverEngine,
                                           SimpleQuote volQuote,
                                           double accuracy, int maxEvaluations,
                                           double minVol, double maxVol) {
