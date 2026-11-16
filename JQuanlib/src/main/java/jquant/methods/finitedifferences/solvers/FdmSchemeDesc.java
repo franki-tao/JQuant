@@ -65,6 +65,10 @@ public class FdmSchemeDesc {
         return new FdmSchemeDesc(FdmSchemeType.ImplicitEulerType, 0.0, 0.0);
     }
 
+    public static FdmSchemeDesc MethodOfLines() {
+        return MethodOfLines(0.001, 0.01);
+    }
+
     public static FdmSchemeDesc MethodOfLines(double eps, double relInitStepSize) {
         return new FdmSchemeDesc(FdmSchemeType.MethodOfLinesType, eps, relInitStepSize);
     }

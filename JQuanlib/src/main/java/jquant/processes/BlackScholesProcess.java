@@ -24,6 +24,13 @@ public class BlackScholesProcess extends GeneralizedBlackScholesProcess {
     public BlackScholesProcess(
             final Handle<Quote> x0,
             final Handle<YieldTermStructure> riskFreeTS,
+            final Handle<BlackVolTermStructure> blackVolTS) {
+        this(x0, riskFreeTS, blackVolTS, new EulerDiscretization(), false);
+    }
+
+    public BlackScholesProcess(
+            final Handle<Quote> x0,
+            final Handle<YieldTermStructure> riskFreeTS,
             final Handle<BlackVolTermStructure> blackVolTS,
             final StochasticProcess1DImpl d,
             boolean forceDiscretization) {
