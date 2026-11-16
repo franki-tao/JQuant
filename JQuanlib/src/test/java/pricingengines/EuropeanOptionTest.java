@@ -1,11 +1,14 @@
 package pricingengines;
 
+import jquant.AmericanExercise;
 import jquant.EuropeanExercise;
 import jquant.EuropeanOption;
 import jquant.Handle;
 import jquant.Option;
 import jquant.Quote;
 import jquant.Settings;
+import jquant.cashflows.Dividend;
+import jquant.methods.lattices.LeisenReimer;
 import jquant.quotes.SimpleQuote;
 import jquant.Compounding;
 import jquant.patterns.Observable;
@@ -15,7 +18,9 @@ import jquant.pricingengines.CashOrNothingPayoff;
 import jquant.pricingengines.GapPayoff;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.StrikedTypePayoff;
+import jquant.pricingengines.vanilla.AnalyticDividendEuropeanEngine;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
+import jquant.pricingengines.vanilla.BinomialVanillaEngine;
 import jquant.processes.BlackScholesMertonProcess;
 import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.termstructures.YieldTermStructure;
@@ -30,15 +35,19 @@ import jquant.time.Period;
 import jquant.time.TimeUnit;
 import jquant.time.calendars.NullCalendar;
 import jquant.time.daycounters.Actual360;
+import jquant.time.daycounters.Actual365Fixed;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Analytic European prices from QuantLib {@code test-suite/europeanoption.cpp}
@@ -703,6 +712,116 @@ public class EuropeanOptionTest {
     }
 
     @Test
+    public void testImpliedVolWithDividends() {
+        int maxEvaluations = 100;
+        double tolerance = 1.0e-6;
+
+        Option.Type[] types = {Option.Type.Call, Option.Type.Put};
+        double[] strikes = {90.0, 99.5, 100.0, 100.5, 110.0};
+        int[] lengths = {36, 180, 360, 1080};
+        double[] underlyings = {90.0, 95.0, 99.9, 100.0, 100.1, 105.0, 110.0};
+        double[] qRates = {0.01, 0.05, 0.10};
+        double[] rRates = {0.01, 0.05, 0.10};
+        double[] vols = {0.01, 0.20, 0.30, 0.70, 0.90};
+
+        DayCounter dc = new Actual360(false);
+        Date today = Date.todaysDate();
+        Settings.instance.evaluationDate().equal(today);
+
+        SimpleQuote spot = new SimpleQuote(0.0);
+        SimpleQuote vol = new SimpleQuote(0.0);
+        BlackVolTermStructure volTS = flatVol(today, vol, dc);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.0);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+
+        for (Option.Type type : types) {
+            for (double strike : strikes) {
+                for (int length : lengths) {
+                    // option to check
+                    Date exDate = today.add(length);
+                    EuropeanExercise exercise = new EuropeanExercise(exDate);
+                    PlainVanillaPayoff payoff = new PlainVanillaPayoff(type, strike);
+                    GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                            new Handle<>(spot, true),
+                            new Handle<>(qTS, true),
+                            new Handle<>(rTS, true),
+                            new Handle<>(volTS, true));
+                    List<Dividend> dividends = Dividend.dividendVector(
+                            List.of(today.add(length / 2)), new double[]{1.0});
+                    EuropeanOption option = new EuropeanOption(payoff, exercise);
+                    AnalyticDividendEuropeanEngine divEngine =
+                            new AnalyticDividendEuropeanEngine(process, dividends);
+                    option.setPricingEngine(divEngine);
+
+                    for (double u : underlyings) {
+                        for (double m : qRates) {
+                            for (double n : rRates) {
+                                for (double v : vols) {
+                                    double q = m, r = n;
+                                    spot.setValue(u);
+                                    qRate.setValue(q);
+                                    rRate.setValue(r);
+                                    vol.setValue(v);
+
+                                    double value = option.NPV();
+                                    if (value == 0.0)
+                                        continue;
+
+                                    // shift guess somehow
+                                    vol.setValue(v * 0.5);
+                                    if (Math.abs(value - option.NPV()) <= 1.0e-12) {
+                                        // flat price vs vol --- pointless (and
+                                        // numerically unstable) to solve
+                                        continue;
+                                    }
+
+                                    double implVol;
+                                    try {
+                                        implVol = option.impliedVolatility(
+                                                value, process, dividends, tolerance, maxEvaluations);
+                                    } catch (Exception e) {
+                                        fail("\nimplied vol calculation failed:"
+                                                + "\n   option:         " + type
+                                                + "\n   strike:         " + strike
+                                                + "\n   spot value:     " + u
+                                                + "\n   dividend yield: " + q
+                                                + "\n   risk-free rate: " + r
+                                                + "\n   today:          " + today
+                                                + "\n   maturity:       " + exDate
+                                                + "\n   volatility:     " + v
+                                                + "\n   option value:   " + value, e);
+                                        return;
+                                    }
+                                    if (Math.abs(implVol - v) > tolerance) {
+                                        // the difference might not matter
+                                        vol.setValue(implVol);
+                                        double value2 = option.NPV();
+                                        double error = relativeError(value, value2, u);
+                                        assertTrue(error <= tolerance,
+                                                type + " option:\n"
+                                                        + "    spot value:          " + u + "\n"
+                                                        + "    strike:              " + strike + "\n"
+                                                        + "    dividend yield:      " + q + "\n"
+                                                        + "    risk-free rate:      " + r + "\n"
+                                                        + "    maturity:            " + exDate + "\n\n"
+                                                        + "    original volatility: " + v + "\n"
+                                                        + "    price:               " + value + "\n"
+                                                        + "    implied volatility:  " + implVol + "\n"
+                                                        + "    corresponding price: " + value2 + "\n"
+                                                        + "    error:               " + error);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     public void testImpliedVolContainment() {
         int maxEvaluations = 100;
         double tolerance = 1.0e-6;
@@ -759,6 +878,309 @@ public class EuropeanOptionTest {
 
         assertTrue(Math.abs(option2.NPV() - refValue) > 1.0e-8,
                 "volatility change did not cause the value to change");
+    }
+
+    @Test
+    public void testAnalyticEngineDiscountCurve() {
+        DayCounter dc = new Actual360(false);
+        Date today = Date.todaysDate();
+        Settings.instance.evaluationDate().equal(today);
+
+        SimpleQuote spot = new SimpleQuote(1000.0);
+        SimpleQuote qRate = new SimpleQuote(0.01);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.015);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+        SimpleQuote vol = new SimpleQuote(0.02);
+        BlackVolTermStructure volTS = flatVol(today, vol, dc);
+        SimpleQuote discRate = new SimpleQuote(0.015);
+        YieldTermStructure discTS = flatRate(today, discRate, dc);
+
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true),
+                new Handle<>(qTS, true),
+                new Handle<>(rTS, true),
+                new Handle<>(volTS, true));
+        AnalyticEuropeanEngine engineSingleCurve = new AnalyticEuropeanEngine(process);
+        AnalyticEuropeanEngine engineMultiCurve = new AnalyticEuropeanEngine(
+                process, new Handle<>(discTS, true));
+
+        PlainVanillaPayoff payoff = new PlainVanillaPayoff(Option.Type.Call, 1025.0);
+        Date exDate = today.add(new Period(1, TimeUnit.YEARS));
+        EuropeanOption option = new EuropeanOption(payoff, new EuropeanExercise(exDate));
+
+        option.setPricingEngine(engineSingleCurve);
+        double npvSingleCurve = option.NPV();
+        option.setPricingEngine(engineMultiCurve);
+        double npvMultiCurve = option.NPV();
+        // check that NPV is the same regardless of engine interface
+        assertEquals(npvSingleCurve, npvMultiCurve);
+        // check that NPV changes if discount rate is changed
+        discRate.setValue(0.023);
+        npvMultiCurve = option.NPV();
+        assertNotEquals(npvSingleCurve, npvMultiCurve);
+    }
+
+    @Test
+    public void testFarOutOfTheMoneyBinomialEngines() {
+        DayCounter dc = new Actual365Fixed();
+        Date today = new Date(15, Month.AUGUST, 2026);
+        Settings.instance.evaluationDate().equal(today);
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.01);
+        SimpleQuote rRate = new SimpleQuote(0.03);
+        SimpleQuote vol = new SimpleQuote(0.15);
+
+        GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true),
+                new Handle<>(flatRate(today, qRate, dc), true),
+                new Handle<>(flatRate(today, rRate, dc), true),
+                new Handle<>(flatVol(today, vol, dc), true));
+
+        PlainVanillaPayoff payoff = new PlainVanillaPayoff(Option.Type.Put, 500.0);
+        EuropeanExercise exercise = new EuropeanExercise(
+                today.add(new Period(1, TimeUnit.DAYS)));
+        EuropeanOption option = new EuropeanOption(payoff, exercise);
+
+        int steps = 801;
+
+        option.setPricingEngine(new AnalyticEuropeanEngine(process));
+        double expected = option.NPV();
+
+        option.setPricingEngine(new BinomialVanillaEngine(process, steps,
+                BinomialVanillaEngine.TreeType.LEISEN_REIMER));
+        double calculated = option.NPV();
+        double tolerance = 1.0e-6;
+        assertTrue(Math.abs(calculated - expected) <= tolerance * expected,
+                "Leisen-Reimer far-OTM put: expected " + expected
+                        + ", calculated " + calculated);
+
+        // the Joshi up probability is an asymptotic series, and diverges this
+        // far from the money
+        option.setPricingEngine(new BinomialVanillaEngine(process, steps,
+                BinomialVanillaEngine.TreeType.JOSHI));
+        IllegalArgumentException joshi =
+                assertThrows(IllegalArgumentException.class, option::NPV);
+        assertTrue(joshi.getMessage().contains("invalid up probability"),
+                "unexpected message: " + joshi.getMessage());
+
+        // pu rounds to 1 for a deep in-the-money call. The down move now comes
+        // from Peizer-Pratt at -d2, so these price instead of throwing.
+        double[] deepStrike = {20.0, 80.0, 50.0};
+        double[] deepVol = {0.15, 0.01, 0.01};
+        double[] deepR = {0.03, 0.0, 0.0};
+        double[] deepQ = {0.01, 0.0, 0.0};
+        for (int i = 0; i < 3; i++) {
+            GeneralizedBlackScholesProcess deepProcess = new BlackScholesMertonProcess(
+                    new Handle<>(spot, true),
+                    new Handle<>(flatRate(today, new SimpleQuote(deepQ[i]), dc), true),
+                    new Handle<>(flatRate(today, new SimpleQuote(deepR[i]), dc), true),
+                    new Handle<>(flatVol(today, new SimpleQuote(deepVol[i]), dc), true));
+            EuropeanOption deepOption = new EuropeanOption(
+                    new PlainVanillaPayoff(Option.Type.Call, deepStrike[i]), exercise);
+            deepOption.setPricingEngine(new AnalyticEuropeanEngine(deepProcess));
+            double deepExpected = deepOption.NPV();
+            deepOption.setPricingEngine(new BinomialVanillaEngine(deepProcess, steps,
+                    BinomialVanillaEngine.TreeType.LEISEN_REIMER));
+            double deepCalculated = deepOption.NPV();
+            double deepError = Math.abs(deepCalculated - deepExpected);
+            double deepTolerance = 1.0e-6;
+            assertTrue(deepError <= deepTolerance,
+                    "deep ITM call K=" + deepStrike[i] + ": expected " + deepExpected
+                            + ", calculated " + deepCalculated);
+        }
+
+        // Past the point where the up probability underflows, the step stays
+        // finite and puts the mass on the up move.
+        LeisenReimer.LeisenReimerStep step =
+                LeisenReimer.leisenReimerStep(1000.0, 1.0, 1.0, 5);
+        assertEquals(1.0, step.upProbability);
+        assertTrue(Double.isFinite(step.up) && step.up > 0.0,
+                "up factor is not finite and positive: " + step.up);
+        assertTrue(Double.isFinite(step.down) && step.down > 0.0,
+                "down factor is not finite and positive: " + step.down);
+    }
+
+    @Test
+    public void testLargeDriftBinomialEngines() {
+        DayCounter dc = new Actual365Fixed();
+        Date today = new Date(15, Month.AUGUST, 2026);
+        Settings.instance.evaluationDate().equal(today);
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        SimpleQuote rRate = new SimpleQuote(0.10);
+        SimpleQuote vol = new SimpleQuote(0.02);
+
+        GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true),
+                new Handle<>(flatRate(today, qRate, dc), true),
+                new Handle<>(flatRate(today, rRate, dc), true),
+                new Handle<>(flatVol(today, vol, dc), true));
+
+        PlainVanillaPayoff payoff = new PlainVanillaPayoff(Option.Type.Call, 100.0);
+        EuropeanOption option = new EuropeanOption(payoff,
+                new EuropeanExercise(today.add(new Period(1, TimeUnit.YEARS))));
+
+        option.setPricingEngine(new AnalyticEuropeanEngine(process));
+        double expected = option.NPV();
+
+        // at ten steps 4*variance is below 3*drift^2, so the equal-probability
+        // up step has no real solution
+        option.setPricingEngine(new BinomialVanillaEngine(process, 10,
+                BinomialVanillaEngine.TreeType.ADDITIVE_EQP));
+        IllegalArgumentException additive =
+                assertThrows(IllegalArgumentException.class, option::NPV);
+        assertTrue(additive.getMessage().contains("more steps are needed"),
+                "unexpected message: " + additive.getMessage());
+
+        option.setPricingEngine(new BinomialVanillaEngine(process, 501,
+                BinomialVanillaEngine.TreeType.ADDITIVE_EQP));
+        double calculated = option.NPV();
+        double tolerance = 0.02;
+        assertTrue(Math.abs(calculated - expected) <= tolerance * expected,
+                "AdditiveEQP call: expected " + expected + ", calculated " + calculated);
+    }
+
+    @Test
+    public void testBinomialGreeksWithCoincidentNodes() {
+        // At low volatility deep in the money the Leisen-Reimer up probability
+        // is 0.99999999999999645, and the up and down factors round to one.
+        DayCounter dc = new Actual360(false);
+        Date today = Date.todaysDate();
+        Settings.instance.evaluationDate().equal(today);
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        SimpleQuote rRate = new SimpleQuote(0.0);
+        SimpleQuote vol = new SimpleQuote(0.01);
+
+        GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true),
+                new Handle<>(flatRate(today, qRate, dc), true),
+                new Handle<>(flatRate(today, rRate, dc), true),
+                new Handle<>(flatVol(today, vol, dc), true));
+
+        PlainVanillaPayoff payoff = new PlainVanillaPayoff(Option.Type.Call, 20.0);
+        EuropeanExercise exercise = new EuropeanExercise(
+                today.add(new Period(1, TimeUnit.YEARS)));
+
+        EuropeanOption option = new EuropeanOption(payoff, exercise);
+        option.setPricingEngine(new BinomialVanillaEngine(process, 801,
+                BinomialVanillaEngine.TreeType.LEISEN_REIMER));
+
+        EuropeanOption reference = new EuropeanOption(payoff, exercise);
+        reference.setPricingEngine(new AnalyticEuropeanEngine(process));
+
+        // Boost BOOST_CHECK_CLOSE's third argument is a percentage:
+        // 1.0e-8 percent == 1.0e-10 relative.
+        double referenceNpv = reference.NPV();
+        double optionNpv = option.NPV();
+        assertTrue(Math.abs(optionNpv - referenceNpv) <= 1.0e-10 * Math.abs(referenceNpv),
+                "tree value " + optionNpv + " differs from analytic " + referenceNpv);
+
+        IllegalArgumentException delta =
+                assertThrows(IllegalArgumentException.class, option::delta);
+        assertTrue(delta.getMessage().contains("delta not provided"),
+                "unexpected message: " + delta.getMessage());
+        IllegalArgumentException gamma =
+                assertThrows(IllegalArgumentException.class, option::gamma);
+        assertTrue(gamma.getMessage().contains("gamma not provided"),
+                "unexpected message: " + gamma.getMessage());
+        IllegalArgumentException theta =
+                assertThrows(IllegalArgumentException.class, option::theta);
+        assertTrue(theta.getMessage().contains("theta not provided"),
+                "unexpected message: " + theta.getMessage());
+    }
+
+    @Test
+    public void testBinomialAmericanExerciseAtMaturity() {
+        Date today = new Date(21, Month.SEPTEMBER, 2026);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual365Fixed();
+        Date maturity = today.add(91);
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true),
+                new Handle<>(flatRate(today, new SimpleQuote(0.0), dc), true),
+                new Handle<>(flatRate(today, new SimpleQuote(0.05), dc), true),
+                new Handle<>(flatVol(today, new SimpleQuote(0.15), dc), true));
+        AmericanExercise americanExercise = new AmericanExercise(today, maturity);
+        EuropeanExercise europeanExercise = new EuropeanExercise(maturity);
+
+        // At 51 steps, the last grid time can round below the unsnapped maturity.
+        int[] steps = {3, 7, 13, 25, 51, 75, 101, 151, 251, 299};
+        double tolerance = 1.0e-10;
+        String[] engineNames = {"CRR", "JR", "LR"};
+        BinomialVanillaEngine.TreeType[] engineTypes = {
+                BinomialVanillaEngine.TreeType.COX_ROSS_RUBINSTEIN,
+                BinomialVanillaEngine.TreeType.JARROW_RUDD,
+                BinomialVanillaEngine.TreeType.LEISEN_REIMER
+        };
+        for (int n : steps) {
+            for (int e = 0; e < engineTypes.length; e++) {
+                for (Option.Type type : new Option.Type[]{Option.Type.Call, Option.Type.Put}) {
+                    PlainVanillaPayoff payoff = new PlainVanillaPayoff(type, 85.0);
+                    EuropeanOption american = new EuropeanOption(payoff, americanExercise);
+                    EuropeanOption european = new EuropeanOption(payoff, europeanExercise);
+                    BinomialVanillaEngine engine =
+                            new BinomialVanillaEngine(process, n, engineTypes[e]);
+                    american.setPricingEngine(engine);
+                    european.setPricingEngine(engine);
+                    double americanValue = american.NPV();
+                    double europeanValue = european.NPV();
+
+                    // The American exercise set includes exercise at European expiry.
+                    assertTrue(americanValue >= europeanValue - tolerance,
+                            engineNames[e] + " " + type + " with " + n + " steps: "
+                                    + "American value " + americanValue
+                                    + " is below European value " + europeanValue);
+
+                    // With no dividends and positive rates, early call exercise has no value.
+                    if (e == 0 && n == 51 && type == Option.Type.Call) {
+                        assertTrue(Math.abs(americanValue - europeanValue) <= tolerance,
+                                "Non-dividend-paying CRR call with 51 steps: "
+                                        + "American value " + americanValue
+                                        + " differs from European value " + europeanValue);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testBinomialAmericanExerciseOnlyAtMaturity() {
+        Date today = new Date(21, Month.SEPTEMBER, 2026);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual365Fixed();
+        Date maturity = today.add(91);
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true),
+                new Handle<>(flatRate(today, new SimpleQuote(0.0), dc), true),
+                new Handle<>(flatRate(today, new SimpleQuote(0.05), dc), true),
+                new Handle<>(flatVol(today, new SimpleQuote(0.15), dc), true));
+        BinomialVanillaEngine engine = new BinomialVanillaEngine(process, 101,
+                BinomialVanillaEngine.TreeType.COX_ROSS_RUBINSTEIN);
+        AmericanExercise americanExercise = new AmericanExercise(maturity, maturity);
+        EuropeanExercise europeanExercise = new EuropeanExercise(maturity);
+
+        // At 101 steps, the snapped lower bound rounds above the unsnapped maturity.
+        for (Option.Type type : new Option.Type[]{Option.Type.Call, Option.Type.Put}) {
+            PlainVanillaPayoff payoff = new PlainVanillaPayoff(type, 85.0);
+            EuropeanOption american = new EuropeanOption(payoff, americanExercise);
+            EuropeanOption european = new EuropeanOption(payoff, europeanExercise);
+            american.setPricingEngine(engine);
+            european.setPricingEngine(engine);
+            double americanValue = american.NPV();
+            double europeanValue = european.NPV();
+            assertTrue(Math.abs(americanValue - europeanValue) <= 1.0e-10,
+                    type + " with 101 steps: terminal-only American value "
+                            + americanValue + " differs from European value " + europeanValue);
+        }
     }
 
     private static final class Flag implements Observer {

@@ -108,13 +108,32 @@ public class MathUtils {
 
     public static double PeizerPrattMethod2Inversion(double z, int n) {
         if (n % 2 != 1) {
-            throw new IllegalArgumentException("n must be odd.");
+            throw new IllegalArgumentException("n must be an odd number: " + n + " not allowed");
         }
         double result = (z / (n + 1.0 / 3.0 + 0.1 / (n + 1.0)));
         result *= result;
         result = Math.exp(-result * (n + 1.0 / 6.0));
-        result = 0.5 + (z > 0 ? 1 : -1) * Math.sqrt((0.25 * (1.0 - result)));
-        return result;
+        double root = Math.sqrt(1.0 - result);
+        // 0.5*(1.0-root) rewritten to keep its digits as root nears 1
+        if (z > 0.0)
+            return 0.5 * (1.0 + root);
+        else
+            return 0.5 * result / (1.0 + root);
+    }
+
+    /** Log of {@link #PeizerPrattMethod2Inversion}, finite when the probability underflows. */
+    public static double PeizerPrattMethod2LogInversion(double z, int n) {
+        if (n % 2 != 1) {
+            throw new IllegalArgumentException("n must be an odd number: " + n + " not allowed");
+        }
+        double denom = n + 1.0 / 3.0 + 0.1 / (n + 1.0);
+        double exponent = (z / denom) * (z / denom) * (n + 1.0 / 6.0);
+        double result = Math.exp(-exponent);
+        double root = Math.sqrt(1.0 - result);
+        if (z > 0.0)
+            return Math.log(0.5 * (1.0 + root));
+        // log(0.5*result/(1+root)), with result = exp(-exponent)
+        return -exponent + Math.log(0.5) - Math.log(1.0 + root);
     }
 
     public static double betaContinuedFraction(double a, double b, double x,
