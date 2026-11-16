@@ -35,7 +35,7 @@ import static jquant.processes.impl.ProcessUtil.*;
 
     \ingroup processes
 */
-public abstract class HestonProcess extends StochasticProcess {
+public class HestonProcess extends StochasticProcess {
     public enum Discretization {
         PartialTruncation,
         FullTruncation,
@@ -52,6 +52,18 @@ public abstract class HestonProcess extends StochasticProcess {
     private Handle<Quote> s0_;
     private double v0_, kappa_, theta_, sigma_, rho_;
     private Discretization discretization_;
+
+    public HestonProcess(Handle<YieldTermStructure> riskFreeRate,
+                         Handle<YieldTermStructure> dividendYield,
+                         Handle<Quote> s0,
+                         double v0,
+                         double kappa,
+                         double theta,
+                         double sigma,
+                         double rho) {
+        this(riskFreeRate, dividendYield, s0, v0, kappa, theta, sigma, rho,
+                Discretization.QuadraticExponentialMartingale);
+    }
 
     public HestonProcess(Handle<YieldTermStructure> riskFreeRate,
                          Handle<YieldTermStructure> dividendYield,

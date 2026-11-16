@@ -7,13 +7,19 @@ import jquant.Handle;
 import jquant.Option;
 import jquant.Payoff;
 import jquant.PricingEngine;
+import jquant.Quote;
 import jquant.Settings;
 import jquant.methods.finitedifferences.solvers.FdmSchemeDesc;
+import jquant.models.equity.HestonModel;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
 import jquant.pricingengines.vanilla.FdBlackScholesVanillaEngine;
+import jquant.pricingengines.vanilla.FdHestonVanillaEngine;
+import jquant.pricingengines.vanilla.MakeFdCIRVanillaEngine;
 import jquant.processes.BlackScholesMertonProcess;
 import jquant.processes.BlackScholesProcess;
+import jquant.processes.CoxIngersollRossProcess;
+import jquant.processes.HestonProcess;
 import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.equityfx.BlackConstantVol;
@@ -356,9 +362,10 @@ public class FdBlackScholesVanillaEngineTest {
     }
 
     /**
-     * Black-Scholes part of {@code testFdEnginesWithNonStrikedPayoff} from
-     * {@code test-suite/europeanoption.cpp}. The official Heston and CIR
-     * engines are not available in this port and are intentionally omitted.
+     * Ports {@code testFdEnginesWithNonStrikedPayoff} from
+     * {@code test-suite/europeanoption.cpp}: the Black-Scholes, Heston and
+     * CIR finite-difference engines must all reject the non-striked payoff
+     * with the official {@code "non-striked payoff given"} error.
      */
     @Test
     public void testFdEnginesWithNonStrikedPayoff() {
@@ -384,27 +391,43 @@ public class FdBlackScholesVanillaEngineTest {
         DayCounter dc = new Actual360(false);
 
         SimpleQuote spot = new SimpleQuote(100.0);
+        Handle<Quote> spotHandle = new Handle<>(spot, true);
         YieldTermStructure rTS = flatRate(today, new SimpleQuote(0.03), dc);
         YieldTermStructure qTS = flatRate(today, new SimpleQuote(0.0), dc);
         BlackVolTermStructure volTS = flatVol(today, new SimpleQuote(0.2), dc);
+        Handle<YieldTermStructure> rTSHandle = new Handle<>(rTS, true);
+        Handle<YieldTermStructure> qTSHandle = new Handle<>(qTS, true);
 
         BlackScholesMertonProcess process = new BlackScholesMertonProcess(
-                new Handle<>(spot, true),
-                new Handle<>(qTS, true),
-                new Handle<>(rTS, true),
+                spotHandle,
+                qTSHandle,
+                rTSHandle,
                 new Handle<>(volTS, true));
+
+        HestonModel hestonModel = new HestonModel(
+                new HestonProcess(rTSHandle, qTSHandle, spotHandle,
+                        0.04, 1.0, 0.04, 0.5, -0.7));
+        CoxIngersollRossProcess cirProcess =
+                new CoxIngersollRossProcess(1.0, 0.02, 0.03, 0.03);
 
         EuropeanOption option = new EuropeanOption(
                 new CappedCallPayoff(),
                 new EuropeanExercise(today.add(new Period(1, TimeUnit.YEARS))));
 
-        option.setPricingEngine(new FdBlackScholesVanillaEngine(process));
+        List<PricingEngine> engines = new ArrayList<>();
+        engines.add(new FdBlackScholesVanillaEngine(process));
+        engines.add(new FdHestonVanillaEngine(hestonModel));
+        engines.add(new MakeFdCIRVanillaEngine(cirProcess, process, 0.0).build());
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class, option::NPV);
-        assertTrue(exception.getMessage().contains("non-striked payoff given"),
-                "expected the non-striked payoff error, got: "
-                        + exception.getMessage());
+        for (PricingEngine engine : engines) {
+            option.setPricingEngine(engine);
+
+            IllegalArgumentException exception = assertThrows(
+                    IllegalArgumentException.class, option::NPV);
+            assertTrue(exception.getMessage().contains("non-striked payoff given"),
+                    "expected the non-striked payoff error, got: "
+                            + exception.getMessage());
+        }
     }
 
     private static double relativeError(double x1, double x2, double reference) {
