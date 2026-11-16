@@ -10,6 +10,8 @@ public class MathUtils {
 
     public static final int NULL_SIZE = 2147483647;
 
+    public static final int QL_MAX_INTEGER = Integer.MAX_VALUE;
+
     public static final double QL_MIN_POSITIVE_REAL = 2.22507e-308;
 
     public static final double M_EULER_MASCHERONI = 0.5772156649015328606065121;

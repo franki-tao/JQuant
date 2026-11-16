@@ -31,9 +31,7 @@ import jquant.math.optimization.impl.Configuration;
 import jquant.math.randomnumbers.MersenneTwisterUniformRng;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
 import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -68,13 +66,17 @@ public class DifferentialEvolution extends OptimizationMethod {
     private Candidate bestMemberEver_;
     private MersenneTwisterUniformRng rng_;
 
+    private static Candidate copyOf(Candidate c) {
+        Candidate copy = new Candidate(c.values.size());
+        copy.values = new Array(c.values);
+        copy.cost = c.cost;
+        return copy;
+    }
+
     private static List<Candidate> deepClone(List<Candidate> src) {
         List<Candidate> dst = new ArrayList<>(src.size());
         for (Candidate c : src) {
-            Candidate copy = new Candidate(c.values.size());
-            copy.values = new Array(c.values);
-            copy.cost = c.cost;
-            dst.add(copy);
+            dst.add(copyOf(c));
         }
         return dst;
     }
@@ -127,7 +129,9 @@ public class DifferentialEvolution extends OptimizationMethod {
     }
 
     private Array getMutationProbabilities(final List<Candidate> population) {
-        Array mutationProbabilities = currGenCrossover_;
+        // official Array assignment has value semantics; copy so that the
+        // Exponential branch below does not modify currGenCrossover_ in place
+        Array mutationProbabilities = new Array(currGenCrossover_);
         switch (configuration().crossoverType) {
             case Normal:
                 break;
@@ -322,7 +326,7 @@ public class DifferentialEvolution extends OptimizationMethod {
     private Array rotateArray(Array inputArray) {
         Array copy = new Array(inputArray);
         randomize(copy, 0, copy.size(), rng_);
-        return inputArray;
+        return copy;
     }
 
     private void crossover(final List<Candidate> oldPopulation,
@@ -373,13 +377,7 @@ public class DifferentialEvolution extends OptimizationMethod {
             }
             if (!Double.isFinite(trialCost))
                 trialCost = QL_MAX_REAL;
-            // selection: keep trial only if better than original
-            if (trialCost <= oldPopulation.get(popIter).cost) {
-                population.get(popIter).cost = trialCost;
-            } else {
-                population.get(popIter).values = new Array(oldPopulation.get(popIter).values);
-                population.get(popIter).cost = oldPopulation.get(popIter).cost;
-            }
+            population.get(popIter).cost = trialCost;
 
         }
     }
@@ -410,7 +408,9 @@ public class DifferentialEvolution extends OptimizationMethod {
 
         List<Candidate> population = new ArrayList<>();
         if (!configuration().initialPopulation.isEmpty()) {
-            population = CommonUtil.ArrayInit(configuration().initialPopulation.size(), new Candidate(1));
+            for (int i = 0; i < configuration().initialPopulation.size(); ++i) {
+                population.add(new Candidate(1));
+            }
             for (int i = 0; i < population.size(); ++i) {
                 population.get(i).values = configuration().initialPopulation.get(i);
                 QL_REQUIRE(population.get(i).values.size() == p.currentValue().size(),
@@ -427,7 +427,7 @@ public class DifferentialEvolution extends OptimizationMethod {
         }
         partialSort(population, 1);
         // std::partial_sort (population.begin(), population.begin() + 1, population.end(), sort_by_cost());
-        bestMemberEver_ = population.get(0);
+        bestMemberEver_ = copyOf(population.get(0));
         double fxOld = population.get(0).cost;
         int iteration = 0, stationaryPointIteration = 0;
 
@@ -437,7 +437,7 @@ public class DifferentialEvolution extends OptimizationMethod {
             partialSort(population, 1);
             // std::partial_sort (population.begin(), population.begin() + 1, population.end(), sort_by_cost());
             if (population.get(0).cost < bestMemberEver_.cost)
-                bestMemberEver_ = population.get(0);
+                bestMemberEver_ = copyOf(population.get(0));
             double fxNew = population.get(0).cost;
             // 装箱
             ReferencePkg<Integer> spi = new ReferencePkg<>(stationaryPointIteration);
@@ -460,26 +460,20 @@ public class DifferentialEvolution extends OptimizationMethod {
         }
         k = Math.min(k, population.size());
 
-        PriorityQueue<Candidate> maxHeap = new PriorityQueue<>(
-                k,
-                Comparator.comparingDouble((Candidate c) -> c.cost).reversed() // 降序排序（大顶堆）
-        );
-
-        for (Candidate candidate : population) {
-            if (maxHeap.size() < k) {
-                maxHeap.offer(candidate);
-            } else {
-                if (candidate.cost < maxHeap.peek().cost) {
-                    maxHeap.poll();
-                    maxHeap.offer(candidate);
-                }
-            }
-        }
-        List<Candidate> topK = new ArrayList<>(maxHeap);
-        topK.sort(Comparator.comparingDouble(c -> c.cost)); // 按 cost 升序
-
+        // Equivalent to std::partial_sort(begin, begin + k, end, sort_by_cost):
+        // the k smallest members end up sorted at the front, and every other
+        // member is preserved (swap, never overwrite or alias).
         for (int i = 0; i < k; i++) {
-            population.set(i, topK.get(i));
+            int minIndex = i;
+            for (int j = i + 1; j < population.size(); j++) {
+                if (population.get(j).cost < population.get(minIndex).cost)
+                    minIndex = j;
+            }
+            if (minIndex != i) {
+                Candidate tmp = population.get(i);
+                population.set(i, population.get(minIndex));
+                population.set(minIndex, tmp);
+            }
         }
     }
 }
