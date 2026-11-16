@@ -25,8 +25,13 @@ public class BlackScholesLattice extends TreeLattice1D {
         pu_ = tree.probability(0, 0, 1);
     }
 
-    /** Cox-Ross-Rubinstein tree with a constant risk-free discount per step. */
-    public BlackScholesLattice(final CoxRossRubinstein tree,
+    /**
+     * Binomial tree with a constant risk-free discount per step.
+     *
+     * <p>This is the Java counterpart of the {@code BlackScholesLattice<T>}
+     * template in {@code ql/methods/lattices/bsmlattice.hpp}.
+     */
+    public BlackScholesLattice(final BinomialTree<?> tree,
                                double riskFreeRate,
                                double end,
                                int steps) {
@@ -67,6 +72,14 @@ public class BlackScholesLattice extends TreeLattice1D {
                 return tree.underlying(i, j);
             }
         });
+    }
+
+    /** Cox-Ross-Rubinstein tree with a constant risk-free discount per step. */
+    public BlackScholesLattice(final CoxRossRubinstein tree,
+                               double riskFreeRate,
+                               double end,
+                               int steps) {
+        this((BinomialTree<?>) tree, riskFreeRate, end, steps);
     }
 
     public double riskFreeRate() {

@@ -57,17 +57,15 @@ public class ObservableValue<T> implements Observable {
      * @param newValue 要设置的新值。
      */
     public void setValue(T newValue) {
-        notifyObservers();
-        // 1. 获取旧值
+        // Official QuantLib stores the new value before notifying observers;
+        // otherwise a term structure reading its reference date while handling
+        // the notification would cache the old evaluation date.
         T oldValue = this.value;
+        this.value = newValue;
+        notifyObservers();
 
-        // 2. 检查值是否真正发生变化 (避免不必要的通知)
+        // firePropertyChange 会通知所有监听器，并传递属性名、旧值和新值。
         if (!Objects.equals(oldValue, newValue)) {
-            // 3. 更新值
-            this.value = newValue;
-
-            // 4. 通知观察者
-            // firePropertyChange 会通知所有监听器，并传递属性名、旧值和新值。
             support.firePropertyChange(VALUE_PROPERTY, oldValue, newValue);
         }
     }

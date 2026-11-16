@@ -97,6 +97,53 @@ public class EuropeanOption extends Option {
     }
 
     /**
+     * Black volatility that reprices {@code targetValue}, using the
+     * QuantLib {@code VanillaOption::impliedVolatility} default accuracy,
+     * evaluation limit and bracket ({@code 1e-4}, {@code 100},
+     * {@code 1e-7}, {@code 4}).
+     */
+    public double impliedVolatility(double targetValue, GeneralizedBlackScholesProcess process) {
+        return impliedVolatility(targetValue, process, 1.0e-4, 100, 1.0e-7, 4.0);
+    }
+
+    /**
+     * Black volatility that reprices {@code targetValue}, cloning
+     * {@code process} exactly as {@code ImpliedVolatilityHelper::clone}
+     * does in {@code ql/instruments/impliedvolatility.cpp}.
+     */
+    public double impliedVolatility(double targetValue,
+                                    GeneralizedBlackScholesProcess process,
+                                    double accuracy, int maxEvaluations) {
+        return impliedVolatility(targetValue, process, accuracy, maxEvaluations,
+                1.0e-7, 4.0);
+    }
+
+    /**
+     * Solves {@code cloned-process price - targetValue = 0} with Brent.
+     *
+     * <p>The spot, dividend and risk-free handles of {@code process} are
+     * shared. Volatility is a new constant curve that copies the original
+     * reference date, calendar and day counter and is driven by a temporary
+     * quote. The quote passed into the original curve is never written, so
+     * the original process is not notified and a failed solve leaves the
+     * market where it was.
+     */
+    public double impliedVolatility(double targetValue,
+                                    GeneralizedBlackScholesProcess process,
+                                    double accuracy, int maxEvaluations,
+                                    double minVol, double maxVol) {
+        QL_REQUIRE(process != null, "no process given");
+        QL_REQUIRE(!isExpired(), "option expired");
+        QL_REQUIRE(minVol >= 0.0, "minimum volatility must be non-negative");
+        QL_REQUIRE(maxEvaluations > 0, "maximum number of evaluations must be positive");
+        SimpleQuote volQuote = new SimpleQuote((minVol + maxVol) / 2.0);
+        AnalyticEuropeanEngine solverEngine = new AnalyticEuropeanEngine(
+                cloneWithFlatVolatility(process, volQuote));
+        return solveImpliedVolatility(targetValue, solverEngine, volQuote,
+                accuracy, maxEvaluations, minVol, maxVol);
+    }
+
+    /**
      * Solves {@code engine price - targetValue = 0} with Brent.
      *
      * <p>The spot, dividend and risk-free handles of {@code engine} are shared.
@@ -115,19 +162,18 @@ public class EuropeanOption extends Option {
         QL_REQUIRE(maxEvaluations > 0, "maximum number of evaluations must be positive");
         GeneralizedBlackScholesProcess process = engine.process();
         QL_REQUIRE(process != null, "no process given");
-        BlackVolTermStructure blackVol = process.blackVolatility().getValue();
         SimpleQuote volQuote = new SimpleQuote((minVol + maxVol) / 2.0);
-        BlackConstantVol flatVol = new BlackConstantVol(
-                blackVol.referenceDate(),
-                blackVol.calendar(),
-                new Handle<>(volQuote, true),
-                blackVol.dayCounter());
         AnalyticEuropeanEngine solverEngine = new AnalyticEuropeanEngine(
-                new BlackScholesMertonProcess(
-                        process.stateVariable(),
-                        process.dividendYield(),
-                        process.riskFreeRate(),
-                        new Handle<>(flatVol, true)));
+                cloneWithFlatVolatility(process, volQuote));
+        return solveImpliedVolatility(targetValue, solverEngine, volQuote,
+                accuracy, maxEvaluations, minVol, maxVol);
+    }
+
+    private double solveImpliedVolatility(double targetValue,
+                                          AnalyticEuropeanEngine solverEngine,
+                                          SimpleQuote volQuote,
+                                          double accuracy, int maxEvaluations,
+                                          double minVol, double maxVol) {
         setupArguments(solverEngine.getArguments());
         solverEngine.getArguments().validate();
 
@@ -149,6 +195,26 @@ public class EuropeanOption extends Option {
         Brent solver = new Brent();
         solver.setMaxEvaluations(maxEvaluations);
         return solver.solve(priceError, accuracy, (minVol + maxVol) / 2.0, minVol, maxVol);
+    }
+
+    /**
+     * {@code ImpliedVolatilityHelper::clone}: same state variable, dividend
+     * and risk-free curves, with a flat Black volatility driven by
+     * {@code volQuote}.
+     */
+    private static GeneralizedBlackScholesProcess cloneWithFlatVolatility(
+            GeneralizedBlackScholesProcess process, SimpleQuote volQuote) {
+        BlackVolTermStructure blackVol = process.blackVolatility().getValue();
+        BlackConstantVol flatVol = new BlackConstantVol(
+                blackVol.referenceDate(),
+                blackVol.calendar(),
+                new Handle<>(volQuote, true),
+                blackVol.dayCounter());
+        return new BlackScholesMertonProcess(
+                process.stateVariable(),
+                process.dividendYield(),
+                process.riskFreeRate(),
+                new Handle<>(flatVol, true));
     }
 
     @Override

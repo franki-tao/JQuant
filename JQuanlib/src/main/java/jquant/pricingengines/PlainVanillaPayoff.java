@@ -4,10 +4,9 @@ import jquant.Option;
 import jquant.Payoff;
 
 /**
- * Vanilla strike payoff. Cash-or-nothing, asset-or-nothing and gap payoffs
- * are not represented here.
+ * Vanilla strike payoff.
  */
-public class PlainVanillaPayoff implements Payoff {
+public class PlainVanillaPayoff implements StrikedTypePayoff {
     private final Option.Type optionType_;
     private final double strike_;
 

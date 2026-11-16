@@ -8,7 +8,7 @@ import jquant.patterns.Observable;
 import jquant.patterns.ObservableSettings;
 import jquant.patterns.Observer;
 import jquant.pricingengines.BlackCalculator;
-import jquant.pricingengines.PlainVanillaPayoff;
+import jquant.pricingengines.StrikedTypePayoff;
 import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.termstructures.YieldTermStructure;
 import jquant.time.Date;
@@ -93,9 +93,9 @@ public class AnalyticEuropeanEngine implements PricingEngine {
     @Override
     public void calculate() {
         QL_REQUIRE(arguments_.exercise.type() == Exercise.Type.European, "not an European option");
-        QL_REQUIRE(arguments_.payoff instanceof PlainVanillaPayoff,
-                "non-vanilla payoff given");
-        PlainVanillaPayoff payoff = (PlainVanillaPayoff) arguments_.payoff;
+        QL_REQUIRE(arguments_.payoff instanceof StrikedTypePayoff,
+                "non-striked payoff given");
+        StrikedTypePayoff payoff = (StrikedTypePayoff) arguments_.payoff;
         Date exerciseDate = arguments_.exercise.lastDate();
 
         double variance = process_.blackVolatility().getValue()

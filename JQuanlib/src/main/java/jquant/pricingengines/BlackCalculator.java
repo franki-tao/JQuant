@@ -8,11 +8,12 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 import static jquant.math.MathUtils.*;
 
 /**
- * Black 1976 calculator for a plain-vanilla payoff.
+ * Black 1976 calculator for plain-vanilla, cash-or-nothing,
+ * asset-or-nothing and gap payoffs.
  *
  * <p>Value is the alpha/beta substitution from QuantLib
  * {@code ql/pricingengines/blackcalculator.cpp}:
- * {@code discount * (forward * alpha + strike * beta)}.
+ * {@code discount * (forward * alpha + x * beta)}.
  * For a call, {@code alpha = N(d1)} and {@code beta = -N(d2)}.
  * For a put, {@code alpha = N(d1) - 1} and {@code beta = 1 - N(d2)}.
  * Cash-measure ITM probability is {@code N(d2)}.
@@ -39,13 +40,13 @@ public class BlackCalculator {
     private double dxDs_;
     private double dxDstrike_;
 
-    public BlackCalculator(PlainVanillaPayoff payoff, double forward, double stdDev, double discount) {
+    public BlackCalculator(StrikedTypePayoff payoff, double forward, double stdDev, double discount) {
         strike_ = payoff.strike();
         forward_ = forward;
         stdDev_ = stdDev;
         discount_ = discount;
         variance_ = stdDev * stdDev;
-        initialize(payoff.optionType());
+        initialize(payoff);
     }
 
     public BlackCalculator(Option.Type optionType, double strike, double forward,
@@ -267,7 +268,7 @@ public class BlackCalculator {
         return beta_;
     }
 
-    private void initialize(Option.Type optionType) {
+    private void initialize(StrikedTypePayoff payoff) {
         QL_REQUIRE(strike_ >= 0.0, "strike (" + strike_ + ") must be non-negative");
         QL_REQUIRE(forward_ > 0.0, "forward (" + forward_ + ") must be positive");
         QL_REQUIRE(stdDev_ >= 0.0, "stdDev (" + stdDev_ + ") must be non-negative");
@@ -319,18 +320,53 @@ public class BlackCalculator {
         dxDstrike_ = 1.0;
         dxDs_ = 0.0;
 
-        if (optionType == Option.Type.Call) {
+        if (payoff.optionType() == Option.Type.Call) {
             alpha_ = cumD1_;
             dAlphaDd1_ = nD1_;
             beta_ = -cumD2_;
             dBetaDd2_ = -nD2_;
-        } else if (optionType == Option.Type.Put) {
+        } else if (payoff.optionType() == Option.Type.Put) {
             alpha_ = -1.0 + cumD1_;
             dAlphaDd1_ = nD1_;
             beta_ = 1.0 - cumD2_;
             dBetaDd2_ = -nD2_;
         } else {
             QL_FAIL("invalid option type");
+        }
+
+        // Now dispatch on the payoff type, as the QuantLib
+        // BlackCalculator::Calculator visitor does.
+        if (payoff instanceof PlainVanillaPayoff) {
+            // nothing to do: the plain-vanilla coefficients above are final
+        } else if (payoff instanceof CashOrNothingPayoff cash) {
+            alpha_ = dAlphaDd1_ = 0.0;
+            x_ = cash.cashPayoff();
+            dxDstrike_ = 0.0;
+            if (payoff.optionType() == Option.Type.Call) {
+                beta_ = cumD2_;
+                dBetaDd2_ = nD2_;
+            } else if (payoff.optionType() == Option.Type.Put) {
+                beta_ = 1.0 - cumD2_;
+                dBetaDd2_ = -nD2_;
+            } else {
+                QL_FAIL("invalid option type");
+            }
+        } else if (payoff instanceof AssetOrNothingPayoff) {
+            beta_ = dBetaDd2_ = 0.0;
+            if (payoff.optionType() == Option.Type.Call) {
+                alpha_ = cumD1_;
+                dAlphaDd1_ = nD1_;
+            } else if (payoff.optionType() == Option.Type.Put) {
+                alpha_ = 1.0 - cumD1_;
+                dAlphaDd1_ = -nD1_;
+            } else {
+                QL_FAIL("invalid option type");
+            }
+        } else if (payoff instanceof GapPayoff gap) {
+            x_ = gap.secondStrike();
+            dxDstrike_ = 0.0;
+        } else {
+            QL_FAIL("unsupported payoff type: " + payoff.name());
         }
     }
 }
