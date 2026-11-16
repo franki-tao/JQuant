@@ -26,4 +26,8 @@ public abstract class BinomialTree<T extends BinomialTree<T>> extends Tree<T> {
     public int descendant(int level, int index, int branch) {
         return index + branch;
     }
+
+    public abstract double underlying(int i, int index);
+
+    public abstract double probability(int i, int index, int branch);
 }

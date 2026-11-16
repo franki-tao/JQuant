@@ -4,12 +4,20 @@ import jquant.EuropeanExercise;
 import jquant.EuropeanOption;
 import jquant.Handle;
 import jquant.Option;
+import jquant.Quote;
 import jquant.Settings;
 import jquant.quotes.SimpleQuote;
 import jquant.Compounding;
+import jquant.patterns.Observable;
+import jquant.patterns.Observer;
+import jquant.pricingengines.AssetOrNothingPayoff;
+import jquant.pricingengines.CashOrNothingPayoff;
+import jquant.pricingengines.GapPayoff;
 import jquant.pricingengines.PlainVanillaPayoff;
+import jquant.pricingengines.StrikedTypePayoff;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
 import jquant.processes.BlackScholesMertonProcess;
+import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.equityfx.BlackConstantVol;
 import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
@@ -18,11 +26,17 @@ import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.Frequency;
 import jquant.time.Month;
+import jquant.time.Period;
+import jquant.time.TimeUnit;
 import jquant.time.calendars.NullCalendar;
 import jquant.time.daycounters.Actual360;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -423,6 +437,379 @@ public class EuropeanOptionTest {
         assertTrue(process.blackVolatility().getValue() == volCurve);
         assertTrue(volCurve.dayCounter() == dc);
         assertEquals(price, call.NPV(), 0.0);
+    }
+
+    @Test
+    public void testGreeks() {
+        // Official testGreeks: analytic greeks against central finite
+        // differences. The tolerance is the official map value (1.0e-5)
+        // applied through relativeError(expected, calculated, spot).
+        Map<String, Double> tolerance = new LinkedHashMap<>();
+        tolerance.put("delta", 1.0e-5);
+        tolerance.put("gamma", 1.0e-5);
+        tolerance.put("theta", 1.0e-5);
+        tolerance.put("rho", 1.0e-5);
+        tolerance.put("divRho", 1.0e-5);
+        tolerance.put("vega", 1.0e-5);
+
+        Option.Type[] types = {Option.Type.Call, Option.Type.Put};
+        double[] strikes = {50.0, 99.5, 100.0, 100.5, 150.0};
+        double[] underlyings = {100.0};
+        double[] qRates = {0.04, 0.05, 0.06};
+        double[] rRates = {0.01, 0.05, 0.15};
+        double[] residualTimes = {1.0, 2.0};
+        double[] vols = {0.11, 0.50, 1.20};
+
+        DayCounter dc = new Actual360(false);
+        Date today = Date.todaysDate();
+        Settings.instance.evaluationDate().equal(today);
+        try {
+            SimpleQuote spot = new SimpleQuote(0.0);
+            SimpleQuote qRate = new SimpleQuote(0.0);
+            SimpleQuote rRate = new SimpleQuote(0.0);
+            SimpleQuote vol = new SimpleQuote(0.0);
+            YieldTermStructure qTS = evalDateFlatRate(qRate, dc);
+            YieldTermStructure rTS = evalDateFlatRate(rRate, dc);
+            BlackVolTermStructure volTS = evalDateFlatVol(vol, dc);
+
+            for (Option.Type type : types) {
+                for (double strike : strikes) {
+                    for (double residualTime : residualTimes) {
+                        Date exDate = today.add(timeToDays(residualTime));
+                        EuropeanExercise exercise = new EuropeanExercise(exDate);
+                        for (int kk = 0; kk < 4; kk++) {
+                            StrikedTypePayoff payoff = switch (kk) {
+                                case 0 -> new PlainVanillaPayoff(type, strike);
+                                case 1 -> new CashOrNothingPayoff(type, strike, 100.0);
+                                case 2 -> new AssetOrNothingPayoff(type, strike);
+                                case 3 -> new GapPayoff(type, strike, 100.0);
+                                default -> throw new IllegalStateException();
+                            };
+                            BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                                    new Handle<>(spot, true),
+                                    new Handle<>(qTS, true),
+                                    new Handle<>(rTS, true),
+                                    new Handle<>(volTS, true));
+                            AnalyticEuropeanEngine engine = new AnalyticEuropeanEngine(process);
+                            EuropeanOption option = new EuropeanOption(payoff, exercise);
+                            option.setPricingEngine(engine);
+
+                            for (double u : underlyings) {
+                                for (double m : qRates) {
+                                    for (double n : rRates) {
+                                        for (double v : vols) {
+                                            double q = m, r = n;
+                                            spot.setValue(u);
+                                            qRate.setValue(q);
+                                            rRate.setValue(r);
+                                            vol.setValue(v);
+
+                                            double value = option.NPV();
+                                            Map<String, Double> calculated = new LinkedHashMap<>();
+                                            calculated.put("delta", option.delta());
+                                            calculated.put("gamma", option.gamma());
+                                            calculated.put("theta", option.theta());
+                                            calculated.put("rho", option.rho());
+                                            calculated.put("divRho", option.dividendRho());
+                                            calculated.put("vega", option.vega());
+
+                                            if (value > spot.value() * 1.0e-5) {
+                                                Map<String, Double> expected = new LinkedHashMap<>();
+
+                                                // perturb spot and get delta and gamma
+                                                double du = u * 1.0e-4;
+                                                spot.setValue(u + du);
+                                                double valueP = option.NPV();
+                                                double deltaP = option.delta();
+                                                spot.setValue(u - du);
+                                                double valueM = option.NPV();
+                                                double deltaM = option.delta();
+                                                spot.setValue(u);
+                                                expected.put("delta", (valueP - valueM) / (2 * du));
+                                                expected.put("gamma", (deltaP - deltaM) / (2 * du));
+
+                                                // perturb rates and get rho and dividend rho
+                                                double dr = r * 1.0e-4;
+                                                rRate.setValue(r + dr);
+                                                valueP = option.NPV();
+                                                rRate.setValue(r - dr);
+                                                valueM = option.NPV();
+                                                rRate.setValue(r);
+                                                expected.put("rho", (valueP - valueM) / (2 * dr));
+
+                                                double dq = q * 1.0e-4;
+                                                qRate.setValue(q + dq);
+                                                valueP = option.NPV();
+                                                qRate.setValue(q - dq);
+                                                valueM = option.NPV();
+                                                qRate.setValue(q);
+                                                expected.put("divRho", (valueP - valueM) / (2 * dq));
+
+                                                // perturb volatility and get vega
+                                                double dv = v * 1.0e-4;
+                                                vol.setValue(v + dv);
+                                                valueP = option.NPV();
+                                                vol.setValue(v - dv);
+                                                valueM = option.NPV();
+                                                vol.setValue(v);
+                                                expected.put("vega", (valueP - valueM) / (2 * dv));
+
+                                                // perturb date and get theta
+                                                double dT = dc.yearFraction(today.substract(1),
+                                                        today.add(1), new Date(), new Date());
+                                                Settings.instance.evaluationDate()
+                                                        .equal(today.substract(1));
+                                                valueM = option.NPV();
+                                                Settings.instance.evaluationDate()
+                                                        .equal(today.add(1));
+                                                valueP = option.NPV();
+                                                Settings.instance.evaluationDate().equal(today);
+                                                expected.put("theta", (valueP - valueM) / dT);
+
+                                                for (Map.Entry<String, Double> entry
+                                                        : calculated.entrySet()) {
+                                                    String greek = entry.getKey();
+                                                    double expct = expected.get(greek);
+                                                    double calcl = entry.getValue();
+                                                    double tol = tolerance.get(greek);
+                                                    double error = relativeError(expct, calcl, u);
+                                                    assertTrue(error <= tol,
+                                                            type + " " + payoff.name()
+                                                                    + " payoff, strike " + strike
+                                                                    + ", q " + q + ", r " + r
+                                                                    + ", residual time "
+                                                                    + residualTime + ", vol " + v
+                                                                    + ": expected " + greek + " "
+                                                                    + expct + ", calculated " + calcl
+                                                                    + ", error " + error
+                                                                    + ", tolerance " + tol);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } finally {
+            Settings.instance.evaluationDate().equal(today);
+        }
+    }
+
+    @Test
+    public void testImpliedVol() {
+        int maxEvaluations = 100;
+        double tolerance = 1.0e-6;
+
+        Option.Type[] types = {Option.Type.Call, Option.Type.Put};
+        double[] strikes = {90.0, 99.5, 100.0, 100.5, 110.0};
+        int[] lengths = {36, 180, 360, 1080};
+        double[] underlyings = {90.0, 95.0, 99.9, 100.0, 100.1, 105.0, 110.0};
+        double[] qRates = {0.01, 0.05, 0.10};
+        double[] rRates = {0.01, 0.05, 0.10};
+        double[] vols = {0.01, 0.20, 0.30, 0.70, 0.90};
+
+        DayCounter dc = new Actual360(false);
+        Date today = Date.todaysDate();
+        Settings.instance.evaluationDate().equal(today);
+
+        SimpleQuote spot = new SimpleQuote(0.0);
+        SimpleQuote vol = new SimpleQuote(0.0);
+        BlackVolTermStructure volTS = flatVol(today, vol, dc);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.0);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+
+        for (Option.Type type : types) {
+            for (double strike : strikes) {
+                for (int length : lengths) {
+                    Date exDate = today.add(length);
+                    EuropeanExercise exercise = new EuropeanExercise(exDate);
+                    PlainVanillaPayoff payoff = new PlainVanillaPayoff(type, strike);
+                    GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                            new Handle<>(spot, true),
+                            new Handle<>(qTS, true),
+                            new Handle<>(rTS, true),
+                            new Handle<>(volTS, true));
+                    EuropeanOption option = new EuropeanOption(payoff, exercise);
+                    option.setPricingEngine(new AnalyticEuropeanEngine(process));
+
+                    for (double u : underlyings) {
+                        for (double m : qRates) {
+                            for (double n : rRates) {
+                                for (double v : vols) {
+                                    double q = m, r = n;
+                                    spot.setValue(u);
+                                    qRate.setValue(q);
+                                    rRate.setValue(r);
+                                    vol.setValue(v);
+
+                                    double value = option.NPV();
+                                    if (value == 0.0)
+                                        continue;
+
+                                    // shift guess somehow
+                                    vol.setValue(v * 0.5);
+                                    if (Math.abs(value - option.NPV()) <= 1.0e-12) {
+                                        // flat price vs vol --- pointless (and
+                                        // numerically unstable) to solve
+                                        continue;
+                                    }
+
+                                    double implVol;
+                                    try {
+                                        implVol = option.impliedVolatility(
+                                                value, process, tolerance, maxEvaluations);
+                                    } catch (Exception e) {
+                                        throw new AssertionError("\nimplied vol calculation failed:"
+                                                + "\n   option:         " + type
+                                                + "\n   strike:         " + strike
+                                                + "\n   spot value:     " + u
+                                                + "\n   dividend yield: " + q
+                                                + "\n   risk-free rate: " + r
+                                                + "\n   today:          " + today
+                                                + "\n   maturity:       " + exDate
+                                                + "\n   volatility:     " + v
+                                                + "\n   option value:   " + value, e);
+                                    }
+                                    if (Math.abs(implVol - v) > tolerance) {
+                                        // the difference might not matter
+                                        vol.setValue(implVol);
+                                        double value2 = option.NPV();
+                                        double error = relativeError(value, value2, u);
+                                        assertTrue(error <= tolerance,
+                                                type + " option:\n"
+                                                        + "    spot value:          " + u + "\n"
+                                                        + "    strike:              " + strike + "\n"
+                                                        + "    dividend yield:      " + q + "\n"
+                                                        + "    risk-free rate:      " + r + "\n"
+                                                        + "    maturity:            " + exDate + "\n"
+                                                        + "    original volatility: " + v + "\n"
+                                                        + "    price:               " + value + "\n"
+                                                        + "    implied volatility:  " + implVol + "\n"
+                                                        + "    corresponding price: " + value2 + "\n"
+                                                        + "    error:               " + error);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testImpliedVolContainment() {
+        int maxEvaluations = 100;
+        double tolerance = 1.0e-6;
+
+        DayCounter dc = new Actual360(false);
+        Date today = Date.todaysDate();
+        Settings.instance.evaluationDate().equal(today);
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        Handle<Quote> underlying = new Handle<>(spot, true);
+        SimpleQuote qRate = new SimpleQuote(0.05);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.03);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+        SimpleQuote vol = new SimpleQuote(0.20);
+        BlackVolTermStructure volTS = flatVol(today, vol, dc);
+
+        Date exerciseDate = today.add(new Period(1, TimeUnit.YEARS));
+        EuropeanExercise exercise = new EuropeanExercise(exerciseDate);
+        PlainVanillaPayoff payoff = new PlainVanillaPayoff(Option.Type.Call, 100.0);
+
+        GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                underlying,
+                new Handle<>(qTS, true),
+                new Handle<>(rTS, true),
+                new Handle<>(volTS, true));
+        AnalyticEuropeanEngine engine = new AnalyticEuropeanEngine(process);
+
+        // link to the same stochastic process, which shouldn't be changed
+        // by calling methods of either option
+        EuropeanOption option1 = new EuropeanOption(payoff, exercise);
+        option1.setPricingEngine(engine);
+        EuropeanOption option2 = new EuropeanOption(payoff, exercise);
+        option2.setPricingEngine(engine);
+
+        double refValue = option2.NPV();
+
+        Flag f = new Flag();
+        f.registerWith(option2);
+
+        option1.impliedVolatility(refValue * 1.5, process, tolerance, maxEvaluations);
+
+        assertFalse(f.isUp(), "implied volatility calculation triggered a change "
+                + "in another instrument");
+
+        option2.recalculate();
+        assertEquals(refValue, option2.NPV(), 1.0e-8,
+                "implied volatility calculation changed the value of another instrument: "
+                        + "previous value " + refValue + ", current value " + option2.NPV());
+
+        vol.setValue(vol.value() * 1.5);
+
+        assertTrue(f.isUp(), "volatility change not notified");
+
+        assertTrue(Math.abs(option2.NPV() - refValue) > 1.0e-8,
+                "volatility change did not cause the value to change");
+    }
+
+    private static final class Flag implements Observer {
+        private boolean up_ = false;
+
+        void raise() {
+            up_ = true;
+        }
+
+        void lower() {
+            up_ = false;
+        }
+
+        boolean isUp() {
+            return up_;
+        }
+
+        @Override
+        public void registerWith(Observable observable) {
+            observable.registerObserver(this);
+        }
+
+        @Override
+        public void unregisterWithAll() {
+        }
+
+        @Override
+        public void unregisterWith(Observable observable) {
+            observable.unregisterObserver(this);
+        }
+
+        @Override
+        public void update() {
+            raise();
+        }
+    }
+
+    private static double relativeError(double x1, double x2, double reference) {
+        if (reference != 0.0)
+            return Math.abs(x1 - x2) / reference;
+        // fall back to absolute error
+        return Math.abs(x1 - x2);
+    }
+
+    private static YieldTermStructure evalDateFlatRate(SimpleQuote rate, DayCounter dc) {
+        return new FlatForward(0, new NullCalendar(), new Handle<>(rate, true), dc,
+                Compounding.Continuous, Frequency.ANNUAL);
+    }
+
+    private static BlackVolTermStructure evalDateFlatVol(SimpleQuote vol, DayCounter dc) {
+        return new BlackConstantVol(0, new NullCalendar(), new Handle<>(vol, true), dc);
     }
 
     private static AnalyticEuropeanEngine engine(Date today, SimpleQuote spot, SimpleQuote qRate,
