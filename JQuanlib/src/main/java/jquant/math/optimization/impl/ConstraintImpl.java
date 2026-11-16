@@ -7,12 +7,13 @@ public abstract class ConstraintImpl {
 
     //! Returns upper bound for given parameters
     public Array upperBound(Array params) {
-        return new Array(params.size(),
-                params.max());
+        // official: std::numeric_limits<Array::value_type>::max()
+        return new Array(params.size(), Double.MAX_VALUE);
     }
 
     //! Returns lower bound for given parameters
     public Array lowerBound(Array params) {
-        return new Array(params.size(), -params.max());
+        // official: -std::numeric_limits<Array::value_type>::max()
+        return new Array(params.size(), -Double.MAX_VALUE);
     }
 }
