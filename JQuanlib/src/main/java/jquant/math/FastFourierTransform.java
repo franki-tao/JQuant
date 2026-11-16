@@ -2,6 +2,7 @@ package jquant.math;
 
 import org.apache.commons.math3.complex.Complex;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -47,12 +48,33 @@ public class FastFourierTransform {
         transform_impl(val, out, true);
     }
 
+    //! FFT transform of a complex input sequence.
+    /*! Java erasure prevents overloading on {@code List<Double>} and
+        {@code List<Complex>}, so the complex-input variant is named
+        differently. */
+    public void transformComplex(List<Complex> val, List<Complex> out) {
+        transform_impl_complex(val, out, false);
+    }
+
+    //! Inverse FFT transform of a complex input sequence.
+    public void inverse_transformComplex(List<Complex> val, List<Complex> out) {
+        transform_impl_complex(val, out, true);
+    }
+
     private void transform_impl(List<Double> val, List<Complex> out, boolean inverse) {
+        List<Complex> complexVal = new ArrayList<>(val.size());
+        for (Double d : val) {
+            complexVal.add(new Complex(d));
+        }
+        transform_impl_complex(complexVal, out, inverse);
+    }
+
+    private void transform_impl_complex(List<Complex> val, List<Complex> out, boolean inverse) {
         final int order = cs_.size();
         final int N = 1 << order;
         int i = 0;
         for (; i < val.size(); i++) {
-            out.set(bit_reverse(i, order), new Complex(val.get(i)));
+            out.set(bit_reverse(i, order), val.get(i));
         }
         QL_REQUIRE(i <= N, "FFT order is too small");
         for (int s = 1; s <= order; ++s) {
