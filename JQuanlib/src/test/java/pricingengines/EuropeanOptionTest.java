@@ -14,6 +14,7 @@ import jquant.quotes.SimpleQuote;
 import jquant.Compounding;
 import jquant.math.Matrix;
 import jquant.math.interpolations.impl.Bicubic;
+import jquant.models.shortrate.onefactormodels.Vasicek;
 import jquant.patterns.Observable;
 import jquant.patterns.Observer;
 import jquant.pricingengines.AssetOrNothingPayoff;
@@ -21,6 +22,7 @@ import jquant.pricingengines.CashOrNothingPayoff;
 import jquant.pricingengines.GapPayoff;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.StrikedTypePayoff;
+import jquant.pricingengines.vanilla.AnalyticBlackVasicekEngine;
 import jquant.pricingengines.vanilla.AnalyticDividendEuropeanEngine;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
 import jquant.pricingengines.vanilla.BinomialVanillaEngine;
@@ -29,6 +31,7 @@ import jquant.processes.BlackScholesMertonProcess;
 import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.equityfx.BlackConstantVol;
+import jquant.termstructures.volatility.equityfx.BlackVarianceCurve;
 import jquant.termstructures.volatility.equityfx.BlackVarianceSurface;
 import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
 import jquant.termstructures.yield.FlatForward;
@@ -51,6 +54,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static jquant.pricingengines.BlackFormula.blackFormula;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -1339,6 +1343,131 @@ public class EuropeanOptionTest {
             assertTrue(Math.abs(americanValue - europeanValue) <= 1.0e-10,
                     type + " with 101 steps: terminal-only American value "
                             + americanValue + " differs from European value " + europeanValue);
+        }
+    }
+
+    @Test
+    public void testBlackVasicekEngineWithDeterministicRates() {
+        // With a vanishing short-rate volatility and a long-term mean equal to the
+        // initial rate, the Vasicek rate stays constant and the price must match
+        // Black-Scholes, including dividends and a volatility term structure.
+        DayCounter dc = new Actual365Fixed();
+        Date today = Settings.instance.evaluationDate().Date();
+        Date maturity = today.add(new Period(1, TimeUnit.YEARS));
+
+        double r = 0.05;
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        YieldTermStructure rTS = flatRate(today, new SimpleQuote(r), dc);
+        Vasicek vasicek = new Vasicek(r, 0.3, r, 1.0e-10);
+
+        List<BlackVolTermStructure> volCurves = List.of(
+                flatVol(today, new SimpleQuote(0.20), dc),
+                new BlackVarianceCurve(today,
+                        List.of(today.add(new Period(3, TimeUnit.MONTHS)), maturity),
+                        List.of(0.10, 0.20), dc, true));
+
+        double tolerance = 1.0e-8;
+        for (int i = 0; i < volCurves.size(); ++i) {
+            GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                    new Handle<>(spot, true),
+                    new Handle<>(qTS, true),
+                    new Handle<>(rTS, true),
+                    new Handle<>(volCurves.get(i), true));
+            AnalyticBlackVasicekEngine vasicekEngine =
+                    new AnalyticBlackVasicekEngine(process, vasicek, 0.0);
+            AnalyticEuropeanEngine blackEngine = new AnalyticEuropeanEngine(process);
+
+            for (Option.Type type : new Option.Type[]{Option.Type.Call, Option.Type.Put}) {
+                for (double strike : new double[]{80.0, 100.0, 120.0}) {
+                    PlainVanillaPayoff payoff = new PlainVanillaPayoff(type, strike);
+                    EuropeanExercise exercise = new EuropeanExercise(maturity);
+                    EuropeanOption option = new EuropeanOption(payoff, exercise);
+                    option.setPricingEngine(vasicekEngine);
+                    EuropeanOption reference = new EuropeanOption(payoff, exercise);
+                    reference.setPricingEngine(blackEngine);
+
+                    // changing the dividend yield after the first pricing also
+                    // checks that the engine is notified of the change
+                    for (double q : new double[]{0.0, 0.03}) {
+                        qRate.setValue(q);
+                        double calculated = option.NPV();
+                        double expected = reference.NPV();
+
+                        if (Math.abs(calculated - expected) > tolerance) {
+                            fail("failed to reproduce Black-Scholes price"
+                                    + "\n    option type:    " + type
+                                    + "\n    strike:         " + strike
+                                    + "\n    dividend yield: " + q
+                                    + "\n    vol curve:      " + (i == 0 ? "flat" : "term structure")
+                                    + "\n    calculated:     " + calculated
+                                    + "\n    expected:       " + expected
+                                    + "\n    tolerance:      " + tolerance);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testBlackVasicekEngineWithStochasticRates() {
+        DayCounter dc = new Actual365Fixed();
+        Date today = Settings.instance.evaluationDate().Date();
+        Date maturity = today.add(new Period(2, TimeUnit.YEARS));
+
+        double s0 = 100.0;
+        double q = 0.02;
+        double sigmaS = 0.25;
+        double a = 0.4, b = 0.04, r0 = 0.03, sigmaR = 0.015;
+
+        YieldTermStructure qTS = flatRate(today, new SimpleQuote(q), dc);
+        GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                new Handle<>(new SimpleQuote(s0), true),
+                new Handle<>(qTS, true),
+                new Handle<>(flatRate(today, new SimpleQuote(r0), dc), true),
+                new Handle<>(flatVol(today, new SimpleQuote(sigmaS), dc), true));
+        Vasicek vasicek = new Vasicek(r0, a, b, sigmaR);
+
+        double T = dc.yearFraction(today, maturity, new Date(), new Date());
+        double zcb = vasicek.discountBond(0.0, T, r0);
+        double forward = s0 * qTS.discount(maturity, false) / zcb;
+        double g = (1.0 - Math.exp(-a * T)) / a;
+
+        double tolerance = 1.0e-6;
+        for (double rho : new double[]{-0.5, 0.0, 0.5}) {
+            // integral over [0, T] of sigmaS^2 + 2 rho sigmaS sigmaR g(u) + sigmaR^2 g(u)^2,
+            // with g(u) = (1 - exp(-a u)) / a
+            double variance = sigmaS * sigmaS * T
+                    + 2.0 * rho * sigmaS * sigmaR * (T - g) / a
+                    + sigmaR * sigmaR
+                    * (T - 2.0 * g + (1.0 - Math.exp(-2.0 * a * T)) / (2.0 * a)) / (a * a);
+
+            AnalyticBlackVasicekEngine engine =
+                    new AnalyticBlackVasicekEngine(process, vasicek, rho);
+
+            for (Option.Type type : new Option.Type[]{Option.Type.Call, Option.Type.Put}) {
+                for (double strike : new double[]{80.0, 100.0, 120.0}) {
+                    EuropeanOption option = new EuropeanOption(
+                            new PlainVanillaPayoff(type, strike),
+                            new EuropeanExercise(maturity));
+                    option.setPricingEngine(engine);
+                    double calculated = option.NPV();
+                    double expected = blackFormula(type, strike, forward,
+                            Math.sqrt(variance), zcb, 0.0);
+
+                    if (Math.abs(calculated - expected) > tolerance) {
+                        fail("failed to reproduce closed-form price"
+                                + "\n    option type: " + type
+                                + "\n    strike:      " + strike
+                                + "\n    correlation: " + rho
+                                + "\n    calculated:  " + calculated
+                                + "\n    expected:    " + expected
+                                + "\n    tolerance:   " + tolerance);
+                    }
+                }
+            }
         }
     }
 

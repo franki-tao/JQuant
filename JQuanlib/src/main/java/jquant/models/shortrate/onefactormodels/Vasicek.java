@@ -7,7 +7,13 @@ import jquant.models.ConstantParameter;
 import jquant.models.Parameter;
 import jquant.models.shortrate.OneFactorAffineModel;
 import jquant.models.shortrate.OneFactorModel;
+import jquant.patterns.Observable;
+import jquant.patterns.ObservableSettings;
+import jquant.patterns.Observer;
 import jquant.processes.OrnsteinUhlenbeckProcess;
+
+import java.util.HashSet;
+import java.util.Set;
 
 import static jquant.math.MathUtils.QL_EPSILON;
 import static jquant.pricingengines.BlackFormula.blackFormula;
@@ -22,7 +28,7 @@ import static jquant.pricingengines.BlackFormula.blackFormula;
 
     \ingroup shortrate
 */
-public abstract class Vasicek extends OneFactorAffineModel {
+public class Vasicek extends OneFactorAffineModel {
     //! Short-rate dynamics in the %Vasicek model
     /*! The short-rate follows an Ornstein-Uhlenbeck process with mean
         \f$ b \f$.
@@ -51,6 +57,20 @@ public abstract class Vasicek extends OneFactorAffineModel {
     protected Parameter b_;
     protected Parameter sigma_;
     protected Parameter lambda_;
+    private final Set<Observer> observers_ = new HashSet<>();
+    private final Set<Observable> registeredObservables_ = new HashSet<>();
+
+    /**
+     * 构造函数
+     *
+     * @param r0     0.05
+     * @param a      0.1
+     * @param b      0.05
+     * @param sigma  0.01
+     */
+    public Vasicek(double r0, double a, double b, double sigma) {
+        this(r0, a, b, sigma, 0.0);
+    }
 
     /**
      * 构造函数
@@ -74,6 +94,7 @@ public abstract class Vasicek extends OneFactorAffineModel {
         lambda_ = new ConstantParameter(lambda, new NoConstraint());
     }
 
+    @Override
     public double discountBondOption(Option.Type type, double strike, double maturity, double bondMaturity) {
         double v;
         double _a = a();
@@ -89,6 +110,12 @@ public abstract class Vasicek extends OneFactorAffineModel {
         double k = discountBond(0.0, maturity, r0_)*strike;
 
         return blackFormula(type, k, f, v, 1.0, 0);
+    }
+
+    @Override
+    public double discountBondOption(Option.Type type, double strike, double maturity,
+                                     double bondStart, double bondMaturity) {
+        return discountBondOption(type, strike, maturity, bondMaturity);
     }
 
     public OneFactorModel.ShortRateDynamics dynamics() {
@@ -113,6 +140,55 @@ public abstract class Vasicek extends OneFactorAffineModel {
 
     public double r0() {
         return r0_;
+    }
+
+    @Override
+    protected void generateArguments() {
+    }
+
+    @Override
+    public void registerObserver(Observer o) {
+        observers_.add(o);
+    }
+
+    @Override
+    public void unregisterObserver(Observer o) {
+        observers_.remove(o);
+    }
+
+    @Override
+    public void notifyObservers() {
+        if (!ObservableSettings.getInstance().isUpdatesEnabled()) {
+            ObservableSettings.getInstance().registerDeferred(observers_);
+        } else {
+            for (Observer observer : Set.copyOf(observers_)) {
+                observer.update();
+            }
+        }
+    }
+
+    @Override
+    public void registerWith(Observable observable) {
+        if (observable != null) {
+            observable.registerObserver(this);
+            registeredObservables_.add(observable);
+        }
+    }
+
+    @Override
+    public void unregisterWith(Observable observable) {
+        if (observable != null) {
+            observable.unregisterObserver(this);
+            registeredObservables_.remove(observable);
+        }
+    }
+
+    @Override
+    public void unregisterWithAll() {
+        for (Observable observable : registeredObservables_) {
+            observable.unregisterObserver(this);
+        }
+        registeredObservables_.clear();
     }
 
     @Override
