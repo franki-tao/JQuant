@@ -409,7 +409,117 @@ public enum BootstrapTraits {
         public double transformInverse(double x, int i, PiecewiseYieldCurve curve) {
             return Math.log(x - (-1.0 / curve.times()[i] + 1E-8));
         }
+    },
+
+    /**
+     * Discount-curve traits for a multiplicative spread over a base curve.
+     *
+     * <p>This mirrors QuantLib's {@code detail::SpreadTraits<Discount>} in
+     * {@code spreadbootstraptraits.hpp}: everything is inherited from
+     * {@link #Discount} except the interpolated curve type, which is an
+     * {@code InterpolatedSpreadDiscountCurve}. The nodes therefore hold
+     * spread discount factors, starting at 1.0, and a discount at time
+     * {@code t} is {@code baseCurve.discount(t) * spreadFactor(t)}.
+     *
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/spreadbootstraptraits.hpp
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/spreaddiscountcurve.hpp
+     */
+    SpreadDiscount {
+        @Override
+        public double initialValue(PiecewiseYieldCurve curve) {
+            return 1.0;
+        }
+
+        @Override
+        public double guess(int i, PiecewiseYieldCurve curve, boolean validData) {
+            if (validData) // previous iteration value
+                return curve.data()[i];
+            if (i == 1) // first pillar
+                return 1.0 / (1.0 + AVERAGE_RATE * curve.times()[1]);
+            // flat rate extrapolation
+            double r = -Math.log(curve.data()[i - 1]) / curve.times()[i - 1];
+            return Math.exp(-r * curve.times()[i]);
+        }
+
+        @Override
+        public double minValueAfter(int i, PiecewiseYieldCurve curve, boolean validData) {
+            if (validData)
+                return min(curve.data()) / 2.0;
+            double dt = curve.times()[i] - curve.times()[i - 1];
+            return curve.data()[i - 1] * Math.exp(-MAX_RATE * dt);
+        }
+
+        @Override
+        public double maxValueAfter(int i, PiecewiseYieldCurve curve, boolean validData) {
+            double dt = curve.times()[i] - curve.times()[i - 1];
+            return curve.data()[i - 1] * Math.exp(MAX_RATE * dt);
+        }
+
+        @Override
+        public void updateGuess(double[] data, double value, int i) {
+            data[i] = value;
+        }
+
+        @Override
+        public int maxIterations() {
+            return 100;
+        }
+
+        @Override
+        public double discountImpl(PiecewiseYieldCurve curve, double t) {
+            // InterpolatedSpreadDiscountCurve::discountImpl:
+            //   originalCurve_->discount(t) * calcSpread(t)
+            return curve.baseCurveHandle().currentLink().discount(t, false)
+                    * spreadFactor(curve, t);
+        }
+
+        // GlobalBootstrap support, inherited unchanged from Discount.
+
+        @Override
+        public GlobalGuess globalGuess(PiecewiseYieldCurve curve, boolean validData) {
+            double[] data = curve.data();
+            if (validData)
+                return new GlobalGuess(tail(data), true);
+            double[] times = curve.times();
+            Array guess = new Array(times.length - 1);
+            for (int i = 1; i < times.length; ++i)
+                guess.set(i - 1, -AVERAGE_RATE * times[i]);
+            return new GlobalGuess(guess, false);
+        }
+
+        @Override
+        public boolean hasTransform() {
+            return true;
+        }
+
+        @Override
+        public double transformDirect(double x, int i, PiecewiseYieldCurve curve) {
+            return Math.exp(x);
+        }
+
+        @Override
+        public double transformInverse(double x, int i, PiecewiseYieldCurve curve) {
+            return Math.log(x);
+        }
     };
+
+    /**
+     * Interpolated spread discount factor at {@code t}, with flat-forward
+     * extrapolation past the last pillar. This is the {@code calcSpread} of
+     * {@code InterpolatedSpreadDiscountCurve}, equivalent to the discount
+     * computed by {@link #Discount} from the same data.
+     */
+    private static double spreadFactor(PiecewiseYieldCurve curve, double t) {
+        double[] times = curve.times();
+        Interpolation interpolation = curve.interpolation();
+        double tMax = times[times.length - 1];
+        if (t <= tMax)
+            return interpolation.value(t, true);
+        double[] data = curve.data();
+        double dMax = data[data.length - 1];
+        double instFwdMax = -interpolation.derivative(tMax, true) / dMax;
+        return dMax * Math.exp(-instFwdMax * (t - tMax));
+    }
 
     private static final double AVERAGE_RATE = 0.05;
     private static final double MAX_RATE = 1.0;
