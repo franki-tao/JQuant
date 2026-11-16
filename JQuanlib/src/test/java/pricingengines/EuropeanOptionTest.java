@@ -8,9 +8,12 @@ import jquant.Option;
 import jquant.Quote;
 import jquant.Settings;
 import jquant.cashflows.Dividend;
+import jquant.methods.finitedifferences.solvers.FdmSchemeDesc;
 import jquant.methods.lattices.LeisenReimer;
 import jquant.quotes.SimpleQuote;
 import jquant.Compounding;
+import jquant.math.Matrix;
+import jquant.math.interpolations.impl.Bicubic;
 import jquant.patterns.Observable;
 import jquant.patterns.Observer;
 import jquant.pricingengines.AssetOrNothingPayoff;
@@ -21,12 +24,16 @@ import jquant.pricingengines.StrikedTypePayoff;
 import jquant.pricingengines.vanilla.AnalyticDividendEuropeanEngine;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
 import jquant.pricingengines.vanilla.BinomialVanillaEngine;
+import jquant.pricingengines.vanilla.FdBlackScholesVanillaEngine;
 import jquant.processes.BlackScholesMertonProcess;
 import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.equityfx.BlackConstantVol;
+import jquant.termstructures.volatility.equityfx.BlackVarianceSurface;
 import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
 import jquant.termstructures.yield.FlatForward;
+import jquant.termstructures.yield.ZeroCurve;
+import jquant.time.Calendar;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.Frequency;
@@ -34,10 +41,12 @@ import jquant.time.Month;
 import jquant.time.Period;
 import jquant.time.TimeUnit;
 import jquant.time.calendars.NullCalendar;
+import jquant.time.calendars.Target;
 import jquant.time.daycounters.Actual360;
 import jquant.time.daycounters.Actual365Fixed;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -878,6 +887,156 @@ public class EuropeanOptionTest {
 
         assertTrue(Math.abs(option2.NPV() - refValue) > 1.0e-8,
                 "volatility change did not cause the value to change");
+    }
+
+    @Test
+    public void testLocalVolatility() {
+        // Official testLocalVolatility: finite differences with local
+        // volatility. The implied-vol FD prices (constant vol path) are
+        // checked against the analytic engine, then the local-vol FD
+        // prices are checked against the same analytic reference.
+        final Date settlementDate = new Date(5, Month.JULY, 2002);
+        Settings.instance.evaluationDate().equal(settlementDate);
+
+        final DayCounter dayCounter = new Actual365Fixed();
+        final Calendar calendar = new Target();
+
+        int[] t = {13, 41, 75, 165, 256, 345, 524, 703};
+        double[] r = {0.0357, 0.0349, 0.0341, 0.0355, 0.0359, 0.0368, 0.0386, 0.0401};
+
+        List<Double> rates = new ArrayList<>();
+        List<Date> dates = new ArrayList<>();
+        rates.add(0.0357);
+        dates.add(settlementDate);
+        for (int i = 0; i < 8; ++i) {
+            dates.add(settlementDate.add(t[i]));
+            rates.add(r[i]);
+        }
+        final YieldTermStructure rTS = new ZeroCurve(dates, rates, dayCounter);
+        final YieldTermStructure qTS = new FlatForward(settlementDate, 0.0, dayCounter,
+                Compounding.Continuous, Frequency.ANNUAL);
+
+        final SimpleQuote s0 = new SimpleQuote(4500.00);
+
+        final List<Double> strikes = List.of(
+                100.0, 500.0, 2000.0, 3400.0, 3600.0, 3800.0, 4000.0, 4200.0, 4400.0, 4500.0,
+                4600.0, 4800.0, 5000.0, 5200.0, 5400.0, 5600.0, 7500.0, 10000.0, 20000.0, 30000.0);
+
+        double[] v = {
+                1.015873, 1.015873, 1.015873, 0.89729, 0.796493, 0.730914, 0.631335, 0.568895,
+                0.711309, 0.711309, 0.711309, 0.641309, 0.635593, 0.583653, 0.508045, 0.463182,
+                0.516034, 0.500534, 0.500534, 0.500534, 0.448706, 0.416661, 0.375470, 0.353442,
+                0.516034, 0.482263, 0.447713, 0.387703, 0.355064, 0.337438, 0.316966, 0.306859,
+                0.497587, 0.464373, 0.430764, 0.374052, 0.344336, 0.328607, 0.310619, 0.301865,
+                0.479511, 0.446815, 0.414194, 0.361010, 0.334204, 0.320301, 0.304664, 0.297180,
+                0.461866, 0.429645, 0.398092, 0.348638, 0.324680, 0.312512, 0.299082, 0.292785,
+                0.444801, 0.413014, 0.382634, 0.337026, 0.315788, 0.305239, 0.293855, 0.288660,
+                0.428604, 0.397219, 0.368109, 0.326282, 0.307555, 0.298483, 0.288972, 0.284791,
+                0.420971, 0.389782, 0.361317, 0.321274, 0.303697, 0.295302, 0.286655, 0.282948,
+                0.413749, 0.382754, 0.354917, 0.316532, 0.300016, 0.292251, 0.284420, 0.281164,
+                0.400889, 0.370272, 0.343525, 0.307904, 0.293204, 0.286549, 0.280189, 0.277767,
+                0.390685, 0.360399, 0.334344, 0.300507, 0.287149, 0.281380, 0.276271, 0.274588,
+                0.383477, 0.353434, 0.327580, 0.294408, 0.281867, 0.276746, 0.272655, 0.271617,
+                0.379106, 0.349214, 0.323160, 0.289618, 0.277362, 0.272641, 0.269332, 0.268846,
+                0.377073, 0.347258, 0.320776, 0.286077, 0.273617, 0.269057, 0.266293, 0.266265,
+                0.399925, 0.369232, 0.338895, 0.289042, 0.265509, 0.255589, 0.249308, 0.249665,
+                0.423432, 0.406891, 0.373720, 0.314667, 0.281009, 0.263281, 0.246451, 0.242166,
+                0.453704, 0.453704, 0.453704, 0.381255, 0.334578, 0.305527, 0.268909, 0.251367,
+                0.517748, 0.517748, 0.517748, 0.416577, 0.364770, 0.331595, 0.287423, 0.264285};
+
+        final Matrix blackVolMatrix = new Matrix(strikes.size(), dates.size() - 1);
+        for (int i = 0; i < strikes.size(); ++i) {
+            for (int j = 1; j < dates.size(); ++j) {
+                blackVolMatrix.set(i, j - 1, v[i * (dates.size() - 1) + j - 1]);
+            }
+        }
+
+        final BlackVarianceSurface volTS = new BlackVarianceSurface(
+                settlementDate, calendar,
+                dates.subList(1, dates.size()),
+                strikes, blackVolMatrix,
+                dayCounter);
+        volTS.setInterpolation(new Bicubic());
+        final GeneralizedBlackScholesProcess process = new BlackScholesMertonProcess(
+                new Handle<>(s0, true),
+                new Handle<>(qTS, true),
+                new Handle<>(rTS, true),
+                new Handle<>(volTS, true));
+
+        final FdmSchemeDesc[] schemeDescs = {
+                FdmSchemeDesc.Douglas(),
+                FdmSchemeDesc.CrankNicolson(),
+                FdmSchemeDesc.ModifiedCraigSneyd()
+        };
+        final String[] schemeNames = {
+                "Douglas",
+                "Crank-Nicolson",
+                "Mod. Craig-Sneyd"
+        };
+
+        for (int i = 2; i < dates.size(); i += 2) {
+            for (int j = 3; j < strikes.size() - 5; j += 5) {
+                final Date exDate = dates.get(i);
+                final PlainVanillaPayoff payoff =
+                        new PlainVanillaPayoff(Option.Type.Call, strikes.get(j));
+
+                final EuropeanExercise exercise = new EuropeanExercise(exDate);
+
+                EuropeanOption option = new EuropeanOption(payoff, exercise);
+                option.setPricingEngine(new AnalyticEuropeanEngine(process));
+
+                final double tol = 0.001;
+                final double expectedNPV = option.NPV();
+                final double expectedDelta = option.delta();
+                final double expectedGamma = option.gamma();
+
+                option.setPricingEngine(new FdBlackScholesVanillaEngine(process, 200, 400));
+
+                double calculatedNPV = option.NPV();
+                final double calculatedDelta = option.delta();
+                final double calculatedGamma = option.gamma();
+
+                // check implied pricing first
+                if (Math.abs(expectedNPV - calculatedNPV) > tol * expectedNPV) {
+                    fail("Failed to reproduce option price for "
+                            + "\n    strike:     " + payoff.strike()
+                            + "\n    maturity:   " + exDate
+                            + "\n    calculated: " + calculatedNPV
+                            + "\n    expected:   " + expectedNPV);
+                }
+                if (Math.abs(expectedDelta - calculatedDelta) > tol * expectedDelta) {
+                    fail("Failed to reproduce option delta for "
+                            + "\n    strike:     " + payoff.strike()
+                            + "\n    maturity:   " + exDate
+                            + "\n    calculated: " + calculatedDelta
+                            + "\n    expected:   " + expectedDelta);
+                }
+                if (Math.abs(expectedGamma - calculatedGamma) > tol * expectedGamma) {
+                    fail("Failed to reproduce option gamma for "
+                            + "\n    strike:     " + payoff.strike()
+                            + "\n    maturity:   " + exDate
+                            + "\n    calculated: " + calculatedGamma
+                            + "\n    expected:   " + expectedGamma);
+                }
+
+                // check local vol pricing
+                // delta/gamma are not the same by definition (model implied greeks)
+                for (int k = 0; k < schemeDescs.length; k++) {
+                    option.setPricingEngine(new FdBlackScholesVanillaEngine(
+                            process, 25, 100, 0, schemeDescs[k], true, 0.35));
+
+                    calculatedNPV = option.NPV();
+                    if (Math.abs(expectedNPV - calculatedNPV) > tol * expectedNPV) {
+                        fail("Failed to reproduce local vol option price for "
+                                + "\n    strike:     " + payoff.strike()
+                                + "\n    maturity:   " + exDate
+                                + "\n    calculated: " + calculatedNPV
+                                + "\n    expected:   " + expectedNPV
+                                + "\n    scheme:     " + schemeNames[k]);
+                    }
+                }
+            }
+        }
     }
 
     @Test

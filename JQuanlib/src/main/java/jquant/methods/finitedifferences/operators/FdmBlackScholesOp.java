@@ -6,23 +6,24 @@ import jquant.methods.finitedifferences.meshers.FdmMesher;
 import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
+import jquant.termstructures.volatility.equityfx.LocalVolTermStructure;
 import jquant.time.Frequency;
 import jquant.utilities.FdmQuantoHelper;
 
-import static jquant.math.CommonUtil.QL_FAIL;
+import static jquant.math.MathUtils.squared;
 
 /**
  * Black-Scholes linear operator.
  *
  * <p>Port of {@code ql/methods/finitedifferences/operators/fdmblackscholesop.{hpp,cpp}}.
- * This port supports the constant (non-local) volatility path, which is the
- * path used by the official European FD tests. Local volatility raises a
- * clear error.
+ * Both the constant (non-local) and the local volatility paths are supported.
  */
 public class FdmBlackScholesOp implements FdmLinearOpComposite {
     private final FdmMesher mesher_;
     private final YieldTermStructure rTS_, qTS_;
     private final BlackVolTermStructure volTS_;
+    private final LocalVolTermStructure localVol_;
+    private final Array x_;
     private final FirstDerivativeOp dxMap_;
     private final TripleBandLinearOp dxxMap_;
     private final TripleBandLinearOp mapT_;
@@ -38,13 +39,21 @@ public class FdmBlackScholesOp implements FdmLinearOpComposite {
                              double illegalLocalVolOverwrite,
                              int direction,
                              FdmQuantoHelper quantoHelper) {
-        if (localVol) {
-            QL_FAIL("local volatility is not supported by this port");
-        }
         mesher_ = mesher;
         rTS_ = bsProcess.riskFreeRate().getValue();
         qTS_ = bsProcess.dividendYield().getValue();
         volTS_ = bsProcess.blackVolatility().getValue();
+        if (localVol) {
+            localVol_ = bsProcess.localVolatility().getValue();
+            final Array locations = mesher.locations(direction);
+            x_ = new Array(locations.size());
+            for (int i = 0; i < locations.size(); i++) {
+                x_.set(i, Math.exp(locations.get(i)));
+            }
+        } else {
+            localVol_ = null;
+            x_ = new Array(0);
+        }
         dxMap_ = new FirstDerivativeOp(direction, mesher);
         dxxMap_ = new SecondDerivativeOp(direction, mesher);
         mapT_ = new TripleBandLinearOp(direction, mesher);
@@ -61,18 +70,47 @@ public class FdmBlackScholesOp implements FdmLinearOpComposite {
         final double q = qTS_.forwardRate(t1, t2, Compounding.Continuous,
                 Frequency.NO_FREQUENCY, false).rate();
 
-        final int size = mesher_.layout().size();
-        final double v = volTS_.blackForwardVariance(t1, t2, strike_, false) / (t2 - t1);
+        if (localVol_ != null) {
+            final Array v = new Array(mesher_.layout().size());
+            for (FdmLinearOpIterator iter : mesher_.layout()) {
+                final int i = iter.index();
 
-        final Array halfV = new Array(size, 0.5 * v);
-        if (quantoHelper_ != null) {
-            final Array equityVol = new Array(size, Math.sqrt(v));
-            final Array drift = new Array(size, r - q - 0.5 * v)
-                    .subtract(quantoHelper_.quantoAdjustment(equityVol, t1, t2));
-            mapT_.axpyb(drift, dxMap_, dxxMap_.mult(halfV), new Array(1, -r));
+                if (illegalLocalVolOverwrite_ < 0.0) {
+                    v.set(i, squared(localVol_.localVol(0.5 * (t1 + t2), x_.get(i), true)));
+                } else {
+                    try {
+                        v.set(i, squared(localVol_.localVol(0.5 * (t1 + t2), x_.get(i), true)));
+                    } catch (RuntimeException e) {
+                        v.set(i, squared(illegalLocalVolOverwrite_));
+                    }
+                }
+            }
+
+            final Array halfV = v.mutiply(0.5);
+            if (quantoHelper_ != null) {
+                final Array drift = new Array(v.size(), r - q)
+                        .subtract(halfV)
+                        .subtract(quantoHelper_.quantoAdjustment(
+                                v.transform(Math::sqrt), t1, t2));
+                mapT_.axpyb(drift, dxMap_, dxxMap_.mult(halfV), new Array(1, -r));
+            } else {
+                mapT_.axpyb(new Array(v.size(), r - q).subtract(halfV), dxMap_,
+                        dxxMap_.mult(halfV), new Array(1, -r));
+            }
         } else {
-            mapT_.axpyb(new Array(1, r - q - 0.5 * v), dxMap_,
-                    dxxMap_.mult(halfV), new Array(1, -r));
+            final int size = mesher_.layout().size();
+            final double v = volTS_.blackForwardVariance(t1, t2, strike_, false) / (t2 - t1);
+
+            final Array halfV = new Array(size, 0.5 * v);
+            if (quantoHelper_ != null) {
+                final Array equityVol = new Array(size, Math.sqrt(v));
+                final Array drift = new Array(size, r - q - 0.5 * v)
+                        .subtract(quantoHelper_.quantoAdjustment(equityVol, t1, t2));
+                mapT_.axpyb(drift, dxMap_, dxxMap_.mult(halfV), new Array(1, -r));
+            } else {
+                mapT_.axpyb(new Array(1, r - q - 0.5 * v), dxMap_,
+                        dxxMap_.mult(halfV), new Array(1, -r));
+            }
         }
     }
 
