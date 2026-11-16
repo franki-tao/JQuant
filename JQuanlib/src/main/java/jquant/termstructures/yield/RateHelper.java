@@ -2,6 +2,7 @@ package jquant.termstructures.yield;
 
 import jquant.Handle;
 import jquant.Quote;
+import jquant.patterns.Observable;
 import jquant.termstructures.YieldTermStructure;
 import jquant.time.Date;
 
@@ -34,6 +35,15 @@ public abstract class RateHelper {
     //! quotes whose changes must rebuild a curve that uses this helper
     public List<Quote> notifications() {
         return List.of(quote_.getValue());
+    }
+
+    /**
+     * Other observables whose changes must rebuild a curve that uses this
+     * helper, e.g. a relinkable discount curve which can be linked after the
+     * curve was built. Empty by default.
+     */
+    public List<Observable> notificationObservables() {
+        return List.of();
     }
 
     public Date earliestDate() {

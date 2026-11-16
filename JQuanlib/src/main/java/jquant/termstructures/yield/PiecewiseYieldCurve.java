@@ -212,6 +212,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure
         for (RateHelper helper : instruments_) {
             for (jquant.Quote quote : helper.notifications())
                 registerWith(quote);
+            for (jquant.patterns.Observable observable : helper.notificationObservables())
+                registerWith(observable);
         }
         if (globalBootstrap_ != null) {
             // As in QuantLib, setup() does not calculate. Defer the actual
