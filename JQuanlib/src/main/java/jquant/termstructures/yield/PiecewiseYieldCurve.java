@@ -1,5 +1,6 @@
 package jquant.termstructures.yield;
 
+import jquant.Handle;
 import jquant.math.Function;
 import jquant.math.Interpolation;
 import jquant.math.interpolations.impl.Interpolator;
@@ -10,6 +11,7 @@ import jquant.math.solvers1d.Brent;
 import jquant.math.solvers1d.FiniteDifferenceNewtonSafe;
 import jquant.termstructures.MultiCurveBootstrapProvider;
 import jquant.termstructures.YieldTermStructure;
+import jquant.time.Calendar;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.TimeUtils;
@@ -18,6 +20,7 @@ import jquant.time.calendars.NullCalendar;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -48,6 +51,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure
     double[] data_;
     Date maxDate_;
     Interpolation interpolation_;
+    /** Base curve for a multiplicative spread curve; {@code null} otherwise. */
+    private final Handle<YieldTermStructure> baseCurve_;
     private final LocalBootstrap localBootstrap_;
     private final GlobalBootstrap globalBootstrap_;
     private final IterativeBootstrap iterativeBootstrap_;
@@ -124,7 +129,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure
                                Interpolator interpolator,
                                double accuracy,
                                LocalBootstrap bootstrap) {
-        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy, bootstrap, null, null);
+        this(referenceDate, new NullCalendar(), instruments, dayCounter, traits,
+                interpolator, accuracy, bootstrap, null, null, null);
     }
 
     /**
@@ -154,7 +160,8 @@ public class PiecewiseYieldCurve extends YieldTermStructure
                                Interpolator interpolator,
                                double accuracy,
                                GlobalBootstrap bootstrap) {
-        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy, null, bootstrap, null);
+        this(referenceDate, new NullCalendar(), instruments, dayCounter, traits,
+                interpolator, accuracy, null, bootstrap, null, null);
     }
 
     /**
@@ -180,11 +187,46 @@ public class PiecewiseYieldCurve extends YieldTermStructure
                                Interpolator interpolator,
                                double accuracy,
                                IterativeBootstrap bootstrap) {
-        this(referenceDate, instruments, dayCounter, traits, interpolator, accuracy,
-                null, null, bootstrap);
+        this(referenceDate, new NullCalendar(), instruments, dayCounter, traits,
+                interpolator, accuracy, null, null, bootstrap, null);
+    }
+
+    /**
+     * Builds a curve whose nodes are multiplicative spread discounts over a
+     * base curve: the reference date, calendar and day counter come from the
+     * base curve, and each discount is
+     * {@code baseCurve.discount(t) * spreadCurve.discount(t)}.
+     *
+     * <p>This is the constructor used by {@link PiecewiseSpreadYieldCurve}; it
+     * mirrors the protected
+     * {@code PiecewiseYieldCurve(instruments, bootstrap, baseCurve, i)}
+     * overload of QuantLib.
+     *
+     * <p>https://github.com/lballabio/QuantLib/blob/master/ql/termstructures/yield/piecewiseyieldcurve.hpp
+     */
+    protected PiecewiseYieldCurve(Handle<YieldTermStructure> baseCurve,
+                                  List<RateHelper> instruments,
+                                  BootstrapTraits traits,
+                                  Interpolator interpolator,
+                                  IterativeBootstrap bootstrap) {
+        this(baseReferenceDate(baseCurve), baseCalendar(baseCurve), instruments,
+                baseDayCounter(baseCurve), traits, interpolator, 1.0e-12,
+                null, null, bootstrap, requireBaseCurve(baseCurve));
+    }
+
+    /** @see #PiecewiseYieldCurve(Handle, List, BootstrapTraits, Interpolator, IterativeBootstrap) */
+    protected PiecewiseYieldCurve(Handle<YieldTermStructure> baseCurve,
+                                  List<RateHelper> instruments,
+                                  BootstrapTraits traits,
+                                  Interpolator interpolator,
+                                  GlobalBootstrap bootstrap) {
+        this(baseReferenceDate(baseCurve), baseCalendar(baseCurve), instruments,
+                baseDayCounter(baseCurve), traits, interpolator, 1.0e-12,
+                null, bootstrap, null, requireBaseCurve(baseCurve));
     }
 
     private PiecewiseYieldCurve(Date referenceDate,
+                                Calendar calendar,
                                 List<RateHelper> instruments,
                                 DayCounter dayCounter,
                                 BootstrapTraits traits,
@@ -192,8 +234,9 @@ public class PiecewiseYieldCurve extends YieldTermStructure
                                 double accuracy,
                                 LocalBootstrap localBootstrap,
                                 GlobalBootstrap globalBootstrap,
-                                IterativeBootstrap iterativeBootstrap) {
-        super(referenceDate, new NullCalendar(), dayCounter, new ArrayList<>(), new ArrayList<>());
+                                IterativeBootstrap iterativeBootstrap,
+                                Handle<YieldTermStructure> baseCurve) {
+        super(referenceDate, calendar, dayCounter, new ArrayList<>(), new ArrayList<>());
         // GlobalBootstrap may take all its helpers in additionalHelpers, so the
         // regular helper list can be empty (official IterativeBootstrap and
         // LocalBootstrap still reject that).
@@ -206,6 +249,16 @@ public class PiecewiseYieldCurve extends YieldTermStructure
         traits_ = traits;
         interpolator_ = interpolator;
         accuracy_ = accuracy;
+        baseCurve_ = baseCurve;
+        if (baseCurve_ != null && !baseCurve_.empty()) {
+            // RelativeDerivedYieldTermStructure observes the original curve
+            // and inherits its extrapolation behaviour.
+            registerWith(baseCurve_.get());
+            if (baseCurve_.currentLink().allowsExtrapolation())
+                enableExtrapolation();
+            else
+                disableExtrapolation();
+        }
         localBootstrap_ = localBootstrap;
         globalBootstrap_ = globalBootstrap;
         iterativeBootstrap_ = iterativeBootstrap;
@@ -255,6 +308,13 @@ public class PiecewiseYieldCurve extends YieldTermStructure
         // Quote changed. Rebuild on the next discount, and tell instruments
         // now so a cached NPV is not reused.
         stale_ = true;
+        if (baseCurve_ != null && !baseCurve_.empty()) {
+            // RelativeDerivedYieldTermStructure::setupExtrapolation
+            if (baseCurve_.currentLink().allowsExtrapolation())
+                enableExtrapolation();
+            else
+                disableExtrapolation();
+        }
         super.update();
     }
 
@@ -263,19 +323,33 @@ public class PiecewiseYieldCurve extends YieldTermStructure
         return List.copyOf(dates_);
     }
 
-    double[] data() {
+    public double[] data() {
         calculateIfNeeded();
         return data_;
     }
 
-    double[] times() {
+    public double[] times() {
         calculateIfNeeded();
         return times_;
+    }
+
+    /** Date/value pairs, as the official {@code InterpolatedNodes::nodes()}. */
+    public List<Map.Entry<Date, Double>> nodes() {
+        calculateIfNeeded();
+        List<Map.Entry<Date, Double>> nodes = new ArrayList<>(dates_.size());
+        for (int i = 0; i < dates_.size(); ++i)
+            nodes.add(Map.entry(dates_.get(i), data_[i]));
+        return nodes;
     }
 
     Interpolation interpolation() {
         calculateIfNeeded();
         return interpolation_;
+    }
+
+    /** The base curve of a spread curve, or {@code null} for a standalone one. */
+    Handle<YieldTermStructure> baseCurveHandle() {
+        return baseCurve_;
     }
 
     /** How many pillar passes the iterative bootstrap used. */
@@ -289,8 +363,48 @@ public class PiecewiseYieldCurve extends YieldTermStructure
     }
 
     @Override
+    public Date referenceDate() {
+        // RelativeDerivedYieldTermStructure: a spread curve uses the reference
+        // date of its base curve. During the superclass constructor the field
+        // is not assigned yet, so fall back to the explicitly passed date.
+        if (baseCurve_ != null)
+            return baseCurve_.currentLink().referenceDate();
+        return super.referenceDate();
+    }
+
+    @Override
+    public DayCounter dayCounter() {
+        if (baseCurve_ != null)
+            return baseCurve_.currentLink().dayCounter();
+        return super.dayCounter();
+    }
+
+    @Override
+    public Calendar calendar() {
+        if (baseCurve_ != null)
+            return baseCurve_.currentLink().calendar();
+        return super.calendar();
+    }
+
+    @Override
+    public int settlementDays() {
+        if (baseCurve_ != null)
+            return baseCurve_.currentLink().settlementDays();
+        return super.settlementDays();
+    }
+
+    @Override
     public Date maxDate() {
         calculateIfNeeded();
+        if (baseCurve_ != null) {
+            // InterpolatedSpreadDiscountCurve::maxDate:
+            //   min(originalCurve_->maxDate(), maxDate_ or dates_.back())
+            Date curveMax = maxDate_;
+            if (curveMax == null && !dates_.isEmpty())
+                curveMax = dates_.get(dates_.size() - 1);
+            QL_REQUIRE(curveMax != null, "curve has no dates yet");
+            return TimeUtils.min(baseCurve_.currentLink().maxDate(), curveMax);
+        }
         return maxDate_;
     }
 
@@ -299,6 +413,24 @@ public class PiecewiseYieldCurve extends YieldTermStructure
         if (stale_ && !bootstrapping_)
             bootstrap();
         return traits_.discountImpl(this, t);
+    }
+
+    private static Handle<YieldTermStructure> requireBaseCurve(Handle<YieldTermStructure> baseCurve) {
+        QL_REQUIRE(baseCurve != null, "null base curve handle");
+        QL_REQUIRE(!baseCurve.empty(), "empty base curve handle");
+        return baseCurve;
+    }
+
+    private static Date baseReferenceDate(Handle<YieldTermStructure> baseCurve) {
+        return requireBaseCurve(baseCurve).currentLink().referenceDate();
+    }
+
+    private static Calendar baseCalendar(Handle<YieldTermStructure> baseCurve) {
+        return requireBaseCurve(baseCurve).currentLink().calendar();
+    }
+
+    private static DayCounter baseDayCounter(Handle<YieldTermStructure> baseCurve) {
+        return requireBaseCurve(baseCurve).currentLink().dayCounter();
     }
 
     private void bootstrap() {
