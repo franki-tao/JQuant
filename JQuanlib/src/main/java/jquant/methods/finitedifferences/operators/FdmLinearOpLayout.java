@@ -39,7 +39,12 @@ public class FdmLinearOpLayout implements Iterable<FdmLinearOpIterator> {
                 if (!hasNext()) {
                     throw new NoSuchElementException();
                 }
-                final FdmLinearOpIterator result = iterator;
+                // Return a snapshot of the current state: the official
+                // iterator is dereferenced by value, so incrementing the
+                // underlying iterator must not modify the element already
+                // handed to the caller.
+                final FdmLinearOpIterator result = new FdmLinearOpIterator(
+                        dim_, iterator.coordinates(), iterator.index());
                 ++count;
                 if (count < size_) {
                     iterator.increment();

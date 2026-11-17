@@ -57,7 +57,7 @@ public class BicubicSplineImpl extends Interpolation2DTemplateImpl implements Bi
             // section[i] = derivativeY(this->xBegin_[i], y);
         }
         return new CubicInterpolation(
-                yValues,
+                xValues,
                 CommonUtil.toArray(section),
                 Spline, false,
                 SecondDerivative, 0.0,
@@ -96,6 +96,7 @@ public class BicubicSplineImpl extends Interpolation2DTemplateImpl implements Bi
 
     @Override
     public void calculate() {
+        splines_.clear();
         for (double[] zd : zData_) {
             splines_.add(new CubicInterpolation(xValues, zd, Spline, false,
                     SecondDerivative, 0.0,

@@ -113,7 +113,16 @@ public class XABRInterpolationImpl extends templateImpl {
     public void update() {
         updateModelInstance();
 
-        // we should also check that y contains positive values only
+        // the market volatilities must be non-negative; checked here rather
+        // than in the constructor because the underlying data can change
+        // before each recalibration
+        {
+            double[] x = super.xValue;
+            double[] y = super.yValue;
+            for (int i = 0; i < x.length; i++)
+                QL_REQUIRE(y[i] >= 0.0, "negative volatility (" + y[i]
+                        + ") given at strike " + x[i]);
+        }
 
         // we must update weights if it is vegaWeighted
         if (vegaWeighted_) {

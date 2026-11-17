@@ -48,7 +48,7 @@ public class KernelInterpolation2DImpl extends Interpolation2DTemplateImpl {
 
     @Override
     public void calculate() {
-
+        updateAlphaVec();
     }
 
     @Override

@@ -131,4 +131,8 @@ public class CubicInterpolation extends Interpolation {
     public final List<Boolean> monotonicityAdjustments() {
         return temp.monotonicityAdjustments_;
     }
+
+    public void setLeftConditionValue(double value) {
+        temp.setLeftConditionValue(value);
+    }
 }

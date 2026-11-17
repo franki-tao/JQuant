@@ -2,6 +2,7 @@ package jquant.math.interpolations.impl;
 
 import jquant.math.Interpolation;
 import jquant.math.templateImpl;
+import jquant.math.interpolations.CubicInterpolation;
 
 import java.util.Arrays;
 
@@ -9,10 +10,11 @@ import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 public class MixedInterpolationImpl extends templateImpl {
-    private double[] xBegin2_;
-    private double[] yBegin2_;
-    private int n_;
-    private Interpolation interpolation1_, interpolation2_;
+    private final double[] xBegin2_;
+    private final double switchX_;
+    private final int n_;
+    private final Interpolation interpolation1_, interpolation2_;
+    private final boolean matchDerivatives_;
 
     public enum Behavior {
         ShareRanges,  /*!< Define both interpolations over the
@@ -24,40 +26,55 @@ public class MixedInterpolationImpl extends templateImpl {
                                interpolation over the second part. */
     }
 
-    ;
-
     /*
     behavior= ShareRanges
      */
     public MixedInterpolationImpl(double[] x, double[] y, int n,
                                   Behavior behavior, Interpolator factory1,
                                   Interpolator factory2) {
+        this(x, y, n, behavior, factory1, factory2, false);
+    }
+
+    public MixedInterpolationImpl(double[] x, double[] y, int n,
+                                  Behavior behavior, Interpolator factory1,
+                                  Interpolator factory2,
+                                  boolean matchDerivatives) {
         super(x, y, Math.max(factory1.getRequiredPoints(), factory2.getRequiredPoints()));
         n_ = n;
-        QL_REQUIRE(n < x.length,
-                "too large n (" + n + ") for " +
-                        x.length + "-element x sequence");
+        // the switch point xBegin_ + n is dereferenced in update() and
+        // value(), so it must be a valid element; for SplitRanges the
+        // first segment additionally reads xBegin_ + n + 1
+        final int maxN = x.length - 1;
+        QL_REQUIRE(n <= maxN,
+                "n is too large (" + n + " > " + maxN + ")");
+        switchX_ = x[n];
         xBegin2_ = Arrays.copyOfRange(x, n, x.length);
-        yBegin2_ = Arrays.copyOfRange(y, n, y.length);
+        matchDerivatives_ = matchDerivatives;
         switch (behavior) {
             case ShareRanges:
                 interpolation1_ = factory1.interpolate(x, y);
                 interpolation2_ = factory2.interpolate(x, y);
                 break;
             case SplitRanges:
-                interpolation1_ = factory1.interpolate(Arrays.copyOfRange(x, 0, n + 1),
-                        y);
+                interpolation1_ = factory1.interpolate(
+                        Arrays.copyOfRange(x, 0, n + 1),
+                        Arrays.copyOfRange(y, 0, n + 1));
                 interpolation2_ = factory2.interpolate(xBegin2_,
-                        yBegin2_);
+                        Arrays.copyOfRange(y, n, y.length));
                 break;
             default:
                 QL_FAIL("unknown mixed-interpolation behavior: " + behavior);
+                throw new IllegalStateException("unreachable");
         }
     }
 
     @Override
     public void update() {
         interpolation1_.update();
+        if (matchDerivatives_) {
+            ((CubicInterpolation) interpolation2_)
+                    .setLeftConditionValue(interpolation1_.derivative(switchX_, true));
+        }
         interpolation2_.update();
     }
 

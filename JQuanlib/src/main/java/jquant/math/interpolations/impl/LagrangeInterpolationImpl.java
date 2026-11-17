@@ -44,7 +44,7 @@ public class LagrangeInterpolationImpl extends templateImpl implements UpdatedYI
     }
 
     @Override
-    public double primitive(double x) {
+    public double derivative(double x) {
         double n = 0.0, d = 0.0, nd = 0.0, dd = 0.0;
         for (int i = 0; i < n_; ++i) {
             final double x_i = xValue[i];
@@ -67,7 +67,7 @@ public class LagrangeInterpolationImpl extends templateImpl implements UpdatedYI
     }
 
     @Override
-    public double derivative(double v) {
+    public double primitive(double v) {
         QL_FAIL("LagrangeInterpolation primitive is not implemented");
         return 0;
     }
@@ -86,17 +86,30 @@ public class LagrangeInterpolationImpl extends templateImpl implements UpdatedYI
 
     private double _value(double[] y, double x) {
         final double eps = 10 * QL_EPSILON * abs(x);
-        int iter = CommonUtil.lowerBound(xValue, x - eps);//std::lower_bound(this->xBegin_, this->xEnd_, x - eps);
-        if (iter != xValue.length && xValue[iter] - x < eps) {
-            return yValue[iter];
+        int iter = lowerBound(xValue, x - eps);
+        if (iter != xValue.length && close_enough(xValue[iter], x, 10)) {
+            return y[iter];
         }
 
         double n = 0.0, d = 0.0;
         for (int i = 0; i < n_; ++i) {
             final double alpha = lambda_.get(i) / (x - xValue[i]);
-            n += alpha * yValue[i];
+            n += alpha * y[i];
             d += alpha;
         }
         return n / d;
+    }
+
+    // std::lower_bound equivalent
+    private static int lowerBound(double[] a, double key) {
+        int low = 0, high = a.length;
+        while (low < high) {
+            int mid = (low + high) >>> 1;
+            if (a[mid] < key)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+        return low;
     }
 }

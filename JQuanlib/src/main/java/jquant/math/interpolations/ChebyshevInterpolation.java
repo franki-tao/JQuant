@@ -14,38 +14,44 @@ import static jquant.math.MathUtils.M_PI;
 public class ChebyshevInterpolation extends Interpolation {
     public enum PointsType {FirstKind, SecondKind};
 
-    private Array x_;
+    private final Array x_;
     private Array y_;
 
     // 默认pointsType = SecondKind
+    public ChebyshevInterpolation(Array y) {
+        this(y, PointsType.SecondKind);
+    }
+
     public ChebyshevInterpolation(Array y, PointsType pointsType) {
         x_ = nodes(y.size(), pointsType);
-        y_ = y;
+        y_ = new Array(y);
         impl_ = new LagrangeInterpolationImpl(x_.toArray(), y_.toArray());
         impl_.update();
     }
 
     // 默认pointsType = SecondKind
-    public ChebyshevInterpolation(int n , Function f, PointsType pointsType) {
-        Array tp = nodes(n, pointsType);
-        new ChebyshevInterpolation(tp.transform(f), pointsType);
+    public ChebyshevInterpolation(int n, Function f) {
+        this(n, f, PointsType.SecondKind);
+    }
+
+    public ChebyshevInterpolation(int n, Function f, PointsType pointsType) {
+        this(nodes(n, pointsType).transform(f), pointsType);
     }
 
     public void updateY(Array y) {
         QL_REQUIRE(y.size() == y_.size(),
                 "interpolation override has the wrong length");
 
-        for (int i=0; i<y.size(); i++) {
-            y_.set(i, y.get(i));
-        }
-//        std::copy(y.begin(), y.end(), y_.begin());
+        y_ = new Array(y);
+        impl_ = new LagrangeInterpolationImpl(x_.toArray(), y_.toArray());
+        impl_.update();
     }
 
     public Array nodes() {
         return x_;
     }
 
-    public Array nodes(int n, PointsType pointsType) {
+    public static Array nodes(int n, PointsType pointsType) {
         Array t = new Array(n);
 
         switch(pointsType) {

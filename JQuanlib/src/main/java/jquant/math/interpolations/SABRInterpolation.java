@@ -40,6 +40,39 @@ public class SABRInterpolation extends Interpolation {
                              double t,
                              double forward, double alpha, double beta, double nu,
                              double rho, boolean alphaIsFixed, boolean betaIsFixed,
+                             boolean nuIsFixed, boolean rhoIsFixed) {
+        this(x, y, t, forward, alpha, beta, nu, rho,
+                alphaIsFixed, betaIsFixed, nuIsFixed, rhoIsFixed, true);
+    }
+
+    public SABRInterpolation(double[] x, double[] y,
+                             double t,
+                             double forward, double alpha, double beta, double nu,
+                             double rho, boolean alphaIsFixed, boolean betaIsFixed,
+                             boolean nuIsFixed, boolean rhoIsFixed, boolean vegaWeighted) {
+        this(x, y, t, forward, alpha, beta, nu, rho,
+                alphaIsFixed, betaIsFixed, nuIsFixed, rhoIsFixed, vegaWeighted,
+                null, null, 0.0020);
+    }
+
+    public SABRInterpolation(double[] x, double[] y,
+                             double t,
+                             double forward, double alpha, double beta, double nu,
+                             double rho, boolean alphaIsFixed, boolean betaIsFixed,
+                             boolean nuIsFixed, boolean rhoIsFixed, boolean vegaWeighted,
+                             EndCriteria endCriteria,
+                             OptimizationMethod optMethod,
+                             double errorAccept) {
+        this(x, y, t, forward, alpha, beta, nu, rho,
+                alphaIsFixed, betaIsFixed, nuIsFixed, rhoIsFixed, vegaWeighted,
+                endCriteria, optMethod, errorAccept, false, 50, 0.0,
+                Sarb.VolatilityType.ShiftedLognormal);
+    }
+
+    public SABRInterpolation(double[] x, double[] y,
+                             double t,
+                             double forward, double alpha, double beta, double nu,
+                             double rho, boolean alphaIsFixed, boolean betaIsFixed,
                              boolean nuIsFixed, boolean rhoIsFixed, boolean vegaWeighted,
                              EndCriteria endCriteria,
                              OptimizationMethod optMethod,
