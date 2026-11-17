@@ -16,6 +16,7 @@ import java.util.Optional;
 import static jquant.cashflows.CashflowUtil.FloatingLeg;
 import static jquant.cashflows.CashflowUtil.setCouponPricer;
 import static jquant.cashflows.TimingAdjustment.Black76;
+import static jquant.math.CommonUtil.QL_REQUIRE;
 
 //! helper class building a sequence of capped/floored ibor-rate coupons
 public class IborLeg {
@@ -36,6 +37,8 @@ public class IborLeg {
     private BusinessDayConvention exCouponAdjustment_; // = Unadjusted;
     private boolean exCouponEndOfMonth_ = false;
     private Optional<Boolean> useIndexedCoupons_;
+    private BusinessDayConvention fixingConvention_ = BusinessDayConvention.PRECEDING;
+    private StubIndexSelection stubIndexSelection_;
 
     public IborLeg(Schedule schedule, IborIndex index) {
         schedule_ = schedule;
@@ -88,6 +91,11 @@ public class IborLeg {
     }
 
     public IborLeg withFixingDays(int fixingDays) {
+        fixingDays_ = CommonUtil.ArrayInit(1, fixingDays);
+        return this;
+    }
+
+    public IborLeg withFixingDays(Integer fixingDays) {
         fixingDays_ = CommonUtil.ArrayInit(1, fixingDays);
         return this;
     }
@@ -160,9 +168,24 @@ public class IborLeg {
         exCouponEndOfMonth_ = endOfMonth;
         return this;
     }
+    public IborLeg withFixingConvention(BusinessDayConvention convention) {
+        fixingConvention_ = convention;
+        return this;
+    }
+
+    public IborLeg withStubIndexSelection(final StubIndexSelection selection) {
+        stubIndexSelection_ = selection;
+        return this;
+    }
+
     // b = true
     public IborLeg withIndexedCoupons(Optional<Boolean> b) {
         useIndexedCoupons_ = b;
+        return this;
+    }
+
+    public IborLeg withIndexedCoupons(boolean b) {
+        useIndexedCoupons_ = Optional.of(b);
         return this;
     }
 
@@ -176,7 +199,37 @@ public class IborLeg {
         List<CashFlow> leg = FloatingLeg( schedule_, notionals_, index_, paymentDayCounter_,
                 paymentAdjustment_, fixingDays_, gearings_, spreads_,
                 caps_, floors_, inArrears_, zeroPayments_, paymentLag_, paymentCalendar_,
-                exCouponPeriod_, exCouponCalendar_, exCouponAdjustment_, exCouponEndOfMonth_);
+                exCouponPeriod_, exCouponCalendar_, exCouponAdjustment_, exCouponEndOfMonth_,
+                fixingConvention_);
+
+        if (stubIndexSelection_ != null && !stubIndexSelection_.empty()) {
+            QL_REQUIRE(caps_.isEmpty() && floors_.isEmpty(),
+                    "stub index conventions are not supported for capped/floored Ibor legs");
+            QL_REQUIRE(!inArrears_,
+                    "stub index conventions are not supported for in-arrears Ibor legs");
+            QL_REQUIRE(useIndexedCoupons_.orElse(
+                            !IborCoupon.Settings.instance().usingAtParCoupons()),
+                    "stub index conventions require indexed coupons");
+            QL_REQUIRE(schedule_.hasIsRegular(),
+                    "schedule does not provide regularity information for stub index selection");
+
+            for (int i = 0; i < leg.size(); ++i) {
+                if (schedule_.isRegular(i + 1))
+                    continue;
+
+                // periods with null gearing are fixed-rate coupons; leave them alone
+                if (!(leg.get(i) instanceof IborCoupon coupon))
+                    continue;
+
+                leg.set(i, new StubIborCoupon(
+                        coupon.date(), coupon.nominal(), coupon.accrualStartDate(),
+                        coupon.accrualEndDate(), coupon.fixingDays(), stubIndexSelection_,
+                        coupon.gearing(), coupon.spread(), coupon.referencePeriodStart(),
+                        coupon.referencePeriodEnd(), coupon.dayCounter(), coupon.isInArrears(),
+                        coupon.exCouponDate(), coupon.fixingConvention()));
+            }
+        }
+
         if (caps_.isEmpty() && floors_.isEmpty() && !inArrears_) {
             IborCouponPricer pricer = new BlackIborCouponPricer(
                     new Handle<>(new OptionletVolatilityStructure(BusinessDayConvention.FOLLOWING, new DayCounter()), true),

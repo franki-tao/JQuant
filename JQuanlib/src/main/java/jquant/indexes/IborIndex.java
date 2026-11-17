@@ -24,10 +24,11 @@ public class IborIndex extends InterestRateIndex {
                      Handle<YieldTermStructure> h) {
         super(familyName, tenor, settlementDays, currency, fixingCalendar, dayCounter);
         convention_ = convention;
-        termStructure_ = h;
+        termStructure_ = h != null ? h : new Handle<>(null, false);
         endOfMonth_ = endOfMonth;
-        if (h != null && !h.empty())
-            registerWith(h.currentLink());
+        // Register with the handle's link, not with the current curve:
+        // relinking the handle must notify the index (and thus its coupons).
+        registerWith(termStructure_.get());
     }
 
     @Override

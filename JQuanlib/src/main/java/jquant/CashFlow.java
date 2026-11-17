@@ -20,7 +20,10 @@ public abstract class CashFlow extends LazyObject implements Event {
      * returns true if an event has already occurred before a date
      * overloads Event::hasOccurred in order to take Settings::includeTodaysCashflows in account
      */
-    public abstract boolean hasOccurred(final Date refDate, Optional<Boolean> includeRefDate);
+    @Override
+    public boolean hasOccurred(final Date refDate, Optional<Boolean> includeRefDate) {
+        return hasOccurred(date(), refDate, includeRefDate);
+    }
     //@}
     //! \name LazyObject interface
     //@{
@@ -37,20 +40,54 @@ public abstract class CashFlow extends LazyObject implements Event {
     /*returns the date that the cash flow trades exCoupon*/
     public abstract Date exCouponDate();
     /*returns true if the cashflow is trading ex-coupon on the refDate*/
-    public abstract boolean tradingExCoupon(final Date refDate);
+    public boolean tradingExCoupon(final Date refDate) {
+        return tradingExCoupon(exCouponDate(), refDate);
+    }
 
     /**
      * A cash flow on {@code refDate} has occurred unless reference-date events are included.
-     * QuantLib {@code Event::hasOccurred}.
+     * QuantLib {@code CashFlow::hasOccurred}.
      */
     public static boolean hasOccurred(Date eventDate, Date refDate, Optional<Boolean> includeRefDate) {
-        Date ref = (refDate == null || TimeUtils.equals(refDate, new Date()))
-                ? Settings.instance.evaluationDate().Date() : refDate;
+        // easy and quick handling of most cases
+        if (!isNullDate(refDate)) {
+            if (TimeUtils.less(refDate, eventDate))
+                return false;
+            if (TimeUtils.less(eventDate, refDate))
+                return true;
+        }
+
+        Date evaluationDate = Settings.instance.evaluationDate().Date();
+        if (isNullDate(refDate) || TimeUtils.equals(refDate, evaluationDate)) {
+            // today's date; we override the bool with the one
+            // specified in the settings (if any)
+            Optional<Boolean> includeToday = Settings.instance.includeTodaysCashFlows();
+            if (includeToday != null && includeToday.isPresent())
+                includeRefDate = includeToday;
+        }
+
+        Date ref = isNullDate(refDate) ? evaluationDate : refDate;
         boolean include = includeRefDate != null && includeRefDate.isPresent()
                 ? includeRefDate.get()
                 : Settings.instance.includeReferenceDateEvents();
         if (include)
             return TimeUtils.less(eventDate, ref);
         return !TimeUtils.greater(eventDate, ref);
+    }
+
+    /**
+     * QuantLib {@code CashFlow::tradingExCoupon}.  The reference date
+     * defaults to the evaluation date.
+     */
+    public static boolean tradingExCoupon(Date exCouponDate, Date refDate) {
+        if (isNullDate(exCouponDate))
+            return false;
+        Date ref = isNullDate(refDate)
+                ? Settings.instance.evaluationDate().Date() : refDate;
+        return TimeUtils.leq(exCouponDate, ref);
+    }
+
+    private static boolean isNullDate(Date d) {
+        return d == null || d.serialNumber() == 0;
     }
 }

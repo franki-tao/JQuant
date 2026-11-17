@@ -228,6 +228,16 @@ public abstract class Calendar {
         returns the result.
         \note The input date is not modified.
     */
+    // c = following
+    public Date advance(final Date d, int n, TimeUnit unit) {
+        return advance(d, n, unit, BusinessDayConvention.FOLLOWING, false);
+    }
+
+    // endOfMonth = false
+    public Date advance(final Date d, int n, TimeUnit unit, BusinessDayConvention c) {
+        return advance(d, n, unit, c, false);
+    }
+
     // c = following, endOfMonth = false
     public Date advance(final Date d, int n, TimeUnit unit, BusinessDayConvention c, boolean endOfMonth) {
         QL_REQUIRE(d != null, "null date");
@@ -275,6 +285,16 @@ public abstract class Calendar {
         returns the result.
         \note The input date is not modified.
     */
+    // c = following
+    public Date advance(final Date d, final Period period) {
+        return advance(d, period.length(), period.units(), BusinessDayConvention.FOLLOWING, false);
+    }
+
+    // endOfMonth = false
+    public Date advance(final Date d, final Period period, BusinessDayConvention c) {
+        return advance(d, period.length(), period.units(), c, false);
+    }
+
     // c = following, endofMonth = false
     public Date advance(final Date d, final Period period, BusinessDayConvention c, boolean endOfMonth) {
         return advance(d, period.length(), period.units(), c, endOfMonth);

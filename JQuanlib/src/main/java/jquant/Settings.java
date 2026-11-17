@@ -83,6 +83,15 @@ public class Settings implements Singleton<Settings> {
     public Optional<Boolean> includeTodaysCashFlows() {
         return includeTodaysCashFlows_;
     }
+    public void setIncludeTodaysCashFlows(Optional<Boolean> value) {
+        includeTodaysCashFlows_ = value == null ? Optional.empty() : value;
+    }
+    public void setIncludeTodaysCashFlows(Boolean value) {
+        includeTodaysCashFlows_ = value == null ? Optional.empty() : Optional.of(value);
+    }
+    public void setIncludeTodaysCashFlows(boolean value) {
+        includeTodaysCashFlows_ = Optional.of(value);
+    }
 
     public boolean enforcesTodaysHistoricFixings() {
         return enforcesTodaysHistoricFixings_;

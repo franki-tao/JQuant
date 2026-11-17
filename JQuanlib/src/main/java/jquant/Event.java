@@ -24,6 +24,12 @@ public interface Event extends Observable {
         the event date is the same as the refDate.
     */
     boolean hasOccurred(final Date refDate, Optional<Boolean> includeRefDate);
+    default boolean hasOccurred(final Date refDate) {
+        return hasOccurred(refDate, Optional.empty());
+    }
+    default boolean hasOccurred() {
+        return hasOccurred(new Date(), Optional.empty());
+    }
     //@}
 
     //! \name Visitability

@@ -7,6 +7,9 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 //! market element returning a stored value
 public class SimpleQuote extends Quote {
     private double value_;
+    public SimpleQuote() {
+        this(Double.NaN);
+    }
     public SimpleQuote(double value) {
         this.value_ = value;
     }
