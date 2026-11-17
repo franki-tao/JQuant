@@ -30,6 +30,14 @@ public class BlackIborCouponPricer extends IborCouponPricer {
     private TimingAdjustment timingAdjustment_;
     private Handle<Quote> correlation_;
 
+    /** Official default arguments: empty volatility, Black76 timing and unit correlation. */
+    public BlackIborCouponPricer() {
+        this(new Handle<>(null, false),
+                Black76,
+                new Handle<>(new SimpleQuote(1.0), true),
+                Optional.empty());
+    }
+
     /** Official default arguments: Black76 timing and unit correlation. */
     public BlackIborCouponPricer(final Handle<OptionletVolatilityStructure> v) {
         this(v, Black76, new Handle<>(new SimpleQuote(1.0), true), Optional.empty());

@@ -24,6 +24,46 @@ public class FlatForward extends YieldTermStructure {
 
     public FlatForward(final Date referenceDate,
                        Handle<Quote> forward,
+                       final DayCounter dayCounter) {
+        this(referenceDate, forward, dayCounter, Compounding.Continuous, Frequency.ANNUAL);
+    }
+
+    public FlatForward(final Date referenceDate,
+                       double forward,
+                       final DayCounter dayCounter) {
+        this(referenceDate, forward, dayCounter, Compounding.Continuous, Frequency.ANNUAL);
+    }
+
+    public FlatForward(final Date referenceDate,
+                       double forward,
+                       final DayCounter dayCounter,
+                       Compounding compounding) {
+        this(referenceDate, forward, dayCounter, compounding, Frequency.ANNUAL);
+    }
+
+    public FlatForward(final Date referenceDate,
+                       Handle<Quote> forward,
+                       final DayCounter dayCounter,
+                       Compounding compounding) {
+        this(referenceDate, forward, dayCounter, compounding, Frequency.ANNUAL);
+    }
+
+    public FlatForward(int settlementDays,
+                       final Calendar calendar,
+                       Handle<Quote> forward,
+                       final DayCounter dayCounter) {
+        this(settlementDays, calendar, forward, dayCounter, Compounding.Continuous, Frequency.ANNUAL);
+    }
+
+    public FlatForward(int settlementDays,
+                       final Calendar calendar,
+                       double forward,
+                       final DayCounter dayCounter) {
+        this(settlementDays, calendar, forward, dayCounter, Compounding.Continuous, Frequency.ANNUAL);
+    }
+
+    public FlatForward(final Date referenceDate,
+                       Handle<Quote> forward,
                        final DayCounter dayCounter,
                        Compounding compounding,
                        Frequency frequency) {

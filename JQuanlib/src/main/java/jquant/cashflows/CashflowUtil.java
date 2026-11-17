@@ -11,6 +11,7 @@ import java.util.List;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 public class CashflowUtil {
+    // fixingConvention = Preceding
     public static List<CashFlow> FloatingLeg(
             final Schedule schedule,
             final List<Double> nominals,
@@ -30,6 +31,33 @@ public class CashflowUtil {
             Calendar exCouponCalendar, // = Calendar(),
             BusinessDayConvention exCouponAdjustment, // = Unadjusted,
             boolean exCouponEndOfMonth //= false
+    ) {
+        return FloatingLeg(schedule, nominals, index, paymentDayCounter, paymentAdj,
+                fixingDays, gearings, spreads, caps, floors, isInArrears, isZero,
+                paymentLag, paymentCalendar, exCouponPeriod, exCouponCalendar,
+                exCouponAdjustment, exCouponEndOfMonth, BusinessDayConvention.PRECEDING);
+    }
+
+    public static List<CashFlow> FloatingLeg(
+            final Schedule schedule,
+            final List<Double> nominals,
+            final IborIndex index,
+            final DayCounter paymentDayCounter,
+            BusinessDayConvention paymentAdj,
+            final List<Integer> fixingDays,
+            final List<Double> gearings,
+            final List<Double> spreads,
+            final List<Double> caps,
+            final List<Double> floors,
+            boolean isInArrears,
+            boolean isZero,
+            Integer paymentLag, // = 0,
+            Calendar paymentCalendar, // = Calendar(),
+            Period exCouponPeriod, // = Period(),
+            Calendar exCouponCalendar, // = Calendar(),
+            BusinessDayConvention exCouponAdjustment, // = Unadjusted,
+            boolean exCouponEndOfMonth, //= false
+            BusinessDayConvention fixingConvention
     ) {
         int n = schedule.size() - 1;
         QL_REQUIRE(!nominals.isEmpty(), "no notional given");
@@ -102,7 +130,8 @@ public class CashflowUtil {
                             CommonUtil.get(gearings, i, 1.0),
                             CommonUtil.get(spreads, i, 0.0),
                             refStart, refEnd,
-                            paymentDayCounter, isInArrears, exCouponDate)));
+                            paymentDayCounter, isInArrears, exCouponDate,
+                            fixingConvention)));
                 else {
                     leg.add((new
                             CappedFlooredIborCoupon(

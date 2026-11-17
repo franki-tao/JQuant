@@ -5,27 +5,16 @@ import jquant.indexes.IborIndex;
 import jquant.patterns.AcyclicVisitor;
 import jquant.patterns.Singleton;
 import jquant.patterns.Visitor;
+import jquant.time.BusinessDayConvention;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.TimeUtils;
-
-import java.util.Optional;
 
 import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 //! %Coupon paying a Libor-type index
 public class IborCoupon extends FloatingRateCoupon {
-    @Override
-    public boolean hasOccurred(Date refDate, Optional<Boolean> includeRefDate) {
-        return jquant.CashFlow.hasOccurred(date(), refDate, includeRefDate);
-    }
-
-    @Override
-    public boolean tradingExCoupon(Date refDate) {
-        return false;
-    }
-
     // IborCoupon::Settings forward declaration
     public static final class Settings implements Singleton<Settings> {
         private Settings() {
@@ -70,6 +59,28 @@ public class IborCoupon extends FloatingRateCoupon {
                       double nominal,
                       final Date startDate,
                       final Date endDate,
+                      final Integer fixingDays,
+                      final IborIndex iborIndex,
+                      double gearing,
+                      double spread,
+                      final Date refPeriodStart,
+                      final Date refPeriodEnd,
+                      final DayCounter dayCounter,
+                      boolean isInArrears,
+                      final Date exCouponDate,
+                      BusinessDayConvention fixingConvention) {
+        super(paymentDate, nominal, startDate, endDate,
+                fixingDays, iborIndex, gearing, spread,
+                refPeriodStart, refPeriodEnd,
+                dayCounter, isInArrears, exCouponDate, fixingConvention);
+        iborIndex_ = iborIndex;
+        fixingDate_ = super.fixingDate();
+    }
+
+    public IborCoupon(final Date paymentDate,
+                      double nominal,
+                      final Date startDate,
+                      final Date endDate,
                       int fixingDays,
                       final IborIndex iborIndex,
                       double gearing,
@@ -79,12 +90,85 @@ public class IborCoupon extends FloatingRateCoupon {
                       final DayCounter dayCounter,
                       boolean isInArrears,
                       final Date exCouponDate) {
-        super(paymentDate, nominal, startDate, endDate,
-                fixingDays, iborIndex, gearing, spread,
-                refPeriodStart, refPeriodEnd,
-                dayCounter, isInArrears, exCouponDate);
-        iborIndex_ = iborIndex;
-        fixingDate_ = super.fixingDate();
+        this(paymentDate, nominal, startDate, endDate, Integer.valueOf(fixingDays), iborIndex,
+                gearing, spread, refPeriodStart, refPeriodEnd, dayCounter, isInArrears,
+                exCouponDate, BusinessDayConvention.PRECEDING);
+    }
+
+    public IborCoupon(final Date paymentDate,
+                      double nominal,
+                      final Date startDate,
+                      final Date endDate,
+                      int fixingDays,
+                      final IborIndex iborIndex,
+                      double gearing,
+                      double spread,
+                      final Date refPeriodStart,
+                      final Date refPeriodEnd,
+                      final DayCounter dayCounter,
+                      boolean isInArrears) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, iborIndex, gearing, spread,
+                refPeriodStart, refPeriodEnd, dayCounter, isInArrears, new Date());
+    }
+
+    public IborCoupon(final Date paymentDate,
+                      double nominal,
+                      final Date startDate,
+                      final Date endDate,
+                      int fixingDays,
+                      final IborIndex iborIndex,
+                      double gearing,
+                      double spread,
+                      final Date refPeriodStart,
+                      final Date refPeriodEnd,
+                      final DayCounter dayCounter) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, iborIndex, gearing, spread,
+                refPeriodStart, refPeriodEnd, dayCounter, false);
+    }
+
+    public IborCoupon(final Date paymentDate,
+                      double nominal,
+                      final Date startDate,
+                      final Date endDate,
+                      int fixingDays,
+                      final IborIndex iborIndex,
+                      double gearing,
+                      double spread,
+                      final Date refPeriodStart,
+                      final Date refPeriodEnd) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, iborIndex, gearing, spread,
+                refPeriodStart, refPeriodEnd, new DayCounter());
+    }
+
+    public IborCoupon(final Date paymentDate,
+                      double nominal,
+                      final Date startDate,
+                      final Date endDate,
+                      int fixingDays,
+                      final IborIndex iborIndex,
+                      double gearing,
+                      double spread) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, iborIndex, gearing, spread,
+                new Date(), new Date());
+    }
+
+    public IborCoupon(final Date paymentDate,
+                      double nominal,
+                      final Date startDate,
+                      final Date endDate,
+                      int fixingDays,
+                      final IborIndex iborIndex,
+                      double gearing) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, iborIndex, gearing, 0.0);
+    }
+
+    public IborCoupon(final Date paymentDate,
+                      double nominal,
+                      final Date startDate,
+                      final Date endDate,
+                      int fixingDays,
+                      final IborIndex iborIndex) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, iborIndex, 1.0);
     }
 
     public final IborIndex iborIndex() {

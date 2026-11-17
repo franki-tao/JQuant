@@ -12,15 +12,47 @@ import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 //! base floating-rate coupon class
-public abstract class FloatingRateCoupon extends Coupon {
+public class FloatingRateCoupon extends Coupon {
     protected InterestRateIndex index_;
     protected DayCounter dayCounter_;
-    protected int fixingDays_;
+    protected Integer fixingDays_;
     protected double gearing_;
     protected double spread_;
     protected boolean isInArrears_;
+    protected BusinessDayConvention fixingConvention_;
     protected FloatingRateCouponPricer pricer_;
     protected double rate_;
+
+    public FloatingRateCoupon(final Date paymentDate,
+                              double nominal,
+                              final Date startDate,
+                              final Date endDate,
+                              final Integer fixingDays,
+                              final InterestRateIndex index,
+                              double gearing,
+                              double spread,
+                              final Date refPeriodStart,
+                              final Date refPeriodEnd,
+                              DayCounter dayCounter,
+                              boolean isInArrears,
+                              final Date exCouponDate,
+                              BusinessDayConvention fixingConvention) {
+        super(paymentDate, nominal, startDate, endDate, refPeriodStart, refPeriodEnd, exCouponDate);
+        index_ = index;
+        dayCounter_ = dayCounter;
+        fixingDays_ = fixingDays == null ? (index != null ? index.fixingDays() : 0) : fixingDays;
+        gearing_ = gearing;
+        spread_ = spread;
+        isInArrears_ = isInArrears;
+        fixingConvention_ = fixingConvention;
+        QL_REQUIRE(index_ != null, "no index provided");
+        QL_REQUIRE(gearing_ != 0, "Null gearing not allowed");
+        if (dayCounter_.empty())
+            dayCounter_ = index_.dayCounter();
+
+        registerWith(index_);
+        registerWith(Settings.instance.evaluationDate());
+    }
 
     public FloatingRateCoupon(final Date paymentDate,
                               double nominal,
@@ -35,20 +67,85 @@ public abstract class FloatingRateCoupon extends Coupon {
                               DayCounter dayCounter,
                               boolean isInArrears,
                               final Date exCouponDate) {
-        super(paymentDate, nominal, startDate, endDate, refPeriodStart, refPeriodEnd, exCouponDate);
-        index_ = index;
-        dayCounter_ = dayCounter;
-        fixingDays_ = fixingDays;
-        gearing_ = gearing;
-        spread_ = spread;
-        isInArrears_ = isInArrears;
-        QL_REQUIRE(index_ != null, "no index provided");
-        QL_REQUIRE(gearing_ != 0, "Null gearing not allowed");
-        if (dayCounter_.empty())
-            dayCounter_ = index_.dayCounter();
+        this(paymentDate, nominal, startDate, endDate, Integer.valueOf(fixingDays), index,
+                gearing, spread, refPeriodStart, refPeriodEnd, dayCounter, isInArrears,
+                exCouponDate, BusinessDayConvention.PRECEDING);
+    }
 
-        registerWith(index_);
-        registerWith(Settings.instance.evaluationDate());
+    public FloatingRateCoupon(final Date paymentDate,
+                              double nominal,
+                              final Date startDate,
+                              final Date endDate,
+                              int fixingDays,
+                              final InterestRateIndex index,
+                              double gearing,
+                              double spread,
+                              final Date refPeriodStart,
+                              final Date refPeriodEnd,
+                              DayCounter dayCounter,
+                              boolean isInArrears) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, index, gearing, spread,
+                refPeriodStart, refPeriodEnd, dayCounter, isInArrears, new Date());
+    }
+
+    public FloatingRateCoupon(final Date paymentDate,
+                              double nominal,
+                              final Date startDate,
+                              final Date endDate,
+                              int fixingDays,
+                              final InterestRateIndex index,
+                              double gearing,
+                              double spread,
+                              final Date refPeriodStart,
+                              final Date refPeriodEnd,
+                              DayCounter dayCounter) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, index, gearing, spread,
+                refPeriodStart, refPeriodEnd, dayCounter, false);
+    }
+
+    public FloatingRateCoupon(final Date paymentDate,
+                              double nominal,
+                              final Date startDate,
+                              final Date endDate,
+                              int fixingDays,
+                              final InterestRateIndex index,
+                              double gearing,
+                              double spread,
+                              final Date refPeriodStart,
+                              final Date refPeriodEnd) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, index, gearing, spread,
+                refPeriodStart, refPeriodEnd, new DayCounter());
+    }
+
+    public FloatingRateCoupon(final Date paymentDate,
+                              double nominal,
+                              final Date startDate,
+                              final Date endDate,
+                              int fixingDays,
+                              final InterestRateIndex index,
+                              double gearing,
+                              double spread) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, index, gearing, spread,
+                new Date(), new Date());
+    }
+
+    public FloatingRateCoupon(final Date paymentDate,
+                              double nominal,
+                              final Date startDate,
+                              final Date endDate,
+                              int fixingDays,
+                              final InterestRateIndex index,
+                              double gearing) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, index, gearing, 0.0);
+    }
+
+    public FloatingRateCoupon(final Date paymentDate,
+                              double nominal,
+                              final Date startDate,
+                              final Date endDate,
+                              int fixingDays,
+                              final InterestRateIndex index) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, index, 1.0);
     }
 
     //! \name LazyObject interface
@@ -106,7 +203,12 @@ public abstract class FloatingRateCoupon extends Coupon {
         // if isInArrears_ fix at the end of period
         Date refDate = isInArrears_ ? accrualEndDate_ : accrualStartDate_;
         return index_.fixingCalendar().advance(refDate,
-                -(fixingDays_), TimeUnit.DAYS, BusinessDayConvention.PRECEDING, false);
+                -(fixingDays_), TimeUnit.DAYS, fixingConvention_, false);
+    }
+
+    //! fixing convention
+    public BusinessDayConvention fixingConvention() {
+        return fixingConvention_;
     }
 
     //! index gearing, i.e. multiplicative coefficient for the index

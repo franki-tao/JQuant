@@ -399,6 +399,13 @@ public class Schedule {
                         "\n end of month: " + endOfMonth_.get());
     }
 
+    /*! constructor that takes any list of dates, with no meta information */
+    public Schedule(final List<Date> dates) {
+        this(dates, new NullCalendar(), BusinessDayConvention.UNADJUSTED,
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                new ArrayList<>());
+    }
+
     public Schedule() {
         dates_ = new ArrayList<>();
         isRegular_ = new ArrayList<>();

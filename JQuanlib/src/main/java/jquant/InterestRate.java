@@ -121,6 +121,56 @@ public class InterestRate {
         return Double.NaN;
     }
 
+    //! first derivative of the discount factor with respect to the rate
+    /*! \warning Time must be measured using InterestRate's own
+                 day counter.
+    */
+    public double discountFactorFirstDerivative(double t) {
+        double discount = discountFactor(t);
+        switch (comp_) {
+            case Simple:
+                return -t * discount * discount;
+            case Compounded: {
+                double freq = frequency().getValue();
+                double compound = 1.0 + r_ / freq;
+                return -t * discount / compound;
+            }
+            case Continuous:
+                return -t * discount;
+            case SimpleThenCompounded:
+            case CompoundedThenSimple:
+                QL_FAIL(comp_ + " is not supported for direct calculations: use the CashFlow methods");
+            default:
+                QL_FAIL("unknown compounding convention");
+        }
+        return Double.NaN;
+    }
+
+    //! second derivative of the discount factor with respect to the rate
+    /*! \warning Time must be measured using InterestRate's own
+                 day counter.
+    */
+    public double discountFactorSecondDerivative(double t) {
+        double discount = discountFactor(t);
+        switch (comp_) {
+            case Simple:
+                return 2.0 * t * t * discount * discount * discount;
+            case Compounded: {
+                double freq = frequency().getValue();
+                double compound = 1.0 + r_ / freq;
+                return discount * t * (freq * t + 1.0) / (freq * compound * compound);
+            }
+            case Continuous:
+                return t * t * discount;
+            case SimpleThenCompounded:
+            case CompoundedThenSimple:
+                QL_FAIL(comp_ + " is not supported for direct calculations: use the CashFlow methods");
+            default:
+                QL_FAIL("unknown compounding convention");
+        }
+        return Double.NaN;
+    }
+
     //! compound factor implied by the rate compounded between two dates
     /*! returns the compound (a.k.a capitalization) factor
         implied by the rate compounded between two dates.

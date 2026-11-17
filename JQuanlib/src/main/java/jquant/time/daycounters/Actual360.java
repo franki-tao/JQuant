@@ -10,6 +10,10 @@ import jquant.time.impl.Actual360Impl;
     \ingroup daycounters
 */
 public class Actual360 extends DayCounter {
+    public Actual360() {
+        this(false);
+    }
+
     public Actual360(boolean includeLastDay) {
         super(new Actual360Impl(includeLastDay));
     }

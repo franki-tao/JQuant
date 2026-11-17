@@ -88,6 +88,12 @@ public class MakeSchedule {
         return this;
     }
 
+    // endOfMonth = true
+    public MakeSchedule endOfMonth() {
+        endOfMonth_ = true;
+        return this;
+    }
+
     public MakeSchedule withFirstDate(final Date d) {
         firstDate_ = d;
         return this;
@@ -110,7 +116,7 @@ public class MakeSchedule {
         if (convention_.isPresent()) { // NOLINT(readability-implicit-bool-conversion)
             convention = convention_.get();
         } else {
-            if (!calendar_.empty()) {
+            if (calendar_ != null && !calendar_.empty()) {
                 // ...if we set a calendar, we probably want it to be used;
                 convention = BusinessDayConvention.FOLLOWING;
             } else {
@@ -127,7 +133,7 @@ public class MakeSchedule {
 
         Calendar calendar = calendar_;
         // if no calendar was set...
-        if (calendar.empty()) {
+        if (calendar_ == null || calendar_.empty()) {
             // ...we use a null one.
             calendar = new NullCalendar();
         }

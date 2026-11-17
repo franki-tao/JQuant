@@ -19,6 +19,39 @@ public class FixedRateCoupon extends Coupon {
                            double rate,
                            final DayCounter dayCounter,
                            final Date accrualStartDate,
+                           final Date accrualEndDate) {
+        this(paymentDate, nominal, rate, dayCounter, accrualStartDate, accrualEndDate,
+                new Date(), new Date(), new Date());
+    }
+
+    public FixedRateCoupon(final Date paymentDate,
+                           double nominal,
+                           double rate,
+                           final DayCounter dayCounter,
+                           final Date accrualStartDate,
+                           final Date accrualEndDate,
+                           final Date refPeriodStart) {
+        this(paymentDate, nominal, rate, dayCounter, accrualStartDate, accrualEndDate,
+                refPeriodStart, new Date(), new Date());
+    }
+
+    public FixedRateCoupon(final Date paymentDate,
+                           double nominal,
+                           double rate,
+                           final DayCounter dayCounter,
+                           final Date accrualStartDate,
+                           final Date accrualEndDate,
+                           final Date refPeriodStart, // = Date(),
+                           final Date refPeriodEnd) {
+        this(paymentDate, nominal, rate, dayCounter, accrualStartDate, accrualEndDate,
+                refPeriodStart, refPeriodEnd, new Date());
+    }
+
+    public FixedRateCoupon(final Date paymentDate,
+                           double nominal,
+                           double rate,
+                           final DayCounter dayCounter,
+                           final Date accrualStartDate,
                            final Date accrualEndDate,
                            final Date refPeriodStart, // = Date(),
                            final Date refPeriodEnd, // = Date(),
@@ -27,6 +60,36 @@ public class FixedRateCoupon extends Coupon {
         super(paymentDate, nominal, accrualStartDate, accrualEndDate,
                 refPeriodStart, refPeriodEnd, exCouponDate);
         rate_ = new InterestRate(rate, dayCounter, Compounding.Simple, Frequency.ANNUAL);
+    }
+
+    public FixedRateCoupon(final Date paymentDate,
+                           double nominal,
+                           InterestRate interestRate,
+                           final Date accrualStartDate,
+                           final Date accrualEndDate) {
+        this(paymentDate, nominal, interestRate, accrualStartDate, accrualEndDate,
+                new Date(), new Date(), new Date());
+    }
+
+    public FixedRateCoupon(final Date paymentDate,
+                           double nominal,
+                           InterestRate interestRate,
+                           final Date accrualStartDate,
+                           final Date accrualEndDate,
+                           final Date refPeriodStart) {
+        this(paymentDate, nominal, interestRate, accrualStartDate, accrualEndDate,
+                refPeriodStart, new Date(), new Date());
+    }
+
+    public FixedRateCoupon(final Date paymentDate,
+                           double nominal,
+                           InterestRate interestRate,
+                           final Date accrualStartDate,
+                           final Date accrualEndDate,
+                           final Date refPeriodStart, // = Date(),
+                           final Date refPeriodEnd) {
+        this(paymentDate, nominal, interestRate, accrualStartDate, accrualEndDate,
+                refPeriodStart, refPeriodEnd, new Date());
     }
 
     public FixedRateCoupon(final Date paymentDate,
@@ -49,11 +112,6 @@ public class FixedRateCoupon extends Coupon {
     }
 
     @Override
-    public boolean hasOccurred(Date refDate, Optional<Boolean> includeRefDate) {
-        return jquant.CashFlow.hasOccurred(date(), refDate, includeRefDate);
-    }
-
-    @Override
     public void performCalculations() {
         amount_ = nominal() * (rate_.compoundFactor(accrualStartDate_, accrualEndDate_,
                 refPeriodStart_, refPeriodEnd_) -
@@ -64,11 +122,6 @@ public class FixedRateCoupon extends Coupon {
     public double amount() {
         calculate();
         return amount_;
-    }
-
-    @Override
-    public boolean tradingExCoupon(Date refDate) {
-        return false;
     }
 
     public double rate() {
