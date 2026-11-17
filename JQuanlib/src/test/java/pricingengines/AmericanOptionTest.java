@@ -6,6 +6,7 @@ import jquant.EuropeanOption;
 import jquant.Handle;
 import jquant.Option;
 import jquant.Payoff;
+import jquant.Quote;
 import jquant.SavedSettings;
 import jquant.Settings;
 import jquant.cashflows.Dividend;
@@ -15,6 +16,7 @@ import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
 import jquant.pricingengines.vanilla.BaroneAdesiWhaleyApproximationEngine;
 import jquant.pricingengines.vanilla.BinomialVanillaEngine;
 import jquant.pricingengines.vanilla.BjerksundStenslandApproximationEngine;
+import jquant.pricingengines.vanilla.FdBlackScholesShoutEngine;
 import jquant.pricingengines.vanilla.FdBlackScholesVanillaEngine;
 import jquant.pricingengines.vanilla.JuQuadraticApproximationEngine;
 import jquant.pricingengines.vanilla.MakeFdBlackScholesVanillaEngine;
@@ -1149,6 +1151,311 @@ public class AmericanOptionTest {
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    public void testFdShoutGreeks() {
+        // QuantLib test-suite/americanoption.cpp: testFdGreeks<FdBlackScholesShoutEngine>
+        final Map<String, Double> tolerance = new LinkedHashMap<>();
+        tolerance.put("delta", 7.0e-4);
+        tolerance.put("gamma", 2.0e-4);
+
+        final Option.Type[] types = {Option.Type.Call, Option.Type.Put};
+        final double[] strikes = {50.0, 99.5, 100.0, 100.5, 150.0};
+        final double[] underlyings = {100.0};
+        final double[] qRates = {0.04, 0.05, 0.06};
+        final double[] rRates = {0.01, 0.05, 0.15};
+        final int[] years = {1, 2};
+        final double[] vols = {0.11, 0.50, 1.20};
+
+        final DayCounter dc = new Actual360(false);
+        final Date today = Settings.instance.evaluationDate().Date();
+
+        final SimpleQuote spot = new SimpleQuote(0.0);
+        final SimpleQuote qRate = new SimpleQuote(0.0);
+        final SimpleQuote rRate = new SimpleQuote(0.0);
+        final SimpleQuote vol = new SimpleQuote(0.0);
+        final YieldTermStructure qTS = flatRate(today, qRate, dc);
+        final YieldTermStructure rTS = flatRate(today, rRate, dc);
+        final BlackVolTermStructure volTS = flatVol(today, vol, dc);
+
+        for (Option.Type type : types) {
+            for (double strike : strikes) {
+                for (int year : years) {
+                    final Date exDate = today.add(
+                            new Period(year, TimeUnit.YEARS));
+                    final PlainVanillaPayoff payoff =
+                            new PlainVanillaPayoff(type, strike);
+                    final AmericanExercise exercise =
+                            new AmericanExercise(today, exDate);
+                    final BlackScholesMertonProcess stochProcess =
+                            new BlackScholesMertonProcess(
+                                    new Handle<>(spot, true),
+                                    new Handle<>(qTS, true),
+                                    new Handle<>(rTS, true),
+                                    new Handle<>(volTS, true));
+
+                    final FdBlackScholesShoutEngine engine =
+                            new FdBlackScholesShoutEngine(stochProcess, 50);
+
+                    final EuropeanOption option =
+                            new EuropeanOption(payoff, exercise);
+                    option.setPricingEngine(engine);
+
+                    for (double u : underlyings) {
+                        for (double m : qRates) {
+                            for (double n : rRates) {
+                                for (double v : vols) {
+                                    final double q = m, r = n;
+                                    spot.setValue(u);
+                                    qRate.setValue(q);
+                                    rRate.setValue(r);
+                                    vol.setValue(v);
+
+                                    final double value = option.NPV();
+                                    final Map<String, Double> calculated =
+                                            new LinkedHashMap<>();
+                                    calculated.put("delta", option.delta());
+                                    calculated.put("gamma", option.gamma());
+
+                                    if (value > spot.value() * 1.0e-5) {
+                                        // perturb spot and get delta and gamma
+                                        final double du = u * 1.0e-4;
+                                        spot.setValue(u + du);
+                                        final double value_p = option.NPV();
+                                        final double delta_p = option.delta();
+                                        spot.setValue(u - du);
+                                        final double value_m = option.NPV();
+                                        final double delta_m = option.delta();
+                                        spot.setValue(u);
+
+                                        final Map<String, Double> expected =
+                                                new LinkedHashMap<>();
+                                        expected.put("delta",
+                                                (value_p - value_m) / (2 * du));
+                                        expected.put("gamma",
+                                                (delta_p - delta_m) / (2 * du));
+
+                                        for (Map.Entry<String, Double> entry
+                                                : calculated.entrySet()) {
+                                            final String greek = entry.getKey();
+                                            final double expct =
+                                                    expected.get(greek);
+                                            final double calcl =
+                                                    entry.getValue();
+                                            final double tol =
+                                                    tolerance.get(greek);
+                                            final double error = relativeError(
+                                                    expct, calcl, u);
+                                            if (error > tol) {
+                                                fail(greek + " greek failure"
+                                                        + "\n    type:       "
+                                                        + type
+                                                        + "\n    strike:     "
+                                                        + strike
+                                                        + "\n    spot:       " + u
+                                                        + "\n    q:          " + q
+                                                        + "\n    r:          " + r
+                                                        + "\n    today:      " + today
+                                                        + "\n    vol:        " + v
+                                                        + "\n    expected:   " + expct
+                                                        + "\n    calculated: " + calcl
+                                                        + "\n    error:      " + error
+                                                        + "\n    tolerance:  " + tol);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testFDShoutNPV() {
+        // QuantLib test-suite/americanoption.cpp: testFDShoutNPV
+        final DayCounter dc = new Actual365Fixed();
+        final Date today = new Date(4, Month.FEBRUARY, 2021);
+        Settings.instance.evaluationDate().equal(today);
+
+        final Handle<Quote> spot =
+                new Handle<>(new SimpleQuote(100.0), true);
+        final Handle<YieldTermStructure> q =
+                new Handle<>(flatRate(today, 0.03, dc), true);
+        final Handle<YieldTermStructure> r =
+                new Handle<>(flatRate(today, 0.06, dc), true);
+        final Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, new SimpleQuote(0.25), dc), true);
+        final BlackScholesMertonProcess process =
+                new BlackScholesMertonProcess(spot, q, r, volTS);
+
+        final Date maturityDate = today.add(
+                new Period(5, TimeUnit.YEARS));
+
+        record TestDescription(double strike, Option.Type type,
+                               double expected) {
+        }
+
+        final TestDescription[] testDescriptions = {
+                new TestDescription(105, Option.Type.Put, 19.136),
+                new TestDescription(105, Option.Type.Call, 28.211),
+                new TestDescription(120, Option.Type.Put, 28.02),
+                new TestDescription(80, Option.Type.Call, 40.785)
+        };
+
+        final FdBlackScholesShoutEngine engine =
+                new FdBlackScholesShoutEngine(process, 400, 200);
+
+        for (TestDescription desc : testDescriptions) {
+            final EuropeanOption option = new EuropeanOption(
+                    new PlainVanillaPayoff(desc.type(), desc.strike()),
+                    new AmericanExercise(maturityDate));
+            option.setPricingEngine(engine);
+
+            final double expected = desc.expected();
+            final double tol = 2e-2;
+            final double calculated = option.NPV();
+            final double diff = Math.abs(calculated - expected);
+
+            if (diff > tol) {
+                fail("failed to reproduce known shout option price for "
+                        + "\n    strike:     " + desc.strike()
+                        + "\n    option type:" + desc.type()
+                        + "\n    calculated: " + calculated
+                        + "\n    expected:   " + expected
+                        + "\n    difference: " + diff
+                        + "\n    tolerance:  " + tol);
+            }
+        }
+    }
+
+    @Test
+    public void testZeroVolFDShoutNPV() {
+        // QuantLib test-suite/americanoption.cpp: testZeroVolFDShoutNPV
+        final DayCounter dc = new Actual365Fixed();
+        final Date today = new Date(14, Month.FEBRUARY, 2021);
+        Settings.instance.evaluationDate().equal(today);
+
+        final Handle<Quote> spot =
+                new Handle<>(new SimpleQuote(100.0), true);
+        final Handle<YieldTermStructure> q =
+                new Handle<>(flatRate(today, 0.03, dc), true);
+        final Handle<YieldTermStructure> r =
+                new Handle<>(flatRate(today, 0.07, dc), true);
+        final Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, new SimpleQuote(1e-6), dc), true);
+        final BlackScholesMertonProcess process =
+                new BlackScholesMertonProcess(spot, q, r, volTS);
+
+        final Date maturityDate = today.add(
+                new Period(1, TimeUnit.YEARS));
+        final Date dividendDate = today.add(
+                new Period(3, TimeUnit.MONTHS));
+        final double dividendAmount = 10.0;
+        final List<Date> dividendDates = new ArrayList<>();
+        dividendDates.add(dividendDate);
+        final List<Dividend> dividends =
+                Dividend.dividendVector(dividendDates,
+                        new double[]{dividendAmount});
+
+        final EuropeanOption option = new EuropeanOption(
+                new PlainVanillaPayoff(Option.Type.Put, 100.0),
+                new AmericanExercise(today, maturityDate));
+        option.setPricingEngine(
+                new FdBlackScholesVanillaEngine(
+                        process, dividends, 50, 50));
+
+        final double americanNPV = option.NPV();
+
+        final EuropeanOption option2 = new EuropeanOption(
+                new PlainVanillaPayoff(Option.Type.Put, 100.0),
+                new AmericanExercise(today, maturityDate));
+        option2.setPricingEngine(
+                new FdBlackScholesShoutEngine(
+                        process, dividends, 50, 50));
+
+        final double shoutNPV = option2.NPV();
+
+        final double df = r.getValue().discount(maturityDate, false)
+                / r.getValue().discount(dividendDate, false);
+
+        final double tol = 1e-3;
+        final double diff = Math.abs(americanNPV - shoutNPV / df);
+
+        if (diff > tol) {
+            fail("failed to reproduce American option NPV with "
+                    + "shout option pricing engine for "
+                    + "\n    calculated: " + shoutNPV / df
+                    + "\n    expected  : " + americanNPV
+                    + "\n    difference: " + diff
+                    + "\n    tolerance:  " + tol);
+        }
+    }
+
+    @Test
+    public void testLargeDividendShoutNPV() {
+        // QuantLib test-suite/americanoption.cpp: testLargeDividendShoutNPV
+        final DayCounter dc = new Actual365Fixed();
+        final Date today = new Date(21, Month.FEBRUARY, 2021);
+        Settings.instance.evaluationDate().equal(today);
+
+        final double s0 = 100.0;
+        final double vol = 0.25;
+
+        final Handle<YieldTermStructure> q =
+                new Handle<>(flatRate(today, 0.00, dc), true);
+        final Handle<YieldTermStructure> r =
+                new Handle<>(flatRate(today, 0.00, dc), true);
+        final Handle<BlackVolTermStructure> vTS =
+                new Handle<>(flatVol(today, new SimpleQuote(vol), dc), true);
+        final BlackScholesMertonProcess process =
+                new BlackScholesMertonProcess(
+                        new Handle<>(new SimpleQuote(s0), true),
+                        q, r, vTS);
+
+        final Date maturityDate = today.add(
+                new Period(6, TimeUnit.MONTHS));
+        final Date dividendDate = today.add(
+                new Period(3, TimeUnit.MONTHS));
+        final List<Date> dividendDates = new ArrayList<>();
+        dividendDates.add(dividendDate);
+        final List<Dividend> dividends =
+                Dividend.dividendVector(dividendDates, new double[]{30.0});
+
+        final double strike = 80.0;
+        final EuropeanOption option = new EuropeanOption(
+                new PlainVanillaPayoff(Option.Type.Call, strike),
+                new AmericanExercise(today, maturityDate));
+        option.setPricingEngine(
+                new FdBlackScholesShoutEngine(
+                        process, dividends, 100, 400));
+
+        final double calculated = option.NPV();
+
+        final EuropeanOption refOption = new EuropeanOption(
+                new PlainVanillaPayoff(Option.Type.Call, strike),
+                new AmericanExercise(today, dividendDate));
+        refOption.setPricingEngine(
+                new FdBlackScholesShoutEngine(process, 100, 400));
+
+        final double expected = refOption.NPV()
+                * r.getValue().discount(maturityDate, false)
+                / r.getValue().discount(dividendDate, false);
+
+        final double tol = 5e-2;
+        final double diff = Math.abs(expected - calculated);
+
+        if (diff > tol) {
+            fail("failed to reproduce American option NPV with "
+                    + "shout option pricing engine for "
+                    + "\n    calculated: " + calculated
+                    + "\n    expected  : " + expected
+                    + "\n    difference: " + diff
+                    + "\n    tolerance:  " + tol);
         }
     }
 
