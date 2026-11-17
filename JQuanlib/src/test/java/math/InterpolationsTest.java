@@ -11,6 +11,10 @@ import jquant.math.Matrix;
 import jquant.math.RichardsonExtrapolation;
 import jquant.math.integrals.SimpsonIntegral;
 import jquant.math.interpolations.*;
+import jquant.experimental.volatility.NoArbSabrInterpolation;
+import jquant.experimental.volatility.NoArbSabrModel;
+import jquant.experimental.volatility.NoArbSabrSmileSection;
+import jquant.experimental.volatility.NoArbSabrSpecs;
 import jquant.math.interpolations.impl.MixedInterpolationImpl;
 import jquant.math.interpolations.impl.SABRSpecs;
 import jquant.math.randomnumbers.HaltonRsg;
@@ -23,6 +27,7 @@ import jquant.termstructures.volatility.Sarb;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_FAIL;
@@ -41,6 +46,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 public class InterpolationsTest {
+    // Official testInterpolateWithoutUpdate is intentionally not ported.
+    // It exercises the C++ factory `interpolateWithoutUpdate` and the old
+    // versus new `interpolate(..., update)` API of the C++ Interpolation
+    // framework; JQuant constructors do not expose such an update argument.
+    // No fake equivalent is provided.
+
     public List<Double> xRange(double start, double finish, int points) {
         List<Double> x = CommonUtil.ArrayInit(points);
         double dx = (finish - start) / (points - 1);
@@ -1033,11 +1044,8 @@ public class InterpolationsTest {
     public void testTransformations() {
         System.out.println("Testing Sabr and no-arbitrage Sabr transformation functions...");
 
-        // Only the SABR half of the official test is ported here. The
-        // no-arbitrage half requires the experimental NoArbSabr model
-        // (noarbsabrabsprobs.cpp and the related model/specs/interpolation),
-        // which is not available in this port, so it is deliberately omitted
-        // rather than faked.
+        // Both official halves of testTransformations are now present: the
+        // SABR transformations and the no-arbitrage SABR transformations.
         double size = 25.0; // test inputs from [-size,size]^4
 
         int N = 100000;
@@ -1052,6 +1060,7 @@ public class InterpolationsTest {
 
         HaltonRsg h = new HaltonRsg(4, 42, false, false);
         SABRSpecs sabrSpecs = new SABRSpecs();
+        NoArbSabrSpecs noArbSabrSpecs = new NoArbSabrSpecs();
 
         for (int iter = 0; iter < 1_000_000; ++iter) {
             List<Double> s = h.nextSequence().value;
@@ -1069,6 +1078,45 @@ public class InterpolationsTest {
                             && close(z.get(2), y.get(2), N)
                             && close(z.get(3), y.get(3), N),
                     "SabrInterpolation: direct(inverse("
+                            + y.get(0) + "," + y.get(1) + "," + y.get(2) + ","
+                            + y.get(3) + ")) = (" + z.get(0) + "," + z.get(1) + ","
+                            + z.get(2) + "," + z.get(3) + "), difference is ("
+                            + (z.get(0) - y.get(0)) + "," + (z.get(1) - y.get(1))
+                            + "," + (z.get(2) - y.get(2)) + ","
+                            + (z.get(3) - y.get(3)) + ")");
+
+            // noarb sabr
+            y = noArbSabrSpecs.direct(x, fixed, params, forward);
+
+            // we can not invoke the constructor, this would be too slow, so
+            // we copy the parameter check here ...
+            double alpha = y.get(0);
+            double beta = y.get(1);
+            double nu = y.get(2);
+            double rho = y.get(3);
+            CommonUtil.QL_REQUIRE(beta >= NoArbSabrModel.beta_min &&
+                            beta <= NoArbSabrModel.beta_max,
+                    "beta (" + beta + ") out of bounds");
+            double sigmaI = alpha * Math.pow(forward, beta - 1.0);
+            CommonUtil.QL_REQUIRE(sigmaI >= NoArbSabrModel.sigmaI_min &&
+                            sigmaI <= NoArbSabrModel.sigmaI_max,
+                    "sigmaI = alpha*forward^(beta-1.0) (" + sigmaI +
+                            ") out of bounds, alpha=" + alpha +
+                            " beta=" + beta + " forward=" + forward);
+            CommonUtil.QL_REQUIRE(nu >= NoArbSabrModel.nu_min &&
+                            nu <= NoArbSabrModel.nu_max,
+                    "nu (" + nu + ") out of bounds");
+            CommonUtil.QL_REQUIRE(rho >= NoArbSabrModel.rho_min &&
+                            rho <= NoArbSabrModel.rho_max,
+                    "rho (" + rho + ") out of bounds");
+
+            z = noArbSabrSpecs.inverse(y, fixed, params, forward);
+            z = noArbSabrSpecs.direct(z, fixed, params, forward);
+            assertTrue(close(z.get(0), y.get(0), N)
+                            && close(z.get(1), y.get(1), N)
+                            && close(z.get(2), y.get(2), N)
+                            && close(z.get(3), y.get(3), N),
+                    "NoArbSabrInterpolation: direct(inverse("
                             + y.get(0) + "," + y.get(1) + "," + y.get(2) + ","
                             + y.get(3) + ")) = (" + z.get(0) + "," + z.get(1) + ","
                             + z.get(2) + "," + z.get(3) + "), difference is ("
@@ -2463,6 +2511,152 @@ public class InterpolationsTest {
                                 assertFalse(failed, "\nSabr calibration failure:"
                                         + "\n    isAlphaFixed:    " + k_a
                                         + "\n    isBetaFixed:     " + k_b
+                                        + "\n    isNuFixed:       " + k_n
+                                        + "\n    isRhoFixed:      " + k_r
+                                        + "\n    vegaWeighted[i]: " + i);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testNoArbSabrInterpolation() {
+        System.out.println("Testing no-arbitrage Sabr interpolation...");
+
+        // Test SABR function against input volatilities
+        double tolerance = 1.0e-12;
+        double[] strikes = {
+                0.03, 0.032, 0.034, 0.036, 0.038, 0.04, 0.042, 0.044,
+                0.046, 0.048, 0.05, 0.052, 0.054, 0.056, 0.058, 0.06,
+                0.062, 0.064, 0.066, 0.068, 0.07, 0.072, 0.074, 0.076,
+                0.078, 0.08, 0.082, 0.084, 0.086, 0.088, 0.09};
+        // input volatilities for noarb sabr (other than above
+        // alpha is 0.2 here due to the restriction sigmaI <= 1.0 !)
+        double[] volatilities = {
+                0.773729077752926, 0.763916242454194, 0.754773878663612,
+                0.746222305031368, 0.738193023523582, 0.730629785825930,
+                0.723484825471685, 0.716716812668892, 0.710290301049393,
+                0.704174528906769, 0.698342635400901, 0.692771033345972,
+                0.687438902593476, 0.682327777297265, 0.677421206991904,
+                0.672704476238547, 0.668164371832768, 0.663788984329375,
+                0.659567547226380, 0.655490294349232, 0.651548341349061,
+                0.647733583657137, 0.644038608699086, 0.640456620061898,
+                0.636981371712714, 0.633607110719560, 0.630328527192861,
+                0.627140710386248, 0.624039110072250, 0.621019502453590,
+                0.618077959983455};
+
+        double expiry = 1.0;
+        double forward = 0.039;
+        // input SABR coefficients (corresponding to the vols above)
+        double initialAlpha = 0.2;
+        double initialBeta = 0.6;
+        double initialNu = 0.02;
+        double initialRho = 0.01;
+        // calculate SABR vols and compare with input vols
+        NoArbSabrSmileSection noarbSabr = new NoArbSabrSmileSection(expiry,
+                forward,
+                Arrays.asList(initialAlpha, initialBeta, initialNu, initialRho));
+        for (int i = 0; i < strikes.length; i++) {
+            double calculatedVol = noarbSabr.volatility(strikes[i]);
+            assertFalse(Math.abs(volatilities[i] - calculatedVol) > tolerance,
+                    "failed to calculate noarb-Sabr function at strike " +
+                            strikes[i]
+                            + "\n    expected:   " + volatilities[i]
+                            + "\n    calculated: " + calculatedVol
+                            + "\n    error:      " +
+                            Math.abs(calculatedVol - volatilities[i]));
+        }
+
+        // Test SABR calibration against input parameters
+        double betaGuess = 0.5;
+        double alphaGuess = 0.2 / Math.pow(forward, betaGuess - 1.0);
+        double nuGuess = Math.sqrt(0.4);
+        double rhoGuess = 0.0;
+
+        boolean[] vegaWeighted = {true, false};
+        boolean[] isAlphaFixed = {true, false};
+        boolean[] isBetaFixed = {true, false};
+        boolean[] isNuFixed = {true, false};
+        boolean[] isRhoFixed = {true, false};
+
+        double calibrationTolerance = 5.0e-6;
+        // initialize optimization methods
+        OptimizationMethod[] methods = {
+                new Simplex(0.01),
+                new LevenbergMarquardt(1e-8, 1e-8, 1e-8)
+        };
+        // Initialize end criteria
+        EndCriteria endCriteria = new EndCriteria(100000, 100, 1e-8, 1e-8, 1e-8);
+        // Test looping over all possibilities
+        for (int j = 1; j < methods.length; ++j) { // skip simplex (gets caught in some cases)
+            for (boolean i : vegaWeighted) {
+                for (boolean k_a : isAlphaFixed) {
+                    for (int k_b = 0; k_b < 1; ++k_b) { // keep beta fixed (all 4 params free is a problem for this kind of test)
+                        for (boolean k_n : isNuFixed) {
+                            for (boolean k_r : isRhoFixed) {
+                                NoArbSabrInterpolation noarbSabrInterpolation =
+                                        new NoArbSabrInterpolation(
+                                                strikes, volatilities, expiry,
+                                                forward,
+                                                k_a ? initialAlpha : alphaGuess,
+                                                isBetaFixed[k_b] ? initialBeta : betaGuess,
+                                                k_n ? initialNu : nuGuess,
+                                                k_r ? initialRho : rhoGuess,
+                                                k_a, isBetaFixed[k_b], k_n, k_r, i,
+                                                endCriteria, methods[j], 1E-10);
+                                noarbSabrInterpolation.update();
+
+                                // Recover SABR calibration parameters
+                                boolean failed = false;
+                                double calibratedAlpha = noarbSabrInterpolation.alpha();
+                                double calibratedBeta = noarbSabrInterpolation.beta();
+                                double calibratedNu = noarbSabrInterpolation.nu();
+                                double calibratedRho = noarbSabrInterpolation.rho();
+                                double error;
+
+                                // compare results: alpha
+                                error = Math.abs(initialAlpha - calibratedAlpha);
+                                if (error > calibrationTolerance) {
+                                    System.out.println("\nfailed to calibrate alpha Sabr parameter:"
+                                            + "\n    expected:        " + initialAlpha
+                                            + "\n    calibrated:      " + calibratedAlpha
+                                            + "\n    error:           " + error);
+                                    failed = true;
+                                }
+                                // Beta
+                                error = Math.abs(initialBeta - calibratedBeta);
+                                if (error > calibrationTolerance) {
+                                    System.out.println("\nfailed to calibrate beta Sabr parameter:"
+                                            + "\n    expected:        " + initialBeta
+                                            + "\n    calibrated:      " + calibratedBeta
+                                            + "\n    error:           " + error);
+                                    failed = true;
+                                }
+                                // Nu
+                                error = Math.abs(initialNu - calibratedNu);
+                                if (error > calibrationTolerance) {
+                                    System.out.println("\nfailed to calibrate nu Sabr parameter:"
+                                            + "\n    expected:        " + initialNu
+                                            + "\n    calibrated:      " + calibratedNu
+                                            + "\n    error:           " + error);
+                                    failed = true;
+                                }
+                                // Rho
+                                error = Math.abs(initialRho - calibratedRho);
+                                if (error > calibrationTolerance) {
+                                    System.out.println("\nfailed to calibrate rho Sabr parameter:"
+                                            + "\n    expected:        " + initialRho
+                                            + "\n    calibrated:      " + calibratedRho
+                                            + "\n    error:           " + error);
+                                    failed = true;
+                                }
+
+                                assertFalse(failed, "\nnoarb-Sabr calibration failure:"
+                                        + "\n    isAlphaFixed:    " + k_a
+                                        + "\n    isBetaFixed:     " + isBetaFixed[k_b]
                                         + "\n    isNuFixed:       " + k_n
                                         + "\n    isRhoFixed:      " + k_r
                                         + "\n    vegaWeighted[i]: " + i);
