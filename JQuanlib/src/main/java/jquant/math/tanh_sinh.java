@@ -4,7 +4,11 @@ public class tanh_sinh {
     private int max_refinements;
     private double min_complement;
 
-    private final int FUDGE1 = 160;
+    // Boost's tanh_sinh applies the relative tolerance directly to the
+    // estimated error of the L1 norm, which is the change v between two
+    // successive refinement levels.  Scaling it up stops too early and
+    // leaves errors of order 1e-9 for relTolerance 1e-10.
+    private final int FUDGE1 = 1;
     private final int FUDGE2 = 16;
 
     public tanh_sinh(int max_refinements, double min_complement) {
