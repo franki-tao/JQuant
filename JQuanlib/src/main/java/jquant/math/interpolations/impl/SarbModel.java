@@ -15,12 +15,6 @@ public interface SarbModel {
                final double forward, final double expiryTime,
                final List<Double> r, final List<Double> addParams);
 
-    double eps1();
-
-    double eps2();
-
-    double dilationFactor();
-
     Array inverse(final Array y, final List<Boolean> temp,
                   final List<Double> tmp, final double tp);
 
@@ -30,7 +24,7 @@ public interface SarbModel {
     double weight(final double strike, final double forward, final double stdDev,
                   final List<Double> addParams);
 
-    SABRWrapper instance(final double t, final double forward,
-                         final List<Double> params,
-                         final List<Double> addParams);
+    XABRModel instance(final double t, final double forward,
+                       final List<Double> params,
+                       final List<Double> addParams);
 }

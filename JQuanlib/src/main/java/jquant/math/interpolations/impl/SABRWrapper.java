@@ -8,7 +8,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 import static jquant.termstructures.volatility.Sarb.shiftedSabrVolatility;
 import static jquant.termstructures.volatility.Sarb.validateSabrParameters;
 
-public class SABRWrapper {
+public class SABRWrapper implements XABRModel {
     private double t_, forward_;
     private List<Double> params_;
     private double shift_;
@@ -26,6 +26,7 @@ public class SABRWrapper {
         validateSabrParameters(params.get(0), params.get(1), params.get(2), params.get(3));
     }
 
+    @Override
     public double volatility(final double x, final Sarb.VolatilityType volatilityType) {
         return shiftedSabrVolatility(x, forward_, t_, params_.get(0), params_.get(1),
                 params_.get(2), params_.get(3), shift_, volatilityType);

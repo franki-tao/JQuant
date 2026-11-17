@@ -29,7 +29,7 @@ public class XABRInterpolationImpl extends templateImpl {
     public double error_, maxError_;
     public EndCriteria.Type XABREndCriteria_;
     /*! Model instance (if required) */
-    public SABRWrapper modelInstance_;
+    public XABRModel modelInstance_;
 
     public SarbModel modelTmp;
 

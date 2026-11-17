@@ -55,6 +55,51 @@ public class ModifiedBessel {
         }
     }
 
+    /**
+     * Exponentially weighted modified Bessel function of the first kind,
+     * i.e. {@code I_nu(x) * exp(-x)}.  Port of the official QuantLib
+     * {@code modifiedBesselFunction_i_exponentiallyWeighted(Real, Real)}.
+     */
+    public static double modifiedBesselFunction_i_exponentiallyWeighted(double nu,
+                                                                        double x) {
+        QL_REQUIRE(x >= 0.0, "negative argument requires complex version of modifiedBesselFunction");
+        // I_(-n) = I_n at integer order.
+        if (nu < 0.0 && nu == Math.floor(nu))
+            nu = -nu;
+
+        if (Math.abs(x) < 13.0) {
+            final double alpha = Math.pow(0.5 * x, nu) / new GammaFunction().value(1.0 + nu);
+            final double Y = 0.25 * x * x;
+            int k = 1;
+            double sum = alpha, B_k = alpha;
+
+            while (Math.abs(B_k *= Y / (k * (k + nu))) > Math.abs(sum) * QL_EPSILON) {
+                sum += B_k;
+                QL_REQUIRE(++k < 1000, "max iterations exceeded");
+            }
+            return sum * Math.exp(-x);
+        } else {
+            double na_k = 1.0, sign = 1.0;
+            double da_k = 1.0;
+
+            double s1 = 1.0, s2 = 1.0;
+            for (int k = 1; k < 30; ++k) {
+                sign *= -1;
+                na_k *= (4.0 * nu * nu -
+                        (2.0 * (k) - 1.0) *
+                                (2.0 * (k) - 1.0));
+                da_k *= (8.0 * k) * x;
+                final double a_k = na_k / da_k;
+                s2 += a_k;
+                s1 += sign * a_k;
+            }
+            // for real arguments the imaginary part of the official
+            // expression vanishes and only the exponentially weighted
+            // first series remains
+            return 1.0 / Math.sqrt(2 * M_PI * x) * s1;
+        }
+    }
+
     public static Complex modifiedBesselFunction_i_impl(double nu, final Complex x) {
         if (x.abs() < 13.0) {
             final Complex alpha = x.multiply(0.5).pow(nu).divide(new GammaFunction().value(1.0 + nu));

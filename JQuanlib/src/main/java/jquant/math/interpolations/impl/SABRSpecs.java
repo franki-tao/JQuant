@@ -61,17 +61,14 @@ public class SABRSpecs implements SarbModel {
         //values[3] = (2.0 * r[j++] - 1.0) * (1.0 - 1E-6);
     }
 
-    @Override
     public double eps1() {
         return .0000001;
     }
 
-    @Override
     public double eps2() {
         return .9999;
     }
 
-    @Override
     public double dilationFactor() {
         return 0.001;
     }
@@ -112,7 +109,7 @@ public class SABRSpecs implements SarbModel {
     }
 
     @Override
-    public SABRWrapper instance(double t, double forward, List<Double> params, List<Double> addParams) {
+    public XABRModel instance(double t, double forward, List<Double> params, List<Double> addParams) {
         return new SABRWrapper(t, forward, params, addParams);
     }
 }
