@@ -15,15 +15,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.TreeSet;
 
-import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 /**
  * Composite of finite-difference step conditions.
  *
  * <p>Port of {@code ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.{hpp,cpp}}.
- * European and American exercise and cash dividends are implemented;
- * Bermudan exercise is outside the scope of this port.
+ * European, American and Bermudan exercise and cash dividends are implemented.
  */
 public class FdmStepConditionComposite implements FdmStepCondition {
     private final List<Double> stoppingTimes_;
@@ -125,8 +123,11 @@ public class FdmStepConditionComposite implements FdmStepCondition {
             stepConditions.add(new FdmAmericanStepCondition(
                     mesher, calculator, exerciseStart));
         } else if (exercise.type() == Exercise.Type.Bermudan) {
-            // FdmBermudanStepCondition is not ported.
-            QL_FAIL("Bermudan exercise is not ported");
+            final FdmBermudanStepCondition bermudanCondition =
+                    new FdmBermudanStepCondition(exercise.dates(),
+                            refDate, dayCounter, mesher, calculator);
+            stepConditions.add(bermudanCondition);
+            stoppingTimes.add(bermudanCondition.exerciseTimes());
         }
 
         return new FdmStepConditionComposite(stoppingTimes, stepConditions);

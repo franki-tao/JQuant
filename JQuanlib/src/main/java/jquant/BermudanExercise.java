@@ -3,6 +3,7 @@ package jquant;
 import jquant.time.Date;
 import jquant.time.TimeUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -11,10 +12,16 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 /*! A Bermudan option can only be exercised at a set of fixed dates.
  */
 public class BermudanExercise extends EarlyExercise {
+    public BermudanExercise(final List<Date> dates) {
+        this(dates, false);
+    }
+
     public BermudanExercise(final List<Date> dates, boolean payoffAtExpiry) {
         super(Type.Bermudan, payoffAtExpiry);
         QL_REQUIRE(!dates.isEmpty(), "no exercise date given");
-        dates_ = dates;
+        // QuantLib copies the caller's vector before sorting; do the same so
+        // that constructing an exercise does not reorder the input list.
+        dates_ = new ArrayList<>(dates);
         dates_.sort((o1, o2) -> {
             if (TimeUtils.equals(o1, o2))
                 return 0;
