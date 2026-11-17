@@ -5,6 +5,7 @@ import jquant.math.Array;
 import java.util.List;
 
 import static jquant.math.MathUtils.M_PI;
+import static jquant.math.MathUtils.NULL_REAL;
 import static jquant.pricingengines.BlackFormula.blackFormulaStdDevDerivative;
 
 public class SABRSpecs implements SarbModel {
@@ -15,10 +16,10 @@ public class SABRSpecs implements SarbModel {
 
     @Override
     public void defaultValues(List<Double> params, List<Boolean> temp, double forward, double expiryTime, List<Double> addParams) {
-        if (params.get(1) == Double.NaN) {
+        if (params.get(1) == NULL_REAL) {
             params.set(1, 0.5);
         }
-        if (params.get(0) == Double.NaN) {
+        if (params.get(0) == NULL_REAL) {
             // adapt alpha to beta level
             params.set(0, 0.2 * (params.get(1) < 0.9999 ?
                     (double) (Math.pow(forward + (addParams.isEmpty() ? 0.0 : addParams.get(0)),
@@ -28,11 +29,11 @@ public class SABRSpecs implements SarbModel {
 //                            Real(std::pow (forward + (addParams.empty() ? 0.0 : addParams[0]),
 //                1.0 - params[1])) :
 //        1.0);
-        if (params.get(2) == Double.NaN) {
+        if (params.get(2) == NULL_REAL) {
             params.set(2, Math.sqrt(0.4));
         }
         // params[2] = std::sqrt (0.4);
-        if (params.get(3) == Double.NaN) {
+        if (params.get(3) == NULL_REAL) {
             params.set(3, 0.0);
         }
 //            params[3] = 0.0;

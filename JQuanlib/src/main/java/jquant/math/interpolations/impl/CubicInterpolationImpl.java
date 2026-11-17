@@ -74,6 +74,26 @@ public class CubicInterpolationImpl extends templateImpl {
                     "Lagrange boundary condition requires at least " +
                             "4 points (" + (xValue.length) + " are given)");
         }
+        if (leftType_ == CubicInterpolation.BoundaryCondition.NotAKnot
+                || rightType_ == CubicInterpolation.BoundaryCondition.NotAKnot) {
+            // with three points, not-a-knot conditions at both ends
+            // constrain the same knot and the system is singular
+            int required =
+                    (leftType_ == CubicInterpolation.BoundaryCondition.NotAKnot
+                            && rightType_ == CubicInterpolation.BoundaryCondition.NotAKnot) ? 4 : 3;
+            QL_REQUIRE(xValue.length >= required,
+                    "not-a-knot boundary condition requires at least " +
+                            required + " points (" + xValue.length + " are given)");
+        }
+        if (da_ == CubicInterpolation.DerivativeApprox.Akima) {
+            QL_REQUIRE(xValue.length >= 4,
+                    "Akima approximation requires at least " +
+                            "4 points (" + xValue.length + " are given)");
+        }
+    }
+
+    public void setLeftConditionValue(double value) {
+        leftValue_ = value;
     }
 
     @Override
@@ -321,7 +341,7 @@ public class CubicInterpolationImpl extends templateImpl {
                     case Kruger:
                         // intermediate points
                         for (int i = 1; i < n_ - 1; ++i) {
-                            if (S_.get(i - 1) * S_.get(i) < 0.0)
+                            if (S_.get(i - 1) * S_.get(i) <= 0.0)
                                 // slope changes sign at point
                                 tmp_.set(i, 0d);
                             else

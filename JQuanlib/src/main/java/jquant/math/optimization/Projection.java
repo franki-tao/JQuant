@@ -61,6 +61,10 @@ public interface Projection {
     }
 
     default void Projection(Array parameterValues, List<Boolean> fixParameters) {
+        // these fields live on the interface and are therefore shared by all
+        // implementations; reset the counter so that each projection starts
+        // from a clean state, as in the official per-instance implementation
+        numberOfFreeParameters_.setT(0);
         fixedParameters_.setT(parameterValues);
         actualParameters_.setT(parameterValues);
         fixParameters_.setT(fixParameters);

@@ -24,6 +24,6 @@ public class LagrangeInterpolation extends Interpolation {
     }
 
     public double value(Array y, double x) {
-        return new LagrangeInterpolationImpl(xx, yy).value(y, x);
+        return ((LagrangeInterpolationImpl) impl_).value(y, x);
     }
 }

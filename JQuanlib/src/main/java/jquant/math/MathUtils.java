@@ -45,6 +45,22 @@ public class MathUtils {
         return x * x;
     }
 
+    public static boolean close_enough(double x, double y, int n) {
+        // see close() for a note on duplication
+
+        // Deals with +infinity and -infinity representations etc.
+        if (x == y)
+            return true;
+
+        double diff = Math.abs(x - y), tolerance = n * QL_EPSILON;
+
+        if (x == 0.0 || y == 0.0)
+            return diff < (tolerance * tolerance);
+
+        return diff <= tolerance * Math.abs(x) ||
+                diff <= tolerance * Math.abs(y);
+    }
+
     public static boolean close_enough(double x, double y) {
         // see close() for a note on duplication
 

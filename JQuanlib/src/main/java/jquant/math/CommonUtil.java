@@ -275,7 +275,7 @@ public class CommonUtil {
             r.set(i, i, params.rdiag[i]);
             if (i < m) {
                 for (int j = i + 1; j < mT.cols(); j++) {
-                    r.set(i, j, mT.get(i, j));
+                    r.set(i, j, mT.get(j, i));
                 }
                 // std::copy (mT.column_begin(i) + i + 1, mT.column_end(i), r.row_begin(i) + i + 1);
             } else {

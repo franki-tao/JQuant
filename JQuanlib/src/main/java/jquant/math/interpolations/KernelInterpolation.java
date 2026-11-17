@@ -27,6 +27,10 @@ public class KernelInterpolation extends Interpolation {
     \f[
     \left\| Ma-y \right\|_\infty \geq \epsilon
     \f] */
+    public KernelInterpolation(double[] x, double[] y, Function kernel) {
+        this(x, y, kernel, 1.0e-7);
+    }
+
     // epsilon = 1.0E-7(默认)
     public KernelInterpolation(double[] x, double[] y, Function kernel, double epsilon) {
         impl_ = new KernelInterpolationImpl(x, y, kernel, epsilon);

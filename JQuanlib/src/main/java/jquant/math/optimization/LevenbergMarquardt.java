@@ -23,6 +23,12 @@ public class LevenbergMarquardt extends OptimizationMethod {
 
     public LevenbergMarquardt(double epsfcn, // 1.0e-8,
                               double xtol, // 1.0e-8,
+                              double gtol) {//1.0e-8,
+        this(epsfcn, xtol, gtol, false);
+    }
+
+    public LevenbergMarquardt(double epsfcn, // 1.0e-8,
+                              double xtol, // 1.0e-8,
                               double gtol, //1.0e-8,
                               boolean useCostFunctionsJacobian) {// = false)
         epsfcn_ = epsfcn;

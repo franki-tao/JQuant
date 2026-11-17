@@ -14,4 +14,8 @@ public class MixedLinearCubicNaturalSpline extends MixedLinearCubicInterpolation
                 SecondDerivative, 0.0,
                 SecondDerivative, 0.0);
     }
+
+    public MixedLinearCubicNaturalSpline(double[] x, double[] y, int n) {
+        this(x, y, n, MixedInterpolationImpl.Behavior.ShareRanges);
+    }
 }

@@ -48,6 +48,14 @@ public abstract class Interpolation extends Extrapolator {
         return impl_.xMax();
     }
 
+    public java.util.List<Double> xValues() {
+        return impl_.xValues();
+    }
+
+    public java.util.List<Double> yValues() {
+        return impl_.yValues();
+    }
+
     public boolean isInRange(double x) {
         return impl_.isInRange(x);
     }

@@ -1,6 +1,7 @@
 package jquant.methods.finitedifferences.operators;
 
 import jquant.math.Array;
+import jquant.math.Matrix;
 import jquant.methods.finitedifferences.meshers.FdmMesher;
 
 import java.util.function.IntUnaryOperator;
@@ -57,6 +58,21 @@ public class TripleBandLinearOp implements FdmLinearOp {
         final int tmp = a[i];
         a[i] = a[j];
         a[j] = tmp;
+    }
+
+    /**
+     * Converts this operator to a dense matrix, mirroring the official
+     * {@code TripleBandLinearOp::toMatrix()}.
+     */
+    public Matrix toMatrix() {
+        final int n = mesher_.layout().size();
+        final Matrix retVal = new Matrix(n, n, 0.0);
+        for (int i = 0; i < n; ++i) {
+            retVal.set(i, i0_[i], retVal.get(i, i0_[i]) + lower_[i]);
+            retVal.set(i, i, retVal.get(i, i) + diag_[i]);
+            retVal.set(i, i2_[i], retVal.get(i, i2_[i]) + upper_[i]);
+        }
+        return retVal;
     }
 
     @Override
