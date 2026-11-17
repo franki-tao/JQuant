@@ -4,9 +4,11 @@ import jquant.Exercise;
 import jquant.cashflows.Dividend;
 import jquant.math.Array;
 import jquant.methods.finitedifferences.meshers.FdmMesher;
+import jquant.methods.finitedifferences.utilities.FdmDividendHandler;
 import jquant.methods.finitedifferences.utilities.FdmInnerValueCalculator;
 import jquant.time.Date;
 import jquant.time.DayCounter;
+import jquant.time.TimeUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -20,8 +22,8 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * Composite of finite-difference step conditions.
  *
  * <p>Port of {@code ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.{hpp,cpp}}.
- * European and American exercise are implemented; cash dividends and
- * Bermudan exercise are outside the scope of this port.
+ * European and American exercise and cash dividends are implemented;
+ * Bermudan exercise is outside the scope of this port.
  */
 public class FdmStepConditionComposite implements FdmStepCondition {
     private final List<Double> stoppingTimes_;
@@ -74,8 +76,42 @@ public class FdmStepConditionComposite implements FdmStepCondition {
             Date refDate,
             DayCounter dayCounter) {
 
+        final List<List<Double>> stoppingTimes = new ArrayList<>();
+        final List<FdmStepCondition> stepConditions = new ArrayList<>();
+
         if (!cashFlow.isEmpty()) {
-            QL_FAIL("cash dividends are not supported by this port");
+            final Date maturityDate = exercise.lastDate();
+            final List<Dividend> dividends = new ArrayList<>();
+            for (Dividend dividend : cashFlow) {
+                if (TimeUtils.geq(dividend.date(), refDate)
+                        && TimeUtils.leq(dividend.date(), maturityDate)) {
+                    dividends.add(dividend);
+                }
+            }
+
+            final FdmDividendHandler dividendCondition =
+                    new FdmDividendHandler(dividends, mesher, refDate,
+                            dayCounter, 0);
+            stepConditions.add(dividendCondition);
+
+            final List<Double> dividendTimes =
+                    new ArrayList<>(dividendCondition.dividendTimes());
+            final double maturityTime = dayCounter.yearFraction(
+                    refDate, exercise.lastDate());
+
+            // this effectively excludes times after maturity
+            for (int i = 0; i < dividendTimes.size(); ++i) {
+                dividendTimes.set(i,
+                        Math.min(maturityTime, dividendTimes.get(i)));
+            }
+            stoppingTimes.add(new ArrayList<>(dividendTimes));
+
+            // smoother convergence behavior with number of time steps
+            final List<Double> shiftedDividendTimes = new ArrayList<>();
+            for (double t : dividendTimes) {
+                shiftedDividendTimes.add(Math.min(maturityTime, t + 1e-5));
+            }
+            stoppingTimes.add(shiftedDividendTimes);
         }
 
         QL_REQUIRE(exercise.type() == Exercise.Type.American
@@ -83,7 +119,6 @@ public class FdmStepConditionComposite implements FdmStepCondition {
                         || exercise.type() == Exercise.Type.Bermudan,
                 "exercise type is not supported");
 
-        final List<FdmStepCondition> stepConditions = new ArrayList<>();
         if (exercise.type() == Exercise.Type.American) {
             final double exerciseStart = dayCounter.yearFraction(
                     refDate, exercise.date(0));
@@ -94,7 +129,6 @@ public class FdmStepConditionComposite implements FdmStepCondition {
             QL_FAIL("Bermudan exercise is not ported");
         }
 
-        return new FdmStepConditionComposite(
-                Collections.emptyList(), stepConditions);
+        return new FdmStepConditionComposite(stoppingTimes, stepConditions);
     }
 }

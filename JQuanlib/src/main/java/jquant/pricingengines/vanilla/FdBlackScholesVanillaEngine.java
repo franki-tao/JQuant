@@ -6,6 +6,7 @@ import jquant.Exercise;
 import jquant.Option;
 import jquant.PricingEngine;
 import jquant.cashflows.Dividend;
+import jquant.cashflows.FixedDividend;
 import jquant.math.Point;
 import jquant.methods.finitedifferences.meshers.Fdm1dMesher;
 import jquant.methods.finitedifferences.meshers.FdmBlackScholesMesher;
@@ -15,7 +16,9 @@ import jquant.methods.finitedifferences.solvers.FdmBlackScholesSolver;
 import jquant.methods.finitedifferences.solvers.FdmSchemeDesc;
 import jquant.methods.finitedifferences.solvers.FdmSolverDesc;
 import jquant.methods.finitedifferences.stepconditions.FdmStepConditionComposite;
+import jquant.methods.finitedifferences.utilities.EscrowedDividendAdjustment;
 import jquant.methods.finitedifferences.utilities.FdmBoundaryConditionSet;
+import jquant.methods.finitedifferences.utilities.FdmEscrowedLogInnerValueCalculator;
 import jquant.methods.finitedifferences.utilities.FdmInnerValueCalculator;
 import jquant.methods.finitedifferences.utilities.FdmLogInnerValue;
 import jquant.patterns.Observable;
@@ -27,6 +30,7 @@ import jquant.termstructures.YieldTermStructure;
 import jquant.time.Date;
 import jquant.time.TimeUtils;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -41,8 +45,8 @@ import static jquant.math.MathUtils.NULL_REAL;
  * Finite-differences Black-Scholes vanilla option engine.
  *
  * <p>Port of {@code ql/pricingengines/vanilla/fdblackscholesvanillaengine.{hpp,cpp}}.
- * The European, no-dividend, non-quanto path is implemented. The cash
- * dividend model defaults to {@code Spot} as in QuantLib.
+ * The European/American non-quanto paths with cash dividends are implemented.
+ * The cash dividend model defaults to {@code Spot} as in QuantLib.
  */
 public class FdBlackScholesVanillaEngine implements PricingEngine {
     public enum CashDividendModel {
@@ -51,23 +55,36 @@ public class FdBlackScholesVanillaEngine implements PricingEngine {
     }
 
     private final GeneralizedBlackScholesProcess process_;
+    private final List<Dividend> dividends_;
     private final int tGrid_, xGrid_, dampingSteps_;
     private final FdmSchemeDesc schemeDesc_;
     private final boolean localVol_;
     private final double illegalLocalVolOverwrite_;
+    private final CashDividendModel cashDividendModel_;
 
     private final Option.arguments arguments_ = new Option.arguments();
     private final EuropeanOption.results results_ = new EuropeanOption.results();
     private final Set<Observer> observers_ = new HashSet<>();
 
     public FdBlackScholesVanillaEngine(GeneralizedBlackScholesProcess process) {
-        this(process, 100, 100);
+        this(process, Collections.emptyList(), 100, 100);
+    }
+
+    public FdBlackScholesVanillaEngine(GeneralizedBlackScholesProcess process,
+                                       int tGrid) {
+        this(process, Collections.emptyList(), tGrid, 100);
     }
 
     public FdBlackScholesVanillaEngine(GeneralizedBlackScholesProcess process,
                                        int tGrid, int xGrid) {
-        this(process, tGrid, xGrid, 0, FdmSchemeDesc.Douglas(),
-                false, -NULL_REAL);
+        this(process, Collections.emptyList(), tGrid, xGrid);
+    }
+
+    public FdBlackScholesVanillaEngine(GeneralizedBlackScholesProcess process,
+                                       List<Dividend> dividends,
+                                       int tGrid, int xGrid) {
+        this(process, dividends, tGrid, xGrid, 0, FdmSchemeDesc.Douglas(),
+                false, -NULL_REAL, CashDividendModel.Spot);
     }
 
     public FdBlackScholesVanillaEngine(GeneralizedBlackScholesProcess process,
@@ -87,13 +104,27 @@ public class FdBlackScholesVanillaEngine implements PricingEngine {
                                        FdmSchemeDesc schemeDesc,
                                        boolean localVol,
                                        double illegalLocalVolOverwrite) {
+        this(process, Collections.emptyList(), tGrid, xGrid, dampingSteps,
+                schemeDesc, localVol, illegalLocalVolOverwrite,
+                CashDividendModel.Spot);
+    }
+
+    public FdBlackScholesVanillaEngine(GeneralizedBlackScholesProcess process,
+                                       List<Dividend> dividends,
+                                       int tGrid, int xGrid, int dampingSteps,
+                                       FdmSchemeDesc schemeDesc,
+                                       boolean localVol,
+                                       double illegalLocalVolOverwrite,
+                                       CashDividendModel cashDividendModel) {
         process_ = process;
+        dividends_ = dividends;
         tGrid_ = tGrid;
         xGrid_ = xGrid;
         dampingSteps_ = dampingSteps;
         schemeDesc_ = schemeDesc;
         localVol_ = localVol;
         illegalLocalVolOverwrite_ = illegalLocalVolOverwrite;
+        cashDividendModel_ = cashDividendModel;
 
         results_.additionalResults = new HashMap<>();
         process_.registerObserver(new Observer() {
@@ -152,10 +183,44 @@ public class FdBlackScholesVanillaEngine implements PricingEngine {
 
         final Date exerciseDate = arguments_.exercise.lastDate();
         final double maturity = process_.time(exerciseDate);
+        final YieldTermStructure riskFree = process_.riskFreeRate().getValue();
+        final Date settlementDate = riskFree.referenceDate();
 
-        // Spot cash dividend model: no escrowed-dividend adjustment.
-        final double spotAdjustment = 0.0;
-        final List<Dividend> dividendSchedule = Collections.emptyList();
+        // 0. Cash dividend model
+        double spotAdjustment = 0.0;
+        List<Dividend> dividendSchedule = Collections.emptyList();
+        EscrowedDividendAdjustment escrowedDivAdj = null;
+
+        switch (cashDividendModel_) {
+          case Spot:
+            dividendSchedule = dividends_;
+            break;
+          case Escrowed:
+            if (arguments_.exercise.type() != Exercise.Type.European) {
+                // add dividend dates as stopping times
+                final List<Dividend> stoppingSchedule = new ArrayList<>();
+                for (Dividend cf : dividends_) {
+                    stoppingSchedule.add(new FixedDividend(0.0, cf.date()));
+                }
+                dividendSchedule = stoppingSchedule;
+            }
+
+            escrowedDivAdj = new EscrowedDividendAdjustment(
+                    dividends_,
+                    process_.riskFreeRate(),
+                    process_.dividendYield(),
+                    d -> process_.time(d),
+                    maturity);
+
+            spotAdjustment = escrowedDivAdj.dividendAdjustment(
+                    process_.time(settlementDate));
+
+            QL_REQUIRE(process_.x0() + spotAdjustment > 0.0,
+                    "spot minus dividends becomes negative");
+            break;
+          default:
+            QL_FAIL("unknown cash dividend model");
+        }
 
         // 1. Mesher
         final Fdm1dMesher equityMesher = new FdmBlackScholesMesher(
@@ -170,12 +235,25 @@ public class FdBlackScholesVanillaEngine implements PricingEngine {
         final FdmInnerValueCalculator calculator =
                 new FdmLogInnerValue(payoff, mesher, 0);
 
+        final FdmInnerValueCalculator earlyExerciseCalculator;
+        switch (cashDividendModel_) {
+          case Spot:
+            earlyExerciseCalculator = calculator;
+            break;
+          case Escrowed:
+            earlyExerciseCalculator = new FdmEscrowedLogInnerValueCalculator(
+                    escrowedDivAdj, payoff, mesher, 0);
+            break;
+          default:
+            QL_FAIL("unknown cash dividend model");
+            earlyExerciseCalculator = calculator;
+        }
+
         // 3. Step conditions
-        final YieldTermStructure riskFree = process_.riskFreeRate().getValue();
         final FdmStepConditionComposite conditions =
                 FdmStepConditionComposite.vanillaComposite(
                         dividendSchedule, arguments_.exercise, mesher,
-                        calculator, riskFree.referenceDate(),
+                        earlyExerciseCalculator, riskFree.referenceDate(),
                         riskFree.dayCounter());
 
         // 4. Boundary conditions
@@ -201,7 +279,6 @@ public class FdBlackScholesVanillaEngine implements PricingEngine {
         // cubic interpolant can still undershoot the payoff between nodes, so
         // floor only when the holder can exercise on the reference date and the
         // payoff is paid then. Greeks stay on the interpolant.
-        final Date settlementDate = riskFree.referenceDate();
         final Exercise exercise = arguments_.exercise;
         boolean exercisable = false;
         switch (exercise.type()) {
