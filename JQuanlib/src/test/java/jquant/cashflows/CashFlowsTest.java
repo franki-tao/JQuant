@@ -40,6 +40,8 @@ import jquant.time.daycounters.Actual360;
 import jquant.time.daycounters.Actual365Fixed;
 import jquant.time.daycounters.ActualActual;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -61,6 +63,22 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
  * <p>https://github.com/lballabio/QuantLib/blob/master/test-suite/cashflows.cpp
  */
 public class CashFlowsTest {
+
+    // Official QuantLib tests wrap every case in TopLevelFixture, which
+    // restores Settings via SavedSettings. Without this, testSettings (and
+    // a few other cases) leave includeReferenceDateEvents=true, and a later
+    // American option that matures today is not treated as expired.
+    private SavedSettings savedSettings;
+
+    @BeforeEach
+    void saveSettings() {
+        savedSettings = new SavedSettings();
+    }
+
+    @AfterEach
+    void restoreSettings() {
+        savedSettings.restore();
+    }
 
     private static void checkSmall(double actual, double expected, double tolerance) {
         assertEquals(0.0, actual - expected, tolerance);
