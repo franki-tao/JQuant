@@ -10,6 +10,7 @@ import jquant.methods.finitedifferences.meshers.FdmBlackScholesMesher;
 import jquant.methods.finitedifferences.meshers.FdmHestonLocalVolatilityVarianceMesher;
 import jquant.methods.finitedifferences.meshers.FdmMesher;
 import jquant.methods.finitedifferences.meshers.FdmMesherComposite;
+import jquant.methods.finitedifferences.solvers.FdmHestonSolver;
 import jquant.methods.finitedifferences.solvers.FdmSchemeDesc;
 import jquant.methods.finitedifferences.solvers.FdmSolverDesc;
 import jquant.methods.finitedifferences.stepconditions.FdmStepConditionComposite;
@@ -25,6 +26,7 @@ import jquant.pricingengines.StrikedTypePayoff;
 import jquant.processes.HestonProcess;
 import jquant.termstructures.volatility.equityfx.LocalVolTermStructure;
 import jquant.time.Date;
+import jquant.utilities.FdmQuantoHelper;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -42,9 +44,6 @@ import static jquant.math.MathUtils.NULL_REAL;
  * Finite-differences Heston vanilla option engine.
  *
  * <p>Port of {@code ql/pricingengines/vanilla/fdhestonvanillaengine.{hpp,cpp}}.
- * The mesher construction (including the variance mesher and the official
- * payoff check) is ported. The {@code FdmHestonSolver} itself is not ported,
- * so the part of {@link #calculate()} that depends on it is not available.
  */
 public class FdHestonVanillaEngine implements PricingEngine {
     // multiple strikes caching engine
@@ -54,10 +53,11 @@ public class FdHestonVanillaEngine implements PricingEngine {
     }
 
     private final HestonModel model_;
-    private final List<Dividend> dividends_ = Collections.emptyList();
+    private final List<Dividend> dividends_;
     private final int tGrid_, xGrid_, vGrid_, dampingSteps_;
     private final FdmSchemeDesc schemeDesc_;
     private final LocalVolTermStructure leverageFct_;
+    private final FdmQuantoHelper quantoHelper_;
     private final double mixingFactor_;
 
     private final List<Double> strikes_ = new ArrayList<>();
@@ -68,7 +68,14 @@ public class FdHestonVanillaEngine implements PricingEngine {
     private final Set<Observer> observers_ = new HashSet<>();
 
     public FdHestonVanillaEngine(final HestonModel model) {
-        this(model, 100, 100, 50, 0, FdmSchemeDesc.Hundsdorfer(), null, 1.0);
+        this(model, 100, 100, 50, 0, FdmSchemeDesc.Hundsdorfer(),
+                null, 1.0);
+    }
+
+    public FdHestonVanillaEngine(final HestonModel model,
+                                 int tGrid, int xGrid, int vGrid) {
+        this(model, tGrid, xGrid, vGrid, 0, FdmSchemeDesc.Hundsdorfer(),
+                null, 1.0);
     }
 
     public FdHestonVanillaEngine(final HestonModel model,
@@ -76,13 +83,46 @@ public class FdHestonVanillaEngine implements PricingEngine {
                                  final FdmSchemeDesc schemeDesc,
                                  final LocalVolTermStructure leverageFct,
                                  double mixingFactor) {
+        this(model, Collections.emptyList(), null, tGrid, xGrid, vGrid,
+                dampingSteps, schemeDesc, leverageFct, mixingFactor);
+    }
+
+    public FdHestonVanillaEngine(final HestonModel model,
+                                 final List<Dividend> dividends,
+                                 int tGrid, int xGrid, int vGrid, int dampingSteps,
+                                 final FdmSchemeDesc schemeDesc,
+                                 final LocalVolTermStructure leverageFct,
+                                 double mixingFactor) {
+        this(model, dividends, null, tGrid, xGrid, vGrid,
+                dampingSteps, schemeDesc, leverageFct, mixingFactor);
+    }
+
+    public FdHestonVanillaEngine(final HestonModel model,
+                                 final FdmQuantoHelper quantoHelper,
+                                 int tGrid, int xGrid, int vGrid, int dampingSteps,
+                                 final FdmSchemeDesc schemeDesc,
+                                 final LocalVolTermStructure leverageFct,
+                                 double mixingFactor) {
+        this(model, Collections.emptyList(), quantoHelper, tGrid, xGrid, vGrid,
+                dampingSteps, schemeDesc, leverageFct, mixingFactor);
+    }
+
+    public FdHestonVanillaEngine(final HestonModel model,
+                                 final List<Dividend> dividends,
+                                 final FdmQuantoHelper quantoHelper,
+                                 int tGrid, int xGrid, int vGrid, int dampingSteps,
+                                 final FdmSchemeDesc schemeDesc,
+                                 final LocalVolTermStructure leverageFct,
+                                 double mixingFactor) {
         model_ = model;
+        dividends_ = new ArrayList<>(dividends);
         tGrid_ = tGrid;
         xGrid_ = xGrid;
         vGrid_ = vGrid;
         dampingSteps_ = dampingSteps;
         schemeDesc_ = schemeDesc;
         leverageFct_ = leverageFct;
+        quantoHelper_ = quantoHelper;
         mixingFactor_ = mixingFactor;
 
         results_.additionalResults = new HashMap<>();
@@ -157,12 +197,34 @@ public class FdHestonVanillaEngine implements PricingEngine {
 
         final HestonProcess process = model_.process();
 
-        // In the official implementation the following expression is the
-        // constructor argument of FdmHestonSolver, so getSolverDesc is
-        // evaluated (and throws for a non-striked payoff) before the solver
-        // is entered. FdmHestonSolver is not ported here.
-        getSolverDesc(1.5);
-        QL_FAIL("FdmHestonSolver is not ported");
+        final FdmHestonSolver solver = new FdmHestonSolver(
+                process, getSolverDesc(1.5), schemeDesc_,
+                quantoHelper_, leverageFct_, mixingFactor_);
+
+        final double v0 = process.v0();
+        final double spot = process.s0().getValue().value();
+
+        results_.value = solver.valueAt(spot, v0);
+        results_.delta = solver.deltaAt(spot, v0);
+        results_.gamma = solver.gammaAt(spot, v0);
+        results_.theta = solver.thetaAt(spot, v0);
+
+        cachedArgs2results_.clear();
+        final StrikedTypePayoff payoff = (StrikedTypePayoff) arguments_.payoff;
+        for (Double strike : strikes_) {
+            final CachedArgsToResults cached = new CachedArgsToResults();
+            cached.first.exercise = arguments_.exercise;
+            cached.first.payoff = new PlainVanillaPayoff(
+                    payoff.optionType(), strike);
+            final double d = payoff.strike() / strike;
+
+            cached.second.value = solver.valueAt(spot * d, v0) / d;
+            cached.second.delta = solver.deltaAt(spot * d, v0);
+            cached.second.gamma = solver.gammaAt(spot * d, v0) * d;
+            cached.second.theta = solver.thetaAt(spot * d, v0) / d;
+
+            cachedArgs2results_.add(cached);
+        }
     }
 
     // helper method for Heston like engines
@@ -196,7 +258,7 @@ public class FdHestonVanillaEngine implements PricingEngine {
                     maturity, payoff.strike(),
                     NULL_REAL, NULL_REAL, 0.0001, 2.0,
                     new Point<>(payoff.strike(), 0.1),
-                    dividends_, null, 0.0);
+                    dividends_, quantoHelper_, 0.0);
         } else {
             QL_REQUIRE(dividends_.isEmpty(),
                     "multiple strikes engine does not work with discrete dividends");

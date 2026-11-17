@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
+import static jquant.math.MathUtils.NULL_REAL;
 
 public class FdmBlackScholesMesher extends Fdm1dMesher {
     public FdmBlackScholesMesher(
@@ -88,10 +89,10 @@ public class FdmBlackScholesMesher extends Fdm1dMesher {
         double xMin = Math.log(mi) - sigmaSqrtT * normInvEps * scaleFactor;
         double xMax = Math.log(ma) + sigmaSqrtT * normInvEps * scaleFactor;
 
-        if (!Double.isNaN(xMinConstraint)) {
+        if (!Double.isNaN(xMinConstraint) && xMinConstraint != NULL_REAL) {
             xMin = xMinConstraint;
         }
-        if (!Double.isNaN(xMaxConstraint)) {
+        if (!Double.isNaN(xMaxConstraint) && xMaxConstraint != NULL_REAL) {
             xMax = xMaxConstraint;
         }
 

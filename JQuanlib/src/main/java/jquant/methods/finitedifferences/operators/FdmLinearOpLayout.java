@@ -81,6 +81,31 @@ public class FdmLinearOpLayout implements Iterable<FdmLinearOpIterator> {
         return myIndex + coorOffset * spacing_[i];
     }
 
+    public int neighbourhood(FdmLinearOpIterator iterator,
+                             int i1, int offset1,
+                             int i2, int offset2) {
+        int myIndex = iterator.index()
+                - iterator.coordinates()[i1] * spacing_[i1]
+                - iterator.coordinates()[i2] * spacing_[i2];
+
+        int coorOffset1 = iterator.coordinates()[i1] + offset1;
+        if (coorOffset1 < 0) {
+            coorOffset1 = -coorOffset1;
+        } else if (coorOffset1 >= dim_[i1]) {
+            coorOffset1 = 2 * (dim_[i1] - 1) - coorOffset1;
+        }
+
+        int coorOffset2 = iterator.coordinates()[i2] + offset2;
+        if (coorOffset2 < 0) {
+            coorOffset2 = -coorOffset2;
+        } else if (coorOffset2 >= dim_[i2]) {
+            coorOffset2 = 2 * (dim_[i2] - 1) - coorOffset2;
+        }
+
+        return myIndex + coorOffset1 * spacing_[i1]
+                + coorOffset2 * spacing_[i2];
+    }
+
     public FdmLinearOpIterator iterNeighbourhood(FdmLinearOpIterator iterator,
                                                  int i, int offset) {
         final int[] coordinates = iterator.coordinates().clone();

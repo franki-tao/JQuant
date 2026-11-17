@@ -20,8 +20,8 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * Composite of finite-difference step conditions.
  *
  * <p>Port of {@code ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.{hpp,cpp}}.
- * Only the European no-dividend path is implemented; American/Bermudan
- * exercise conditions and cash dividends are outside the scope of this port.
+ * European and American exercise are implemented; cash dividends and
+ * Bermudan exercise are outside the scope of this port.
  */
 public class FdmStepConditionComposite implements FdmStepCondition {
     private final List<Double> stoppingTimes_;
@@ -78,10 +78,23 @@ public class FdmStepConditionComposite implements FdmStepCondition {
             QL_FAIL("cash dividends are not supported by this port");
         }
 
-        QL_REQUIRE(exercise.type() == Exercise.Type.European,
+        QL_REQUIRE(exercise.type() == Exercise.Type.American
+                        || exercise.type() == Exercise.Type.European
+                        || exercise.type() == Exercise.Type.Bermudan,
                 "exercise type is not supported");
 
+        final List<FdmStepCondition> stepConditions = new ArrayList<>();
+        if (exercise.type() == Exercise.Type.American) {
+            final double exerciseStart = dayCounter.yearFraction(
+                    refDate, exercise.date(0), new Date(), new Date());
+            stepConditions.add(new FdmAmericanStepCondition(
+                    mesher, calculator, exerciseStart));
+        } else if (exercise.type() == Exercise.Type.Bermudan) {
+            // FdmBermudanStepCondition is not ported.
+            QL_FAIL("Bermudan exercise is not ported");
+        }
+
         return new FdmStepConditionComposite(
-                Collections.emptyList(), Collections.emptyList());
+                Collections.emptyList(), stepConditions);
     }
 }

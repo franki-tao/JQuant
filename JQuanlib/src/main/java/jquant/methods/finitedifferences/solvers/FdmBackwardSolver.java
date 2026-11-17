@@ -112,7 +112,8 @@ public class FdmBackwardSolver {
                         new CraigSneydScheme(trDesc.theta, trDesc.mu,
                                 map_, bcSet_);
                 final TrBDF2Scheme trBDF2 = new TrBDF2Scheme(
-                        schemeDesc_.theta, map_, trapezoidalScheme, bcSet_);
+                        schemeDesc_.theta, map_, trapezoidalScheme, bcSet_,
+                        schemeDesc_.mu);
                 x = rollbackImpl(trBDF2, x, dampingTo, to, steps);
                 break;
             default:

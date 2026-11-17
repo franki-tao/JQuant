@@ -5,6 +5,7 @@ import jquant.methods.finitedifferences.solvers.FdmSchemeDesc;
 import jquant.processes.CoxIngersollRossProcess;
 import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.time.Date;
+import jquant.utilities.FdmQuantoHelper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,6 +23,13 @@ public class MakeFdCIRVanillaEngine {
     private final double rho_;
     private int tGrid_ = 10, xGrid_ = 100, rGrid_ = 100, dampingSteps_ = 0;
     private FdmSchemeDesc schemeDesc_ = FdmSchemeDesc.ModifiedHundsdorfer();
+    private FdmQuantoHelper quantoHelper_;
+
+    public MakeFdCIRVanillaEngine withQuantoHelper(
+            final FdmQuantoHelper quantoHelper) {
+        quantoHelper_ = quantoHelper;
+        return this;
+    }
 
     public MakeFdCIRVanillaEngine(final CoxIngersollRossProcess cirProcess,
                                   final GeneralizedBlackScholesProcess bsProcess,
@@ -64,6 +72,7 @@ public class MakeFdCIRVanillaEngine {
 
     public FdCIRVanillaEngine build() {
         return new FdCIRVanillaEngine(cirProcess_, bsProcess_, dividends_,
-                tGrid_, xGrid_, rGrid_, dampingSteps_, rho_, schemeDesc_);
+                tGrid_, xGrid_, rGrid_, dampingSteps_, rho_, schemeDesc_,
+                quantoHelper_);
     }
 }

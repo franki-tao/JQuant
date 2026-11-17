@@ -22,7 +22,7 @@ public class BicubicSplineImpl extends Interpolation2DTemplateImpl implements Bi
     public double derivativeX(double x, double y) {
         List<Double> section = CommonUtil.ArrayInit(zData_[0].length);
         for (int i = 0; i < section.size(); ++i) {
-            section.set(i, value(yValues[i], y));
+            section.set(i, value(xValues[i], y));
             // section[i] = value(this->xBegin_[i], y);
         }
 
