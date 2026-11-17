@@ -41,7 +41,10 @@ public class EuropeanOption extends Option {
     @Override
     public boolean isExpired() {
         Date today = Settings.instance.evaluationDate().Date();
-        return TimeUtils.less(exercise_.lastDate(), today);
+        // QuantLib Event::hasOccurred with the default reference date.
+        return Settings.instance.includeReferenceDateEvents()
+                ? TimeUtils.less(exercise_.lastDate(), today)
+                : TimeUtils.leq(exercise_.lastDate(), today);
     }
 
     public double delta() {

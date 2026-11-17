@@ -4,6 +4,7 @@ import jquant.patterns.LazyObject;
 import jquant.time.Date;
 import jquant.time.TimeUtils;
 
+import java.util.HashMap;
 import java.util.Map;
 
 import static jquant.math.CommonUtil.QL_FAIL;
@@ -19,7 +20,7 @@ public abstract class Instrument extends LazyObject {
     protected double NPV_;
     protected double errorEstimate_;
     protected Date valuationDate_;
-    protected Map<String, Object> additionalResults_;
+    protected Map<String, Object> additionalResults_ = new HashMap<>();
     protected PricingEngine engine_;
 
     public static class results implements PricingEngine.results {

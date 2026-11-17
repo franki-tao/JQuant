@@ -4,20 +4,23 @@ import jquant.math.Function;
 
 import static jquant.math.MathUtils.NULL_REAL;
 
-
-//todo 不清楚template <class Integration>具体哪些类型，暂停使用
+/**
+ * Integrator based on a fixed Gaussian quadrature rule.
+ *
+ * <p>Ported from {@code detail::GaussianQuadratureIntegrator} in
+ * {@code ql/math/integrals/gaussianquadratures.hpp/.cpp}. The type parameter
+ * of the C++ template is replaced by the concrete quadrature passed to the
+ * constructor.
+ */
 public class GaussianQuadratureIntegrator extends Integrator {
-    //todo 可能存在隐患
-    private Integration integration_;
+    private final GaussianQuadrature integration_;
 
-    private int n;
-
-    public GaussianQuadratureIntegrator(int n, Integrator integration_) {
+    public GaussianQuadratureIntegrator(int n, GaussianQuadrature integration) {
         super(NULL_REAL, n);
-        this.n = n;
+        integration_ = integration;
     }
 
-    public Integration getIntegration() {
+    public GaussianQuadrature getIntegration() {
         return integration_;
     }
 
@@ -25,18 +28,7 @@ public class GaussianQuadratureIntegrator extends Integrator {
     protected double integrate(Function f, double a, double b) {
         final double c1 = 0.5 * (b - a);
         final double c2 = 0.5 * (a + b);
-        this.integration_ = new Integration(this.n) {
-            @Override
-            protected void setF() {
-                super.f = new Function() {
-                    @Override
-                    public double value(double x) {
-                        return f.value(c1*x + c2);
-                    }
-                };
-            }
-        };
 
-        return this.integration_.value();
+        return c1 * integration_.value(x -> f.value(c1 * x + c2));
     }
 }
