@@ -5,6 +5,7 @@ import jquant.math.Function;
 import jquant.math.solvers1d.Brent;
 import jquant.pricingengines.vanilla.AnalyticDividendEuropeanEngine;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
+import jquant.pricingengines.vanilla.FdBlackScholesVanillaEngine;
 import jquant.processes.BlackScholesMertonProcess;
 import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.quotes.SimpleQuote;
@@ -13,6 +14,8 @@ import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
 import jquant.time.Date;
 import jquant.time.TimeUtils;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_FAIL;
@@ -147,14 +150,9 @@ public class EuropeanOption extends Option {
                                     GeneralizedBlackScholesProcess process,
                                     double accuracy, int maxEvaluations,
                                     double minVol, double maxVol) {
-        QL_REQUIRE(process != null, "no process given");
-        QL_REQUIRE(!isExpired(), "option expired");
-        QL_REQUIRE(minVol >= 0.0, "minimum volatility must be non-negative");
-        QL_REQUIRE(maxEvaluations > 0, "maximum number of evaluations must be positive");
-        SimpleQuote volQuote = new SimpleQuote((minVol + maxVol) / 2.0);
-        AnalyticEuropeanEngine solverEngine = new AnalyticEuropeanEngine(
-                cloneWithFlatVolatility(process, volQuote));
-        return solveImpliedVolatility(targetValue, solverEngine, volQuote,
+        // VanillaOption::impliedVolatility delegates to the dividend-schedule
+        // overload with an empty schedule.
+        return impliedVolatility(targetValue, process, Collections.emptyList(),
                 accuracy, maxEvaluations, minVol, maxVol);
     }
 
@@ -181,8 +179,8 @@ public class EuropeanOption extends Option {
      * QuantLib {@code VanillaOption::impliedVolatility} with a discrete
      * dividend schedule. European options use {@link AnalyticEuropeanEngine}
      * for an empty schedule and {@link AnalyticDividendEuropeanEngine}
-     * otherwise; American and Bermudan exercise require the finite-difference
-     * engine, which is not available here.
+     * otherwise; American and Bermudan exercise use
+     * {@link FdBlackScholesVanillaEngine}, as in the official implementation.
      */
     public double impliedVolatility(double targetValue,
                                     GeneralizedBlackScholesProcess process,
@@ -206,10 +204,12 @@ public class EuropeanOption extends Option {
                 break;
             case American:
             case Bermudan:
-                QL_FAIL("implied volatility for " + exercise_.type()
-                        + " exercise requires a finite-difference engine, "
-                        + "which is not implemented");
-                return Double.NaN;
+                List<Dividend> schedule = (dividends == null)
+                        ? Collections.emptyList()
+                        : new ArrayList<>(dividends);
+                solverEngine = new FdBlackScholesVanillaEngine(
+                        newProcess, schedule, 100, 100);
+                break;
             default:
                 QL_FAIL("unknown exercise type");
                 return Double.NaN;
