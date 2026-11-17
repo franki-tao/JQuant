@@ -52,6 +52,10 @@ public class DayCounter {
         return impl_.dayCount(d1,d2);
     }
     //! Returns the period between two dates as a fraction of year.
+    public double yearFraction(final Date d1, final Date d2) {
+        return yearFraction(d1, d2, new Date(), new Date());
+    }
+    //! Returns the period between two dates as a fraction of year.
     public double yearFraction(final Date d1, final Date d2, final Date refPeriodStart,  final Date refPeriodEnd) {
         QL_REQUIRE(impl_ != null, "no day counter implementation provided");
         return impl_.yearFraction(d1,d2,refPeriodStart,refPeriodEnd);

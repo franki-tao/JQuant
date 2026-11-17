@@ -1,6 +1,8 @@
 package jquant.pricingengines.vanilla;
 
+import jquant.EarlyExercise;
 import jquant.EuropeanOption;
+import jquant.Exercise;
 import jquant.Option;
 import jquant.PricingEngine;
 import jquant.cashflows.Dividend;
@@ -23,6 +25,7 @@ import jquant.pricingengines.StrikedTypePayoff;
 import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.termstructures.YieldTermStructure;
 import jquant.time.Date;
+import jquant.time.TimeUtils;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -30,6 +33,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 import static jquant.math.MathUtils.NULL_REAL;
 
@@ -64,6 +68,11 @@ public class FdBlackScholesVanillaEngine implements PricingEngine {
                                        int tGrid, int xGrid) {
         this(process, tGrid, xGrid, 0, FdmSchemeDesc.Douglas(),
                 false, -NULL_REAL);
+    }
+
+    public FdBlackScholesVanillaEngine(GeneralizedBlackScholesProcess process,
+                                       int tGrid, int xGrid, int dampingSteps) {
+        this(process, tGrid, xGrid, dampingSteps, FdmSchemeDesc.Douglas());
     }
 
     public FdBlackScholesVanillaEngine(GeneralizedBlackScholesProcess process,
@@ -187,6 +196,41 @@ public class FdBlackScholesVanillaEngine implements PricingEngine {
         results_.delta = solver.deltaAt(spot);
         results_.gamma = solver.gammaAt(spot);
         results_.theta = solver.thetaAt(spot);
+
+        // The step condition enforces the exercise on grid nodes. The monotonic
+        // cubic interpolant can still undershoot the payoff between nodes, so
+        // floor only when the holder can exercise on the reference date and the
+        // payoff is paid then. Greeks stay on the interpolant.
+        final Date settlementDate = riskFree.referenceDate();
+        final Exercise exercise = arguments_.exercise;
+        boolean exercisable = false;
+        switch (exercise.type()) {
+          case American:
+            exercisable = TimeUtils.leq(exercise.date(0), settlementDate)
+                          && TimeUtils.leq(settlementDate, exercise.lastDate());
+            break;
+          case Bermudan:
+            for (Date d : exercise.dates()) {
+                if (TimeUtils.equals(d, settlementDate)) {
+                    exercisable = true;
+                    break;
+                }
+            }
+            break;
+          case European:
+            break;
+          default:
+            QL_FAIL("exercise type is not supported");
+        }
+        if (exercisable && exercise instanceof EarlyExercise
+                && ((EarlyExercise) exercise).payoffAtExpiry()) {
+            exercisable = false;
+        }
+        if (exercisable) {
+            final double exerciseValue = payoff.value(process_.x0());
+            if (results_.value < exerciseValue)
+                results_.value = exerciseValue;
+        }
 
         results_.valuationDate = riskFree.referenceDate();
         results_.errorEstimate = Double.NaN;

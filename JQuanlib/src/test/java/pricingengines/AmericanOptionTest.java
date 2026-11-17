@@ -6,11 +6,14 @@ import jquant.EuropeanOption;
 import jquant.Handle;
 import jquant.Option;
 import jquant.Payoff;
+import jquant.SavedSettings;
 import jquant.Settings;
+import jquant.indexes.IndexManager;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
 import jquant.pricingengines.vanilla.BaroneAdesiWhaleyApproximationEngine;
 import jquant.pricingengines.vanilla.BjerksundStenslandApproximationEngine;
+import jquant.pricingengines.vanilla.FdBlackScholesVanillaEngine;
 import jquant.pricingengines.vanilla.JuQuadraticApproximationEngine;
 import jquant.processes.BlackScholesMertonProcess;
 import jquant.quotes.SimpleQuote;
@@ -28,6 +31,8 @@ import jquant.time.calendars.NullCalendar;
 import jquant.time.daycounters.Actual360;
 import jquant.time.daycounters.Actual365Fixed;
 import jquant.time.daycounters.Thirty360;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static jquant.math.MathUtils.QL_EPSILON;
@@ -46,6 +51,26 @@ public class AmericanOptionTest {
 
     private record Data(Option.Type type, double strike, double s, double q,
                         double r, double t, double vol, double result) {
+    }
+
+    private record OptionSpec(double spot, double strike, int maturityInDays,
+                              double volatility, double r, double q) {
+    }
+
+    private SavedSettings savedSettings_;
+
+    @BeforeEach
+    public void setUp() {
+        savedSettings_ = new SavedSettings();
+    }
+
+    @AfterEach
+    public void tearDown() {
+        try {
+            savedSettings_.restore();
+        } finally {
+            IndexManager.Instance.clearHistories();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -728,9 +753,8 @@ public class AmericanOptionTest {
     // Ju quadratic
     // ------------------------------------------------------------------
 
-    @Test
-    public void testJuValues() {
-        Data[] juValues = {
+    private static Data[] juValues() {
+        return new Data[] {
                 // Exhibit 3 - Short dated Put Options
                 new Data(Option.Type.Put, 35.00, 40.00, 0.0, 0.0488, 0.0833, 0.2, 0.006),
                 new Data(Option.Type.Put, 35.00, 40.00, 0.0, 0.0488, 0.3333, 0.2, 0.201),
@@ -793,6 +817,213 @@ public class AmericanOptionTest {
                 new Data(Option.Type.Call, 100.00, 110.00, 0.03, 0.07, 3.0, 0.3, 30.028),
                 new Data(Option.Type.Call, 100.00, 120.00, 0.03, 0.07, 3.0, 0.3, 37.177)
         };
+    }
+
+    @Test
+    public void testFdValues() {
+        // QuantLib test-suite/americanoption.cpp: testFdValues
+        Date today = Settings.instance.evaluationDate().Date();
+        DayCounter dc = new Actual360(false);
+        SimpleQuote spot = new SimpleQuote(0.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        SimpleQuote rRate = new SimpleQuote(0.0);
+        SimpleQuote vol = new SimpleQuote(0.0);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+        BlackVolTermStructure volTS = flatVol(today, vol, dc);
+
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), new Handle<>(qTS, true),
+                new Handle<>(rTS, true), new Handle<>(volTS, true));
+
+        FdBlackScholesVanillaEngine pdeEngine =
+                new FdBlackScholesVanillaEngine(process, 100, 400);
+        // Official variable name says "QR+", but the source constructs a
+        // default FdBlackScholesVanillaEngine (100 x 100).
+        FdBlackScholesVanillaEngine qrPlusEngine =
+                new FdBlackScholesVanillaEngine(process);
+
+        double tolerance = 8.0e-2;
+        for (Data value : juValues()) {
+            Date exDate = today.add(timeToDays(value.t));
+            spot.setValue(value.s);
+            qRate.setValue(value.q);
+            rRate.setValue(value.r);
+            vol.setValue(value.vol);
+
+            EuropeanOption option = new EuropeanOption(
+                    new PlainVanillaPayoff(value.type, value.strike),
+                    new AmericanExercise(today, exDate));
+            option.setPricingEngine(pdeEngine);
+            double pdeCalculated = option.NPV();
+
+            double error = Math.abs(pdeCalculated - value.result);
+            if (error > tolerance) {
+                fail(reportFailure("value", value, today, exDate, value.result,
+                        pdeCalculated, error, tolerance));
+            }
+
+            option.setPricingEngine(qrPlusEngine);
+            double qrPlusCalculated = option.NPV();
+            if (Math.abs(pdeCalculated - qrPlusCalculated) > 2e-2) {
+                fail("QR+ boundary approximation failed to reproduce PDE value"
+                        + "\n    OptionType: " + value.type
+                        + "\n    spot:       " + value.s
+                        + "\n    strike:     " + value.strike
+                        + "\n    r:          " + value.r
+                        + "\n    q:          " + value.q
+                        + "\n    vol:        " + value.vol
+                        + "\n    PDE value:  " + pdeCalculated
+                        + "\n    QR+ value:  " + qrPlusCalculated);
+            }
+        }
+    }
+
+    @Test
+    public void testCallPutParity() {
+        // QuantLib test-suite/americanoption.cpp: testCallPutParity
+        final DayCounter dc = new Actual365Fixed();
+        final Date today = new Date(8, Month.APRIL, 2022);
+        Settings.instance.evaluationDate().equal(today);
+
+        final OptionSpec[] testCaseSpecs = {
+                new OptionSpec(100.0, 100.0, 365, 0.5, 0.15, 0.02),
+                new OptionSpec(100.0, 90.0, 365, 0.5, 0.15, 0.02),
+                new OptionSpec(100.0, 125.0, 730, 0.4, 0.15, 0.05),
+                new OptionSpec(100.0, 125.0, 730, 0.4, 0.06, 0.05)
+        };
+
+        final int xGrid = 400;
+        final int timeStepsPerYear = 50;
+
+        for (OptionSpec testCaseSpec : testCaseSpecs) {
+            Date maturityDate = today.add(
+                    new Period(testCaseSpec.maturityInDays(), TimeUnit.DAYS));
+            double maturityTime = dc.yearFraction(today, maturityDate);
+            int tGrid = (int) (maturityTime * timeStepsPerYear);
+
+            AmericanExercise exercise = new AmericanExercise(today, maturityDate);
+
+            BlackScholesMertonProcess putProcess = buildProcess(
+                    today, dc, testCaseSpec);
+            EuropeanOption putOption = new EuropeanOption(
+                    new PlainVanillaPayoff(Option.Type.Put, testCaseSpec.strike()),
+                    exercise);
+            putOption.setPricingEngine(new FdBlackScholesVanillaEngine(
+                    putProcess, tGrid, xGrid));
+            double putNpv = putOption.NPV();
+
+            OptionSpec callOptionSpec = new OptionSpec(
+                    testCaseSpec.strike(), testCaseSpec.spot(),
+                    testCaseSpec.maturityInDays(), testCaseSpec.volatility(),
+                    testCaseSpec.q(), testCaseSpec.r());
+            BlackScholesMertonProcess callProcess = buildProcess(
+                    today, dc, callOptionSpec);
+            EuropeanOption callOption = new EuropeanOption(
+                    new PlainVanillaPayoff(Option.Type.Call, callOptionSpec.strike()),
+                    exercise);
+            callOption.setPricingEngine(new FdBlackScholesVanillaEngine(
+                    callProcess, tGrid, xGrid));
+            double callNpv = callOption.NPV();
+
+            double diff = Math.abs(putNpv - callNpv);
+            double tol = 0.001;
+            if (diff > tol) {
+                fail("failed to reproduce American call/put parity"
+                        + "\n    Put NPV   : " + putNpv
+                        + "\n    Call NPV  : " + callNpv
+                        + "\n    difference: " + diff
+                        + "\n    tolerance : " + tol);
+            }
+        }
+    }
+
+    private static BlackScholesMertonProcess buildProcess(
+            Date today, DayCounter dc, OptionSpec spec) {
+        return buildProcess(today, dc, spec.spot(), spec.q(), spec.r(),
+                spec.volatility());
+    }
+
+    private static BlackScholesMertonProcess buildProcess(
+            Date today, DayCounter dc, double spot, double q, double r,
+            double vol) {
+        return new BlackScholesMertonProcess(
+                new Handle<>(new SimpleQuote(spot), true),
+                new Handle<>(flatRate(today, q, dc), true),
+                new Handle<>(flatRate(today, r, dc), true),
+                new Handle<>(flatVol(today, new SimpleQuote(vol), dc), true));
+    }
+
+    @Test
+    public void testFdEarliestExerciseDate() {
+        // QuantLib test-suite/americanoption.cpp: testFdEarliestExerciseDate
+        final Date today = new Date(15, Month.JANUARY, 2025);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual365Fixed();
+
+        final double S0 = 80.0;
+        final double K = 100.0;
+        final double sigma = 0.25;
+        final double r = 0.05;
+        final double q = 0.0;
+
+        BlackScholesMertonProcess bsmProcess = buildProcess(
+                today, dc, S0, q, r, sigma);
+
+        final Date maturity = today.add(new Period(1, TimeUnit.YEARS));
+        PlainVanillaPayoff payoff = new PlainVanillaPayoff(Option.Type.Put, K);
+
+        // Full American exercise
+        AmericanExercise fullExercise = new AmericanExercise(today, maturity);
+        EuropeanOption fullOption = new EuropeanOption(payoff, fullExercise);
+        FdBlackScholesVanillaEngine fdEngine =
+                new FdBlackScholesVanillaEngine(bsmProcess, 200, 200, 0);
+        fullOption.setPricingEngine(fdEngine);
+        double fullPrice = fullOption.NPV();
+
+        // European benchmark
+        EuropeanExercise euroExercise = new EuropeanExercise(maturity);
+        EuropeanOption euroOption = new EuropeanOption(payoff, euroExercise);
+        euroOption.setPricingEngine(new AnalyticEuropeanEngine(bsmProcess));
+        double euroPrice = euroOption.NPV();
+
+        double earlyExPremium = fullPrice - euroPrice;
+        assertTrue(earlyExPremium > 1.0,
+                "early exercise premium should be significant for deep ITM put: "
+                        + "full=" + fullPrice + " euro=" + euroPrice);
+
+        // Restricted exercise: only last 3 months
+        Date lateStart = maturity.substract(new Period(3, TimeUnit.MONTHS));
+        AmericanExercise lateExercise = new AmericanExercise(lateStart, maturity);
+        EuropeanOption lateOption = new EuropeanOption(payoff, lateExercise);
+        lateOption.setPricingEngine(fdEngine);
+        double latePrice = lateOption.NPV();
+
+        assertTrue(fullPrice - latePrice > 0.01,
+                "Restricting exercise window should reduce price: full="
+                        + fullPrice + " late=" + latePrice);
+        assertTrue(latePrice > euroPrice + 0.01,
+                "Restricted American should exceed European: late="
+                        + latePrice + " euro=" + euroPrice);
+
+        // Monotonicity: longer exercise window -> higher price
+        Date midStart = maturity.substract(new Period(6, TimeUnit.MONTHS));
+        AmericanExercise midExercise = new AmericanExercise(midStart, maturity);
+        EuropeanOption midOption = new EuropeanOption(payoff, midExercise);
+        midOption.setPricingEngine(fdEngine);
+        double midPrice = midOption.NPV();
+
+        assertTrue(midPrice >= latePrice - 1e-8,
+                "Wider window should give higher price: 6M=" + midPrice
+                        + " 3M=" + latePrice);
+        assertTrue(fullPrice >= midPrice - 1e-8,
+                "Full window should give highest price: full=" + fullPrice
+                        + " 6M=" + midPrice);
+    }
+
+    @Test
+    public void testJuValues() {
+        Data[] juValues = juValues();
 
         Date today = Settings.instance.evaluationDate().Date();
         DayCounter dc = new Actual360(false);

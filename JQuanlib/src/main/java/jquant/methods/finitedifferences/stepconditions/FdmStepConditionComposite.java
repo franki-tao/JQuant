@@ -86,7 +86,7 @@ public class FdmStepConditionComposite implements FdmStepCondition {
         final List<FdmStepCondition> stepConditions = new ArrayList<>();
         if (exercise.type() == Exercise.Type.American) {
             final double exerciseStart = dayCounter.yearFraction(
-                    refDate, exercise.date(0), new Date(), new Date());
+                    refDate, exercise.date(0));
             stepConditions.add(new FdmAmericanStepCondition(
                     mesher, calculator, exerciseStart));
         } else if (exercise.type() == Exercise.Type.Bermudan) {
