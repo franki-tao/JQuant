@@ -32,6 +32,7 @@ public class EuropeanOption extends Option {
     private double rho_ = Double.NaN;
     private double dividendRho_ = Double.NaN;
     private double elasticity_ = Double.NaN;
+    private double strikeSensitivity_ = Double.NaN;
 
     public EuropeanOption(Payoff payoff, Exercise exercise) {
         super(payoff, exercise);
@@ -89,6 +90,12 @@ public class EuropeanOption extends Option {
         calculate();
         QL_REQUIRE(!Double.isNaN(elasticity_), "elasticity not provided");
         return elasticity_;
+    }
+
+    public double strikeSensitivity() {
+        calculate();
+        QL_REQUIRE(!Double.isNaN(strikeSensitivity_), "strikeSensitivity not provided");
+        return strikeSensitivity_;
     }
 
     /**
@@ -294,6 +301,7 @@ public class EuropeanOption extends Option {
             rho_ = rr.rho;
             dividendRho_ = rr.dividendRho;
             elasticity_ = rr.elasticity;
+            strikeSensitivity_ = rr.strikeSensitivity;
         }
     }
 
@@ -306,5 +314,6 @@ public class EuropeanOption extends Option {
         public double rho = Double.NaN;
         public double dividendRho = Double.NaN;
         public double elasticity = Double.NaN;
+        public double strikeSensitivity = Double.NaN;
     }
 }

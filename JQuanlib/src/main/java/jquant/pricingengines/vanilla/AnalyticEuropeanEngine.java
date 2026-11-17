@@ -95,6 +95,7 @@ public class AnalyticEuropeanEngine implements PricingEngine {
         results_.rho = Double.NaN;
         results_.dividendRho = Double.NaN;
         results_.elasticity = Double.NaN;
+        results_.strikeSensitivity = Double.NaN;
         if (results_.additionalResults != null) {
             results_.additionalResults.clear();
         }
@@ -146,6 +147,7 @@ public class AnalyticEuropeanEngine implements PricingEngine {
         results_.vega = black.vega(t);
         results_.theta = black.theta(spot, t);
         results_.thetaPerDay = black.thetaPerDay(spot, t);
+        results_.strikeSensitivity = black.strikeSensitivity();
         results_.valuationDate = riskFree.referenceDate();
         results_.errorEstimate = Double.NaN;
     }
