@@ -13,6 +13,7 @@ import jquant.indexes.IndexManager;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
 import jquant.pricingengines.vanilla.BaroneAdesiWhaleyApproximationEngine;
+import jquant.pricingengines.vanilla.BinomialVanillaEngine;
 import jquant.pricingengines.vanilla.BjerksundStenslandApproximationEngine;
 import jquant.pricingengines.vanilla.FdBlackScholesVanillaEngine;
 import jquant.pricingengines.vanilla.JuQuadraticApproximationEngine;
@@ -23,6 +24,7 @@ import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.equityfx.BlackConstantVol;
 import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
 import jquant.termstructures.yield.FlatForward;
+import jquant.termstructures.yield.ZeroCurve;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.Frequency;
@@ -1591,6 +1593,277 @@ public class AmericanOptionTest {
                     }
                 }
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Binomial theta
+    // ------------------------------------------------------------------
+
+    @Test
+    public void testBinomialTheta() {
+        Date today = new Date(21, Month.SEPTEMBER, 2026);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual365Fixed();
+        Date maturity = today.add(91);
+        SimpleQuote spot = new SimpleQuote(100.0);
+
+        record Case(Option.Type type, double strike, double q, double r,
+                    boolean exercised) {
+        }
+        Case[] cases = {
+                new Case(Option.Type.Put, 115.0, 0.00, 0.05, true),
+                new Case(Option.Type.Put, 100.0, 0.00, 0.05, false),
+                new Case(Option.Type.Call, 85.0, 0.10, 0.01, true),
+                new Case(Option.Type.Call, 85.0, 0.00, -0.05, true)
+        };
+
+        record Tree(String name, BinomialVanillaEngine.TreeType type) {
+        }
+        Tree[] trees = {
+                new Tree("CRR", BinomialVanillaEngine.TreeType.COX_ROSS_RUBINSTEIN),
+                new Tree("JR", BinomialVanillaEngine.TreeType.JARROW_RUDD),
+                new Tree("EQP", BinomialVanillaEngine.TreeType.ADDITIVE_EQP),
+                new Tree("Trigeorgis", BinomialVanillaEngine.TreeType.TRIGEORGIS),
+                new Tree("Tian", BinomialVanillaEngine.TreeType.TIAN),
+                new Tree("LR", BinomialVanillaEngine.TreeType.LEISEN_REIMER),
+                new Tree("Joshi", BinomialVanillaEngine.TreeType.JOSHI)
+        };
+
+        for (Case data : cases) {
+            BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                    new Handle<>(spot, true),
+                    new Handle<>(flatRate(today, data.q, dc), true),
+                    new Handle<>(flatRate(today, data.r, dc), true),
+                    new Handle<>(flatVol(today, new SimpleQuote(0.15), dc), true));
+            Payoff payoff = new PlainVanillaPayoff(data.type, data.strike);
+            AmericanExercise exercise = new AmericanExercise(today, maturity);
+            EuropeanOption option = new EuropeanOption(payoff, exercise);
+            int steps = data.exercised ? 201 : 1001;
+
+            double expectedTheta = 0.0;
+            if (!data.exercised) {
+                // At fixed spot, shortening maturity is equivalent to advancing
+                // time in this flat market. Use an independent finite-difference
+                // engine.
+                EuropeanOption shorter = new EuropeanOption(
+                        payoff, new AmericanExercise(today, today.add(90)));
+                EuropeanOption longer = new EuropeanOption(
+                        payoff, new AmericanExercise(today, today.add(92)));
+                FdBlackScholesVanillaEngine fdEngine =
+                        new FdBlackScholesVanillaEngine(process, 400, 400);
+                shorter.setPricingEngine(fdEngine);
+                longer.setPricingEngine(fdEngine);
+                expectedTheta = (shorter.NPV() - longer.NPV())
+                        / dc.yearFraction(today.add(90), today.add(92));
+            }
+
+            for (Tree tree : trees) {
+                String context = tree.name + " tree, " + data.type
+                        + ", strike " + data.strike + ", r " + data.r
+                        + ", q " + data.q;
+                option.setPricingEngine(new BinomialVanillaEngine(
+                        process, steps, tree.type));
+                if (data.exercised) {
+                    // Immediate exercise gives an affine, time-independent
+                    // payoff. QuantLib's Option::Type is Call=+1, Put=-1.
+                    double officialType =
+                            data.type == Option.Type.Call ? 1.0 : -1.0;
+                    assertAbs(context + " NPV", 15.0, option.NPV(), 1.0e-10);
+                    assertAbs(context + " delta", officialType,
+                            option.delta(), 1.0e-10);
+                    assertAbs(context + " gamma", 0.0, option.gamma(), 1.0e-10);
+                    assertAbs(context + " theta", 0.0, option.theta(), 1.0e-8);
+                } else {
+                    if (!(option.NPV() > payoff.value(spot.value()))) {
+                        fail(context + " NPV not above payoff: NPV="
+                                + option.NPV() + " payoff="
+                                + payoff.value(spot.value()));
+                    }
+                    // Allow for tree discretization and the one-day time bump.
+                    assertAbs(context + " theta", expectedTheta,
+                            option.theta(), 0.05);
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testBinomialThetaNonFlatCurve() {
+        Date today = new Date(21, Month.SEPTEMBER, 2026);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual365Fixed();
+        Date maturity = today.add(365);
+        // The initial rate is 1%, the one-year zero rate is 5%.
+        // Non-decreasing, positive zero rates give positive forwards, so this
+        // call never exercises early.
+        YieldTermStructure riskFree = new ZeroCurve(
+                List.of(today, today.add(1), maturity),
+                List.of(0.01, 0.01, 0.05), dc);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(new SimpleQuote(100.0), true),
+                new Handle<>(flatRate(today, 0.0, dc), true),
+                new Handle<>(riskFree, true),
+                new Handle<>(flatVol(today, new SimpleQuote(0.20), dc), true));
+        Payoff payoff = new PlainVanillaPayoff(Option.Type.Call, 100.0);
+        EuropeanOption american = new EuropeanOption(payoff,
+                new AmericanExercise(today, maturity));
+        EuropeanOption european = new EuropeanOption(payoff,
+                new EuropeanExercise(maturity));
+        european.setPricingEngine(new AnalyticEuropeanEngine(process));
+        // Use the closed-form European value and spatial derivatives in the
+        // PDE at t=0. AnalyticEuropeanEngine::theta itself uses the maturity
+        // zero rate.
+        double expectedTheta = 0.01 * (european.NPV() - 100.0 * european.delta())
+                - 0.5 * 0.20 * 0.20 * 100.0 * 100.0 * european.gamma();
+
+        for (int steps : new int[]{1001, 4001}) {
+            String context = "CRR tree, " + steps + " steps";
+            BinomialVanillaEngine engine = new BinomialVanillaEngine(
+                    process, steps,
+                    BinomialVanillaEngine.TreeType.COX_ROSS_RUBINSTEIN);
+            american.setPricingEngine(engine);
+            european.setPricingEngine(engine);
+            if (!(american.NPV() > payoff.value(100.0))) {
+                fail(context + " American NPV not above payoff: "
+                        + american.NPV());
+            }
+            assertAbs(context + " American-European NPV",
+                    european.NPV(), american.NPV(), 1.0e-10);
+            assertAbs(context + " American-European theta",
+                    european.theta(), american.theta(), 1.0e-10);
+            // Allow for discretization of the spatial Greeks by the tree.
+            assertAbs(context + " theta vs PDE", expectedTheta,
+                    american.theta(), 0.005);
+        }
+    }
+
+    @Test
+    public void testBinomialThetaDeferredExercise() {
+        Date today = new Date(21, Month.SEPTEMBER, 2026);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual365Fixed();
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(new SimpleQuote(100.0), true),
+                new Handle<>(flatRate(today, 0.0, dc), true),
+                new Handle<>(flatRate(today, 0.05, dc), true),
+                new Handle<>(flatVol(today, new SimpleQuote(0.15), dc), true));
+        Payoff payoff = new PlainVanillaPayoff(Option.Type.Put, 115.0);
+        EuropeanOption option = new EuropeanOption(payoff,
+                new AmericanExercise(today.add(1), today.add(91)));
+        option.setPricingEngine(new BinomialVanillaEngine(
+                process, 2,
+                BinomialVanillaEngine.TreeType.COX_ROSS_RUBINSTEIN));
+        // The coarse grid snaps the earliest exercise date to t=0 and returns
+        // intrinsic. The actual earliest date still forbids exercise now, so
+        // retain PDE theta r*K.
+        assertAbs("NPV", 15.0, option.NPV(), 1.0e-10);
+        assertAbs("delta", -1.0, option.delta(), 1.0e-10);
+        assertAbs("gamma", 0.0, option.gamma(), 1.0e-10);
+        assertAbs("theta", 0.05 * 115.0, option.theta(), 1.0e-8);
+    }
+
+    // ------------------------------------------------------------------
+    // Finite-difference American exercise-value floor
+    // ------------------------------------------------------------------
+
+    @Test
+    public void testFdAmericanNotBelowExerciseValue() {
+        // The default grid can undershoot the payoff between nodes. Implied
+        // volatility prices an American with this engine, so that price has to
+        // be something a volatility can reproduce.
+        Date today = new Date(15, Month.OCTOBER, 2026);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual365Fixed();
+
+        record Case(Option.Type type, double spot, double strike, double r,
+                    double q, double vol, int days) {
+        }
+        Case[] cases = {
+                // reported: default 100x100 grid, short of intrinsic by about
+                // 2.6e-6
+                new Case(Option.Type.Call, 110.0, 100.0, 0.00, 0.02, 0.10, 90),
+                // widest miss in the sweep that found the report, about 7e-3
+                new Case(Option.Type.Call, 150.0, 100.0, 0.05, 0.10, 0.35, 1095),
+                new Case(Option.Type.Put, 70.0, 100.0, 0.10, 0.00, 0.20, 365)
+        };
+
+        for (Case c : cases) {
+            SimpleQuote quote = new SimpleQuote(c.spot);
+            BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                    new Handle<>(quote, true),
+                    new Handle<>(flatRate(today, c.q, dc), true),
+                    new Handle<>(flatRate(today, c.r, dc), true),
+                    new Handle<>(flatVol(today, new SimpleQuote(c.vol), dc),
+                            true));
+            Payoff payoff = new PlainVanillaPayoff(c.type, c.strike);
+            AmericanExercise exercise = new AmericanExercise(
+                    today, today.add(c.days));
+            EuropeanOption option = new EuropeanOption(payoff, exercise);
+            option.setPricingEngine(new FdBlackScholesVanillaEngine(process));
+
+            double intrinsic = payoff.value(c.spot);
+            double calculated = option.NPV();
+            if (calculated < intrinsic) {
+                fail("value below exercise: " + c + " spot=" + c.spot
+                        + " today=" + today + " expected=" + intrinsic
+                        + " calculated=" + calculated
+                        + " error=" + (intrinsic - calculated)
+                        + " tolerance=0.0");
+            }
+
+            double implied = option.impliedVolatility(
+                    calculated, process, 1.0e-8, 200, 1.0e-4, 4.0);
+
+            BlackScholesMertonProcess repricedProcess =
+                    new BlackScholesMertonProcess(
+                            new Handle<>(quote, true),
+                            new Handle<>(flatRate(today, c.q, dc), true),
+                            new Handle<>(flatRate(today, c.r, dc), true),
+                            new Handle<>(flatVol(today,
+                                    new SimpleQuote(implied), dc), true));
+            option.setPricingEngine(
+                    new FdBlackScholesVanillaEngine(repricedProcess));
+            double repriced = option.NPV();
+            double error = Math.abs(repriced - calculated);
+            if (error > 1.0e-6) {
+                fail("implied-volatility round trip: " + c + " spot=" + c.spot
+                        + " today=" + today + " expected=" + calculated
+                        + " calculated=" + repriced + " vol=" + implied
+                        + " error=" + error + " tolerance=1.0e-6");
+            }
+        }
+
+        // A European on the same market is worth less than intrinsic. The
+        // floor must not be applied to it, and neither to an American that
+        // cannot be exercised yet.
+        SimpleQuote quote = new SimpleQuote(110.0);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(quote, true),
+                new Handle<>(flatRate(today, 0.02, dc), true),
+                new Handle<>(flatRate(today, 0.00, dc), true),
+                new Handle<>(flatVol(today, new SimpleQuote(0.10), dc), true));
+        Payoff payoff = new PlainVanillaPayoff(Option.Type.Call, 100.0);
+        double intrinsic = payoff.value(110.0);
+
+        EuropeanOption european = new EuropeanOption(payoff,
+                new EuropeanExercise(today.add(90)));
+        european.setPricingEngine(new FdBlackScholesVanillaEngine(process));
+        double europeanValue = european.NPV();
+        if (!(europeanValue < intrinsic - 0.1)) {
+            fail("European value: spot=110.0 today=" + today
+                    + " expected<" + (intrinsic - 0.1) + " calculated="
+                    + europeanValue);
+        }
+
+        EuropeanOption deferred = new EuropeanOption(payoff,
+                new AmericanExercise(today.add(30), today.add(90)));
+        deferred.setPricingEngine(new FdBlackScholesVanillaEngine(process));
+        double deferredValue = deferred.NPV();
+        if (!(deferredValue < intrinsic - 0.05)) {
+            fail("deferred exercise value: spot=110.0 today=" + today
+                    + " expected<" + (intrinsic - 0.05) + " calculated="
+                    + deferredValue);
         }
     }
 
