@@ -1,6 +1,8 @@
 package jquant.pricingengines;
 
+import jquant.PricingEngine;
 import jquant.TimeGrid;
+import jquant.math.MathUtils;
 import jquant.math.statistics.IncrementalStatistics;
 import jquant.methods.montecarlo.MonteCarloModel;
 import jquant.methods.montecarlo.PathGenerator;
@@ -12,8 +14,6 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * Framework for single-variate Monte Carlo pricing engines.
  *
  * <p>Port of QuantLib {@code ql/pricingengines/mcsimulation.hpp}.
- * Control-variate support is not required by the European engine and
- * is omitted.
  */
 public abstract class McSimulation {
     protected McSimulation(boolean antitheticVariate, boolean controlVariate) {
@@ -26,6 +26,22 @@ public abstract class McSimulation {
     protected abstract PathGenerator pathGenerator();
 
     protected abstract TimeGrid timeGrid();
+
+    protected PathPricer controlPathPricer() {
+        return null;
+    }
+
+    protected PathGenerator controlPathGenerator() {
+        return null;
+    }
+
+    protected PricingEngine controlPricingEngine() {
+        return null;
+    }
+
+    protected double controlVariateValue() {
+        return MathUtils.NULL_REAL;
+    }
 
     protected boolean antitheticVariate_;
     protected boolean controlVariate_;
@@ -104,15 +120,28 @@ public abstract class McSimulation {
      */
     public void calculate(double requiredTolerance, int requiredSamples, int maxSamples) {
 
-        QL_REQUIRE(requiredTolerance != jquant.math.MathUtils.NULL_REAL
-                        || requiredSamples != jquant.math.MathUtils.NULL_SIZE,
+        QL_REQUIRE(requiredTolerance != MathUtils.NULL_REAL
+                        || requiredSamples != MathUtils.NULL_SIZE,
                 "neither tolerance nor number of samples set");
 
-        QL_REQUIRE(!controlVariate_,
-                "control variate not supported by this engine");
+        if (controlVariate_) {
+            double controlVariateValue = controlVariateValue();
+            QL_REQUIRE(controlVariateValue != MathUtils.NULL_REAL,
+                    "engine does not provide control-variation price");
 
-        mcModel_ = new MonteCarloModel(pathGenerator(), pathPricer(),
-                new IncrementalStatistics(), antitheticVariate_);
+            PathPricer controlPP = controlPathPricer();
+            QL_REQUIRE(controlPP != null,
+                    "engine does not provide control-variation path pricer");
+
+            PathGenerator controlPG = controlPathGenerator();
+
+            mcModel_ = new MonteCarloModel(pathGenerator(), pathPricer(),
+                    new IncrementalStatistics(), antitheticVariate_,
+                    controlPP, controlVariateValue, controlPG);
+        } else {
+            mcModel_ = new MonteCarloModel(pathGenerator(), pathPricer(),
+                    new IncrementalStatistics(), antitheticVariate_);
+        }
 
         if (requiredTolerance != jquant.math.MathUtils.NULL_REAL) {
             if (maxSamples != jquant.math.MathUtils.NULL_SIZE)
