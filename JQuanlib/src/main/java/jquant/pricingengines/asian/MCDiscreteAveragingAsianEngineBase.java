@@ -8,6 +8,7 @@ import jquant.TimeGrid;
 import jquant.math.MathUtils;
 import jquant.math.randomnumbers.InverseCumulativeRsg;
 import jquant.math.randomnumbers.RngType;
+import jquant.methods.montecarlo.MultiPathGenerator;
 import jquant.methods.montecarlo.PathGenerator;
 import jquant.methods.montecarlo.PathPricer;
 import jquant.patterns.Observable;
@@ -164,6 +165,16 @@ public abstract class MCDiscreteAveragingAsianEngineBase
     }
 
     @Override
+    protected MultiPathGenerator multiPathGenerator() {
+        final int dimensions = process_.factors();
+        final TimeGrid grid = timeGrid();
+        final InverseCumulativeRsg generator = rngType_.makeSequenceGenerator(
+                dimensions * (grid.size() - 1), seed_);
+        return new MultiPathGenerator(process_, grid, generator,
+                brownianBridge_);
+    }
+
+    @Override
     protected double controlVariateValue() {
         final PricingEngine controlPE = controlPricingEngine();
         QL_REQUIRE(controlPE != null,
@@ -223,5 +234,7 @@ public abstract class MCDiscreteAveragingAsianEngineBase
 
     /** Subclasses provide the path pricer for their payoff type. */
     @Override
-    protected abstract PathPricer pathPricer();
+    protected PathPricer pathPricer() {
+        return null;
+    }
 }

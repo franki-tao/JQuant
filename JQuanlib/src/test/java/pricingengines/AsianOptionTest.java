@@ -19,18 +19,23 @@ import jquant.math.randomnumbers.RngType;
 import jquant.pricingengines.BlackFormula;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.asian.AnalyticContinuousGeometricAveragePriceAsianEngine;
+import jquant.pricingengines.asian.AnalyticContinuousGeometricAveragePriceAsianHestonEngine;
 import jquant.pricingengines.asian.AnalyticDiscreteGeometricAveragePriceAsianEngine;
+import jquant.pricingengines.asian.AnalyticDiscreteGeometricAveragePriceAsianHestonEngine;
 import jquant.pricingengines.asian.AnalyticDiscreteGeometricAverageStrikeAsianEngine;
 import jquant.pricingengines.asian.ChoiAsianEngine;
 import jquant.pricingengines.asian.ContinuousArithmeticAsianLevyEngine;
 import jquant.pricingengines.asian.ContinuousArithmeticAsianVecerEngine;
 import jquant.pricingengines.asian.FdBlackScholesAsianEngine;
 import jquant.pricingengines.asian.MakeMCDiscreteArithmeticAPEngine;
+import jquant.pricingengines.asian.MakeMCDiscreteArithmeticAPHestonEngine;
 import jquant.pricingengines.asian.MakeMCDiscreteArithmeticASEngine;
 import jquant.pricingengines.asian.MakeMCDiscreteGeometricAPEngine;
+import jquant.pricingengines.asian.MakeMCDiscreteGeometricAPHestonEngine;
 import jquant.pricingengines.asian.PastFixingsOnly;
 import jquant.pricingengines.asian.TurnbullWakemanAsianEngine;
 import jquant.processes.BlackScholesMertonProcess;
+import jquant.processes.HestonProcess;
 import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.equityfx.BlackConstantVol;
@@ -65,6 +70,15 @@ import static org.junit.jupiter.api.Assertions.fail;
  * {@code test-suite/asianoptions.cpp}.
  */
 public class AsianOptionTest {
+
+    /**
+     * Default evaluation date used by the official QuantLib test suite when
+     * no {@code --date} argument is given.  The Heston Asian reference values
+     * below are compared on that known-good date; the suite notes that some
+     * dates make date-dependent tests fail.
+     */
+    private static final Date KNOWN_GOOD_EVALUATION_DATE =
+            new Date(16, Month.SEPTEMBER, 2015);
 
     private SavedSettings savedSettings_;
 
@@ -1614,6 +1628,559 @@ public class AsianOptionTest {
     }
 
     /**
+     * QuantLib {@code testAnalyticContinuousGeometricAveragePriceHeston}.
+     */
+    @Test
+    public void testAnalyticContinuousGeometricAveragePriceHeston() {
+        Settings.instance.evaluationDate().equal(KNOWN_GOOD_EVALUATION_DATE);
+        DayCounter dc = new Actual365Fixed();
+        Date today = Settings.instance.evaluationDate().Date();
+        Option.Type type = Option.Type.Call;
+        Average.Type averageType = Average.Type.Geometric;
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.05);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+
+        int[] days = {73, 73, 73, 73, 73, 548, 548, 548, 548, 548,
+                1095, 1095, 1095, 1095, 1095};
+        double[] strikes = {90.0, 95.0, 100.0, 105.0, 110.0,
+                90.0, 95.0, 100.0, 105.0, 110.0,
+                90.0, 95.0, 100.0, 105.0, 110.0};
+        double[] prices = {10.6571, 6.5871, 3.4478, 1.4552, 0.4724,
+                16.5030, 13.7625, 11.3374, 9.2245, 7.4122,
+                20.5102, 18.3060, 16.2895, 14.4531, 12.7882};
+        double[] prices2 = {10.6425, 6.4362, 3.1578, 1.1936, 0.3609,
+                14.9955, 11.6707, 8.7767, 6.3818, 4.5118,
+                18.1219, 15.2009, 12.5707, 10.2539, 8.2611};
+        double tolerance = 1.0e-2;
+
+        double v0 = 0.09;
+        double kappa = 1.15;
+        double theta = 0.348;
+        double sigma = 0.39;
+        double rho = -0.64;
+
+        HestonProcess hestonProcess = new HestonProcess(
+                new Handle<>(rTS, true), new Handle<>(qTS, true),
+                new Handle<>(spot, true), v0, kappa, theta, sigma, rho);
+        AnalyticContinuousGeometricAveragePriceAsianHestonEngine engine =
+                new AnalyticContinuousGeometricAveragePriceAsianHestonEngine(
+                        hestonProcess);
+
+        for (int i = 0; i < strikes.length; i++) {
+            double strike = strikes[i];
+            int day = days[i];
+            double expected = prices[i];
+
+            Date expiryDate = today.add(day);
+            Exercise exercise = new EuropeanExercise(expiryDate);
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(type, strike);
+
+            ContinuousAveragingAsianOption option =
+                    new ContinuousAveragingAsianOption(averageType, payoff,
+                            exercise);
+            option.setPricingEngine(engine);
+
+            double calculated = option.NPV();
+            if (Math.abs(calculated - expected) > tolerance) {
+                reportFailure("value", averageType, 1.0, 0,
+                        new ArrayList<>(), payoff, exercise, spot.value(),
+                        qRate.value(), rRate.value(), today,
+                        Math.sqrt(v0), expected, calculated, tolerance);
+            }
+        }
+
+        double v0_2 = 0.09;
+        double kappa_2 = 2.0;
+        double theta_2 = 0.09;
+        double sigma_2 = 1.0;
+        double rho_2 = -0.3;
+
+        HestonProcess hestonProcess_2 = new HestonProcess(
+                new Handle<>(rTS, true), new Handle<>(qTS, true),
+                new Handle<>(spot, true), v0_2, kappa_2, theta_2,
+                sigma_2, rho_2);
+        AnalyticContinuousGeometricAveragePriceAsianHestonEngine engine_2 =
+                new AnalyticContinuousGeometricAveragePriceAsianHestonEngine(
+                        hestonProcess_2);
+
+        for (int i = 0; i < strikes.length; i++) {
+            double strike = strikes[i];
+            int day = days[i];
+            double expected = prices2[i];
+
+            Date expiryDate = today.add(day);
+            Exercise exercise = new EuropeanExercise(expiryDate);
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(type, strike);
+
+            ContinuousAveragingAsianOption option =
+                    new ContinuousAveragingAsianOption(averageType, payoff,
+                            exercise);
+            option.setPricingEngine(engine_2);
+
+            double calculated = option.NPV();
+            if (Math.abs(calculated - expected) > tolerance) {
+                reportFailure("value", averageType, 1.0, 0,
+                        new ArrayList<>(), payoff, exercise, spot.value(),
+                        qRate.value(), rRate.value(), today,
+                        Math.sqrt(v0), expected, calculated, tolerance);
+            }
+        }
+
+        int[] days_3 = {30, 91, 182, 365, 730, 1095,
+                30, 91, 182, 365, 730, 1095,
+                30, 91, 182, 365, 730, 1095};
+        double[] strikes_3 = {90, 90, 90, 90, 90, 90,
+                100, 100, 100, 100, 100, 100,
+                110, 110, 110, 110, 110, 110};
+        double[] tol_3 = {2.0e-2, 1.0e-2, 1.0e-2, 1.0e-2, 1.0e-2, 1.0e-2,
+                2.0e-2, 1.0e-2, 1.0e-2, 1.0e-2, 1.0e-2, 1.0e-2,
+                2.0e-2, 1.0e-2, 1.0e-2, 1.0e-2, 1.0e-2, 1.0e-2};
+        double[] prices_3 = {10.1513, 10.8175, 11.8664, 13.5931, 16.0988,
+                17.9475, 2.0472, 3.5735, 5.0588, 7.1132, 9.9139, 11.9959,
+                0.0350, 0.4869, 1.3376, 2.8569, 5.2804, 7.2682};
+
+        double v0_3 = 0.09;
+        double kappa_3 = 1.15;
+        double theta_3 = 0.0348;
+        double sigma_3 = 0.39;
+        double rho_3 = -0.64;
+
+        HestonProcess hestonProcess_3 = new HestonProcess(
+                new Handle<>(rTS, true), new Handle<>(qTS, true),
+                new Handle<>(spot, true), v0_3, kappa_3, theta_3,
+                sigma_3, rho_3);
+        AnalyticContinuousGeometricAveragePriceAsianHestonEngine engine_3 =
+                new AnalyticContinuousGeometricAveragePriceAsianHestonEngine(
+                        hestonProcess_3);
+
+        for (int i = 0; i < strikes_3.length; i++) {
+            double strike = strikes_3[i];
+            int day = days_3[i];
+            double expected = prices_3[i];
+            double tol = tol_3[i];
+
+            Date expiryDate = today.add(day);
+            Exercise exercise = new EuropeanExercise(expiryDate);
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(type, strike);
+
+            ContinuousAveragingAsianOption option =
+                    new ContinuousAveragingAsianOption(averageType, payoff,
+                            exercise);
+            option.setPricingEngine(engine_3);
+
+            double calculated = option.NPV();
+            if (Math.abs(calculated - expected) > tol) {
+                reportFailure("value", averageType, 1.0, 0,
+                        new ArrayList<>(), payoff, exercise, spot.value(),
+                        qRate.value(), rRate.value(), today,
+                        Math.sqrt(v0), expected, calculated, tol);
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testAnalyticDiscreteGeometricAveragePriceHeston}.
+     */
+    @Test
+    public void testAnalyticDiscreteGeometricAveragePriceHeston() {
+        Settings.instance.evaluationDate().equal(KNOWN_GOOD_EVALUATION_DATE);
+        double[] tol = {3.0e-2, 2.0e-2, 2.0e-2, 2.0e-2, 3.0e-2, 4.0e-2,
+                8.0e-2, 1.0e-2, 2.0e-2, 3.0e-2, 3.0e-2, 4.0e-2,
+                2.0e-2, 1.0e-2, 1.0e-2, 2.0e-2, 3.0e-2, 4.0e-2};
+
+        DayCounter dc = new Actual365Fixed();
+        Date today = Settings.instance.evaluationDate().Date();
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.05);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+
+        HestonProcess hestonProcess = new HestonProcess(
+                new Handle<>(rTS, true), new Handle<>(qTS, true),
+                new Handle<>(spot, true), 0.09, 1.15, 0.0348, 0.39, -0.64);
+
+        PricingEngine engine =
+                new AnalyticDiscreteGeometricAveragePriceAsianHestonEngine(
+                        hestonProcess);
+
+        testDiscreteGeometricAveragePriceHeston(engine, tol);
+    }
+
+    /**
+     * QuantLib {@code testMCDiscreteGeometricAveragePriceHeston}.
+     */
+    @Test
+    public void testMCDiscreteGeometricAveragePriceHeston() {
+        Settings.instance.evaluationDate().equal(KNOWN_GOOD_EVALUATION_DATE);
+        double[] tol = {4.0e-2, 2.0e-2, 2.0e-2, 4.0e-2, 8.0e-2, 2.0e-1,
+                1.0e-1, 4.0e-2, 3.0e-2, 2.0e-2, 9.0e-2, 2.0e-1,
+                2.0e-2, 1.0e-2, 2.0e-2, 2.0e-2, 7.0e-2, 2.0e-1};
+
+        DayCounter dc = new Actual365Fixed();
+        Date today = Settings.instance.evaluationDate().Date();
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.05);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+
+        HestonProcess hestonProcess = new HestonProcess(
+                new Handle<>(rTS, true), new Handle<>(qTS, true),
+                new Handle<>(spot, true), 0.09, 1.15, 0.0348, 0.39, -0.64);
+
+        PricingEngine engine = new MakeMCDiscreteGeometricAPHestonEngine(
+                hestonProcess, RngType.LOW_DISCREPANCY)
+                .withSamples(8191)
+                .withSeed(43)
+                .build();
+
+        testDiscreteGeometricAveragePriceHeston(engine, tol);
+    }
+
+    /**
+     * QuantLib {@code testMCDiscreteArithmeticAveragePriceHeston}.
+     */
+    @Test
+    public void testMCDiscreteArithmeticAveragePriceHeston() {
+        Settings.instance.evaluationDate().equal(KNOWN_GOOD_EVALUATION_DATE);
+        double vol = 0.3;
+        double v0 = vol * vol;
+        double kappa = 11.35;
+        double theta = 0.022;
+        double sigma = 0.618;
+        double rho = -0.5;
+
+        DayCounter dc = new Actual360();
+        Date today = Settings.instance.evaluationDate().Date();
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.03);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.06);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+
+        Average.Type averageType = Average.Type.Arithmetic;
+        double runningSum = 0.0;
+        int pastFixings = 0;
+
+        for (DiscreteAverageData l : casesHestonArithmetic) {
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(l.type(), l.strike());
+
+            double dt = l.length() / (l.fixings() - 1);
+            double[] timeIncrements = new double[l.fixings()];
+            List<Date> fixingDates = new ArrayList<>();
+            timeIncrements[0] = l.first();
+            fixingDates.add(today.add(
+                    (int) (timeIncrements[0] * 365.25)));
+            for (int i = 1; i < l.fixings(); i++) {
+                timeIncrements[i] = i * dt + l.first();
+                fixingDates.add(today.add(
+                        (int) (timeIncrements[i] * 365.25)));
+            }
+            Exercise exercise = new EuropeanExercise(
+                    fixingDates.get(l.fixings() - 1));
+
+            spot.setValue(l.underlying());
+            qRate.setValue(l.dividendYield());
+            rRate.setValue(l.riskFreeRate());
+
+            HestonProcess hestonProcess = new HestonProcess(
+                    new Handle<>(rTS, true), new Handle<>(qTS, true),
+                    new Handle<>(spot, true), v0, kappa, theta, sigma, rho);
+
+            PricingEngine engine = new MakeMCDiscreteArithmeticAPHestonEngine(
+                    hestonProcess, RngType.LOW_DISCREPANCY)
+                    .withSeed(42)
+                    .withSamples(4095)
+                    .build();
+
+            DiscreteAveragingAsianOption option =
+                    new DiscreteAveragingAsianOption(averageType, runningSum,
+                            pastFixings, fixingDates, payoff, exercise);
+            option.setPricingEngine(engine);
+
+            double calculated = option.NPV();
+            double expected = l.result();
+            double tolerance = 5.0e-2;
+            if (Math.abs(calculated - expected) > tolerance) {
+                reportFailure("value", averageType, runningSum, pastFixings,
+                        fixingDates, payoff, exercise, spot.value(),
+                        qRate.value(), rRate.value(), today, vol, expected,
+                        calculated, tolerance);
+            }
+
+            PricingEngine engine2 =
+                    new MakeMCDiscreteArithmeticAPHestonEngine(
+                            hestonProcess, RngType.LOW_DISCREPANCY)
+                            .withSeed(42)
+                            .withSteps(48)
+                            .withSamples(4095)
+                            .withControlVariate(true)
+                            .build();
+
+            option.setPricingEngine(engine2);
+
+            double calculatedCV = option.NPV();
+            double expectedCV = l.result();
+            tolerance = 3.0e-2;
+            if (Math.abs(calculatedCV - expectedCV) > tolerance) {
+                reportFailure("value", averageType, runningSum, pastFixings,
+                        fixingDates, payoff, exercise, spot.value(),
+                        qRate.value(), rRate.value(), today, vol, expectedCV,
+                        calculatedCV, tolerance);
+            }
+        }
+
+        double[] strikes = {60.0, 80.0, 100.0, 120.0, 140.0};
+        double[] prices = {42.5990, 29.3698, 18.2360, 10.0565, 4.9609};
+
+        double v02 = 0.0175;
+        double kappa2 = 1.5768;
+        double theta2 = 0.0398;
+        double sigma2 = 0.5751;
+        double rho2 = -0.5711;
+
+        DayCounter dc2 = new Actual365Fixed();
+
+        SimpleQuote spot2 = new SimpleQuote(100.0);
+        SimpleQuote qRate2 = new SimpleQuote(0.0);
+        YieldTermStructure qTS2 = flatRate(today, qRate2, dc2);
+        SimpleQuote rRate2 = new SimpleQuote(0.03);
+        YieldTermStructure rTS2 = flatRate(today, rRate2, dc2);
+
+        HestonProcess hestonProcess2 = new HestonProcess(
+                new Handle<>(rTS2, true), new Handle<>(qTS2, true),
+                new Handle<>(spot2, true), v02, kappa2, theta2, sigma2, rho2);
+
+        PricingEngine engine3 = new MakeMCDiscreteArithmeticAPHestonEngine(
+                hestonProcess2, RngType.LOW_DISCREPANCY)
+                .withSeed(42)
+                .withSteps(180)
+                .withSamples(8191)
+                .build();
+
+        PricingEngine engine4 = new MakeMCDiscreteArithmeticAPHestonEngine(
+                hestonProcess2, RngType.LOW_DISCREPANCY)
+                .withSeed(42)
+                .withSteps(180)
+                .withSamples(8191)
+                .withControlVariate(true)
+                .build();
+
+        List<Date> fixingDates = new ArrayList<>();
+        for (int i = 1; i <= 120; i++) {
+            fixingDates.add(today.add(new Period(i, TimeUnit.MONTHS)));
+        }
+
+        Exercise exercise = new EuropeanExercise(
+                fixingDates.get(119));
+
+        for (int i = 0; i < prices.length; i++) {
+            double strike = strikes[i];
+            double expected = prices[i];
+
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(Option.Type.Call, strike);
+
+            DiscreteAveragingAsianOption option =
+                    new DiscreteAveragingAsianOption(averageType, runningSum,
+                            pastFixings, fixingDates, payoff, exercise);
+
+            option.setPricingEngine(engine3);
+            double calculated = option.NPV();
+            double tolerance = 9.0e-2;
+
+            if (Math.abs(calculated - expected) > tolerance) {
+                reportFailure("value", averageType, runningSum, pastFixings,
+                        fixingDates, payoff, exercise, spot.value(),
+                        qRate2.value(), rRate2.value(), today, vol, expected,
+                        calculated, tolerance);
+            }
+
+            option.setPricingEngine(engine4);
+            calculated = option.NPV();
+            tolerance = 3.0e-2;
+
+            if (Math.abs(calculated - expected) > tolerance) {
+                reportFailure("value", averageType, runningSum, pastFixings,
+                        fixingDates, payoff, exercise, spot.value(),
+                        qRate2.value(), rRate2.value(), today, vol, expected,
+                        calculated, tolerance);
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testDiscreteGeometricAveragePriceHestonPastFixings}.
+     */
+    @Test
+    public void testDiscreteGeometricAveragePriceHestonPastFixings() {
+        Settings.instance.evaluationDate().equal(KNOWN_GOOD_EVALUATION_DATE);
+        double[][][] tol = {
+                {{0.04, 0.04}, {0.04, 0.04}, {0.04, 0.04},
+                        {0.05, 0.04}, {0.04, 0.04}},
+                {{0.04, 0.04}, {0.04, 0.04}, {0.04, 0.04},
+                        {0.06, 0.06}, {0.06, 0.05}},
+                {{0.04, 0.04}, {0.04, 0.04}, {0.04, 0.04},
+                        {0.05, 0.04}, {0.06, 0.05}}
+        };
+
+        int[] days = {30, 90, 180, 360, 720};
+        double[] strikes = {90, 100, 110};
+
+        DayCounter dc = new Actual365Fixed();
+        Date today = Settings.instance.evaluationDate().Date();
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.05);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+
+        double v0 = 0.09;
+        HestonProcess hestonProcess = new HestonProcess(
+                new Handle<>(rTS, true), new Handle<>(qTS, true),
+                new Handle<>(spot, true), v0, 1.15, 0.0348, 0.39, -0.64);
+
+        PricingEngine analyticEngine =
+                new AnalyticDiscreteGeometricAveragePriceAsianHestonEngine(
+                        hestonProcess);
+
+        PricingEngine mcEngine = new MakeMCDiscreteGeometricAPHestonEngine(
+                hestonProcess, RngType.LOW_DISCREPANCY)
+                .withSamples(8191)
+                .withSeed(43)
+                .build();
+
+        Option.Type type = Option.Type.Call;
+        Average.Type averageType = Average.Type.Geometric;
+
+        for (int strikeIndex = 0; strikeIndex < strikes.length;
+             strikeIndex++) {
+            for (int dayIndex = 0; dayIndex < days.length; dayIndex++) {
+                for (int k = 0; k < 2; k++) {
+                    int futureFixings = (int) Math.floor(
+                            days[dayIndex] / 30.0);
+                    List<Date> fixingDates = new ArrayList<>();
+                    Date expiryDate = today.add(days[dayIndex]);
+
+                    for (int i = futureFixings - 1; i >= 0; i--) {
+                        fixingDates.add(expiryDate.substract(i * 30));
+                    }
+
+                    Exercise exercise = new EuropeanExercise(expiryDate);
+                    PlainVanillaPayoff payoff = new PlainVanillaPayoff(
+                            type, strikes[strikeIndex]);
+
+                    double runningAccumulator;
+                    int pastFixingsCount;
+                    if (k == 0) {
+                        runningAccumulator = 100.0;
+                        pastFixingsCount = 1;
+                    } else {
+                        runningAccumulator = 95.0 * 100.0 * 105.0;
+                        pastFixingsCount = 3;
+                    }
+
+                    DiscreteAveragingAsianOption option =
+                            new DiscreteAveragingAsianOption(averageType,
+                                    runningAccumulator, pastFixingsCount,
+                                    fixingDates, payoff, exercise);
+
+                    option.setPricingEngine(analyticEngine);
+                    double analyticPrice = option.NPV();
+
+                    option.setPricingEngine(mcEngine);
+                    double mcPrice = option.NPV();
+
+                    double tolerance = tol[strikeIndex][dayIndex][k];
+
+                    if (Math.abs(analyticPrice - mcPrice) > tolerance) {
+                        reportFailure("value", averageType,
+                                runningAccumulator, pastFixingsCount,
+                                new ArrayList<>(), payoff, exercise,
+                                spot.value(), qRate.value(), rRate.value(),
+                                today, Math.sqrt(v0), analyticPrice, mcPrice,
+                                tolerance);
+                    }
+                }
+            }
+        }
+    }
+
+    private void testDiscreteGeometricAveragePriceHeston(
+            PricingEngine engine, double[] tol) {
+        int[] days = {30, 91, 182, 365, 730, 1095,
+                30, 91, 182, 365, 730, 1095,
+                30, 91, 182, 365, 730, 1095};
+        double[] strikes = {90, 90, 90, 90, 90, 90,
+                100, 100, 100, 100, 100, 100,
+                110, 110, 110, 110, 110, 110};
+        double[] prices = {10.2732, 10.9554, 11.9916, 13.6950, 16.1773,
+                18.0146, 2.4389, 3.7881, 5.2132, 7.2243, 9.9948, 12.0639,
+                0.1012, 0.5949, 1.4444, 2.9479, 5.3531, 7.3315};
+
+        DayCounter dc = new Actual365Fixed();
+        Date today = Settings.instance.evaluationDate().Date();
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        SimpleQuote rRate = new SimpleQuote(0.05);
+
+        double v0 = 0.09;
+        Option.Type type = Option.Type.Call;
+        Average.Type averageType = Average.Type.Geometric;
+
+        double runningAccumulator = 1.0;
+        int pastFixings = 0;
+
+        for (int i = 0; i < strikes.length; i++) {
+            double strike = strikes[i];
+            int day = days[i];
+            double expected = prices[i];
+            double tolerance = tol[i];
+
+            int futureFixings = (int) Math.floor(day / 7.0);
+            List<Date> fixingDates = new ArrayList<>();
+            Date expiryDate = today.add(day);
+
+            for (int j = futureFixings - 1; j >= 0; j--) {
+                fixingDates.add(expiryDate.substract(j * 7));
+            }
+
+            Exercise exercise = new EuropeanExercise(expiryDate);
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(type, strike);
+
+            DiscreteAveragingAsianOption option =
+                    new DiscreteAveragingAsianOption(averageType,
+                            runningAccumulator, pastFixings, fixingDates,
+                            payoff, exercise);
+            option.setPricingEngine(engine);
+
+            double calculated = option.NPV();
+
+            if (Math.abs(calculated - expected) > tolerance) {
+                reportFailure("value", averageType, 1.0, 0,
+                        new ArrayList<>(), payoff, exercise, spot.value(),
+                        qRate.value(), rRate.value(), today, Math.sqrt(v0),
+                        expected, calculated, tolerance);
+            }
+        }
+    }
+
+    /**
      * QuantLib {@code testChoiAsianEngineVsMC}.
      */
     @Test
@@ -2749,6 +3316,13 @@ public class AsianOptionTest {
             boolean controlVariate,
             double result) {
     }
+
+    /** Heston discrete arithmetic average-price data set. */
+    private static final List<DiscreteAverageData> casesHestonArithmetic =
+            List.of(
+                    new DiscreteAverageData(Option.Type.Call, 120.0, 100.0,
+                            0.0, 0.05, 1.0 / 12.0, 11.0 / 12.0, 12, 0.1,
+                            false, 22.50));
 
     /** Data from "Asian Option", Levy, 1997 (arithmetic average-price). */
     private static final List<DiscreteAverageData> cases4 = List.of(
