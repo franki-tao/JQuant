@@ -51,6 +51,14 @@ public abstract class BlackVolTermStructure extends VolatilityTermStructure {
     //@{
     //! spot volatility
     // extrapolate = false
+    public double blackVol(final Date d, double strike) {
+        return blackVol(d, strike, false);
+    }
+
+    public double blackVol(double t, double strike) {
+        return blackVol(t, strike, false);
+    }
+
     public double blackVol(final Date d,
                            double strike,
                            boolean extrapolate) {
@@ -70,6 +78,14 @@ public abstract class BlackVolTermStructure extends VolatilityTermStructure {
     }
 
     //! spot variance
+    public double blackVariance(final Date d, double strike) {
+        return blackVariance(d, strike, false);
+    }
+
+    public double blackVariance(double t, double strike) {
+        return blackVariance(t, strike, false);
+    }
+
     public double blackVariance(final Date d,
                                 double strike,
                                 boolean extrapolate) {

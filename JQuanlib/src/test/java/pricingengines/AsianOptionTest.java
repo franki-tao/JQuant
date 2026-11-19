@@ -20,6 +20,7 @@ import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.asian.AnalyticContinuousGeometricAveragePriceAsianEngine;
 import jquant.pricingengines.asian.AnalyticDiscreteGeometricAveragePriceAsianEngine;
 import jquant.pricingengines.asian.AnalyticDiscreteGeometricAverageStrikeAsianEngine;
+import jquant.pricingengines.asian.ChoiAsianEngine;
 import jquant.pricingengines.asian.ContinuousArithmeticAsianLevyEngine;
 import jquant.pricingengines.asian.FdBlackScholesAsianEngine;
 import jquant.pricingengines.asian.MakeMCDiscreteArithmeticAPEngine;
@@ -1559,17 +1560,476 @@ public class AsianOptionTest {
     }
 
     /**
-     * Partial port of QuantLib {@code testMCDiscreteArithmeticAveragePrice}.
-     *
-     * <p>The Monte Carlo, finite-differences and Turnbull-Wakeman analytic
-     * approximation sections are covered. The official case also checks the
-     * Choi Asian engine; that engine is deliberately omitted in this step.
+     * QuantLib {@code testChoiAsianEngineVsMC}.
+     */
+    @Test
+    public void testChoiAsianEngineVsMC() {
+        DayCounter dc = new Actual365Fixed();
+        Date today = new Date(5, Month.JANUARY, 2025);
+        // Java-only adaptation: QuantLib's test does not assign the global
+        // evaluation date, but Instrument.isExpired() consults Settings. If
+        // Settings were the real current date this option would be expired,
+        // so the official today is installed here. Market data, samples,
+        // seed and tolerance are unchanged.
+        Settings.instance.evaluationDate().equal(today);
+        Date maturity = today.add(new Period(13, TimeUnit.MONTHS));
+
+        List<Date> fixingDates = new ArrayList<>();
+        fixingDates.add(today.add(new Period(1, TimeUnit.MONTHS)));
+        Date lastAllowed = maturity.substract(
+                new Period(1, TimeUnit.MONTHS));
+        while (TimeUtils.less(
+                fixingDates.get(fixingDates.size() - 1), lastAllowed)) {
+            fixingDates.add(fixingDates.get(fixingDates.size() - 1)
+                    .add(new Period(1, TimeUnit.MONTHS)));
+        }
+
+        int pastFixingsCount = 2;
+        double runningAccumulator = pastFixingsCount * 97.0;
+
+        PlainVanillaPayoff payoff =
+                new PlainVanillaPayoff(Option.Type.Call, 110.0);
+        Exercise exercise = new EuropeanExercise(maturity);
+
+        DiscreteAveragingAsianOption option =
+                new DiscreteAveragingAsianOption(
+                        Average.Type.Arithmetic, runningAccumulator,
+                        pastFixingsCount, fixingDates, payoff, exercise);
+
+        // market data is constant in time
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(new SimpleQuote(100.0), true),
+                new Handle<>(flatRate(today, 0.035, dc), true),
+                new Handle<>(flatRate(today, 0.1, dc), true),
+                new Handle<>(flatVol(today, 0.5, dc), true));
+
+        option.setPricingEngine(new MakeMCDiscreteArithmeticAPEngine(
+                process, RngType.LOW_DISCREPANCY)
+                .withSamples(32000).withSeed(43).build());
+        double expected = option.NPV();
+
+        option.setPricingEngine(new ChoiAsianEngine(process, 20, 2 << 12));
+        double calculated = option.NPV();
+        checkSmall("constant market Choi vs MC",
+                calculated - expected, 0.01);
+
+        // market data is not constant in time
+        process = new BlackScholesMertonProcess(
+                new Handle<>(new SimpleQuote(100.0), true),
+                new Handle<>(new ZeroCurve(
+                        List.of(today,
+                                today.add(new Period(3, TimeUnit.MONTHS)),
+                                today.add(new Period(13, TimeUnit.MONTHS))),
+                        List.of(0.1, 0.0, 0.15), dc), true),
+                new Handle<>(new ZeroCurve(
+                        List.of(today,
+                                today.add(new Period(3, TimeUnit.MONTHS)),
+                                today.add(new Period(13, TimeUnit.MONTHS))),
+                        List.of(0.1, 0.2, 0.05), dc), true),
+                new Handle<>(new BlackVarianceCurve(
+                        today,
+                        List.of(today.add(new Period(1, TimeUnit.DAYS)),
+                                today.add(new Period(100, TimeUnit.DAYS)),
+                                today.add(new Period(13, TimeUnit.MONTHS))),
+                        List.of(0.25, 0.5, 0.4), dc, true), true));
+
+        option.setPricingEngine(new MakeMCDiscreteArithmeticAPEngine(
+                process, RngType.LOW_DISCREPANCY)
+                .withSamples(32000).withSeed(43).build());
+        expected = option.NPV();
+
+        option.setPricingEngine(new ChoiAsianEngine(process, 20, 2 << 12));
+        calculated = option.NPV();
+        checkSmall("non-constant market Choi vs MC",
+                calculated - expected, 0.01);
+    }
+
+    /**
+     * QuantLib {@code testChoiAsianEngineSpecialCases}.
+     */
+    @Test
+    public void testChoiAsianEngineSpecialCases() {
+        DayCounter dc = new Actual365Fixed();
+        Date today = new Date(5, Month.JANUARY, 2025);
+        // Same Java-only adaptation as testChoiAsianEngineVsMC: install the
+        // official evaluation date so Instrument.isExpired() is meaningful.
+        Settings.instance.evaluationDate().equal(today);
+        Date maturity = today.add(new Period(1, TimeUnit.YEARS));
+
+        int pastFixingsCount = 2;
+        double runningAccumulator = pastFixingsCount * 97.0;
+
+        List<Date> fixingDates = new ArrayList<>();
+        fixingDates.add(today);
+        fixingDates.add(today.add(new Period(3, TimeUnit.WEEKS)));
+
+        YieldTermStructure rTS = flatRate(today, 0.2, dc);
+        YieldTermStructure qTS = flatRate(today, 0.075, dc);
+        BlackVolTermStructure vTS = flatVol(today, 0.5, dc);
+
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(new SimpleQuote(100.0), true),
+                new Handle<>(qTS, true), new Handle<>(rTS, true),
+                new Handle<>(vTS, true));
+
+        PricingEngine choiEngine = new ChoiAsianEngine(process);
+
+        PlainVanillaPayoff payoff =
+                new PlainVanillaPayoff(Option.Type.Put, 103.0);
+        Exercise exercise = new EuropeanExercise(maturity);
+
+        DiscreteAveragingAsianOption asianOption =
+                new DiscreteAveragingAsianOption(
+                        Average.Type.Arithmetic, runningAccumulator,
+                        pastFixingsCount, fixingDates, payoff, exercise);
+        asianOption.setPricingEngine(choiEngine);
+
+        double calculated = asianOption.NPV();
+        Date lastFixing = fixingDates.get(fixingDates.size() - 1);
+        double expected = BlackFormula.blackFormula(
+                payoff.optionType(),
+                payoff.strike() - (runningAccumulator + process.x0())
+                        / (pastFixingsCount + 2),
+                100.0 / (pastFixingsCount + 2)
+                        * qTS.discount(lastFixing)
+                        / rTS.discount(lastFixing),
+                Math.sqrt(vTS.blackVariance(lastFixing, payoff.strike())),
+                rTS.discount(maturity),
+                0.0);
+        double tol = 1000 * MathUtils.QL_EPSILON;
+        checkSmall("today folded into past", calculated - expected, tol);
+
+        fixingDates = new ArrayList<>();
+        fixingDates.add(today);
+
+        asianOption = new DiscreteAveragingAsianOption(
+                Average.Type.Arithmetic, runningAccumulator,
+                pastFixingsCount, fixingDates, payoff, exercise);
+        asianOption.setPricingEngine(choiEngine);
+        calculated = asianOption.NPV();
+        expected = rTS.discount(maturity) * payoff.value(
+                (runningAccumulator + process.x0())
+                        / (pastFixingsCount + 1));
+        checkSmall("only today fixing", calculated - expected, tol);
+
+        fixingDates = new ArrayList<>();
+        asianOption = new DiscreteAveragingAsianOption(
+                Average.Type.Arithmetic, runningAccumulator,
+                pastFixingsCount, fixingDates, payoff, exercise);
+        asianOption.setPricingEngine(choiEngine);
+        calculated = asianOption.NPV();
+        expected = rTS.discount(maturity) * payoff.value(
+                runningAccumulator / pastFixingsCount);
+        checkSmall("no remaining fixings", calculated - expected, tol);
+    }
+
+    /**
+     * QuantLib {@code testChoiAsianZeroVolatility}.
+     */
+    @Test
+    public void testChoiAsianZeroVolatility() {
+        Date today = Settings.instance.evaluationDate().Date();
+        DayCounter dc = new Actual365Fixed();
+        SimpleQuote spot = new SimpleQuote(100.0);
+        YieldTermStructure qTS = flatRate(today, 0.01, dc);
+        YieldTermStructure rTS = flatRate(today, 0.03, dc);
+        BlackVolTermStructure volTS = flatVol(today, 0.0, dc);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), new Handle<>(qTS, true),
+                new Handle<>(rTS, true), new Handle<>(volTS, true));
+        PricingEngine engine = new ChoiAsianEngine(process);
+        PricingEngine twEngine = new TurnbullWakemanAsianEngine(process);
+
+        List<Date> fixingDates = List.of(today.add(30), today.add(60));
+        Exercise exercise = new EuropeanExercise(today.add(60));
+        double discount = rTS.discount(exercise.lastDate());
+        double m = fixingDates.size();
+
+        double expectedAverage = 0.0;
+        for (Date fd : fixingDates) {
+            expectedAverage += spot.value() * qTS.discount(fd)
+                    / rTS.discount(fd) / m;
+        }
+
+        for (Option.Type type : List.of(Option.Type.Call, Option.Type.Put)) {
+            for (double strike : new double[]{
+                    90.0, expectedAverage, 110.0}) {
+                PlainVanillaPayoff payoff =
+                        new PlainVanillaPayoff(type, strike);
+                DiscreteAveragingAsianOption option =
+                        new DiscreteAveragingAsianOption(
+                                Average.Type.Arithmetic, 0.0, 0,
+                                fixingDates, payoff, exercise);
+                option.setPricingEngine(engine);
+                DiscreteAveragingAsianOption twOption =
+                        new DiscreteAveragingAsianOption(
+                                Average.Type.Arithmetic, 0.0, 0,
+                                fixingDates, payoff, exercise);
+                twOption.setPricingEngine(twEngine);
+
+                double expected = payoff.value(expectedAverage) * discount;
+                checkSmall("zero-vol Choi NPV " + type + " " + strike,
+                        option.NPV() - expected, 1.0e-12);
+                checkSmall("zero-vol TW NPV " + type + " " + strike,
+                        twOption.NPV() - expected, 1.0e-12);
+                double sensitivity = discount * expectedAverage
+                        / spot.value();
+                double expectedDelta;
+                if (type == Option.Type.Call) {
+                    expectedDelta = expectedAverage > strike
+                            ? sensitivity
+                            : (expectedAverage == strike
+                            ? 0.5 * sensitivity : 0.0);
+                } else {
+                    expectedDelta = expectedAverage < strike
+                            ? -sensitivity
+                            : (expectedAverage == strike
+                            ? -0.5 * sensitivity : 0.0);
+                }
+                checkSmall("zero-vol delta " + type + " " + strike,
+                        option.delta() - expectedDelta, 1.0e-12);
+                if (option.gamma() != 0.0) {
+                    fail("zero-vol gamma is not exactly zero: "
+                            + option.gamma());
+                }
+            }
+        }
+
+        // call-minus-put delta at the ATM state
+        PlainVanillaPayoff callPayoff = new PlainVanillaPayoff(
+                Option.Type.Call, expectedAverage);
+        PlainVanillaPayoff putPayoff = new PlainVanillaPayoff(
+                Option.Type.Put, expectedAverage);
+        DiscreteAveragingAsianOption callOption =
+                new DiscreteAveragingAsianOption(
+                        Average.Type.Arithmetic, 0.0, 0,
+                        fixingDates, callPayoff, exercise);
+        callOption.setPricingEngine(engine);
+        DiscreteAveragingAsianOption putOption =
+                new DiscreteAveragingAsianOption(
+                        Average.Type.Arithmetic, 0.0, 0,
+                        fixingDates, putPayoff, exercise);
+        putOption.setPricingEngine(engine);
+        double parityDelta = discount * expectedAverage / spot.value();
+        checkSmall("zero-vol ATM delta parity",
+                callOption.delta() - putOption.delta() - parityDelta,
+                1.0e-12);
+    }
+
+    /**
+     * QuantLib {@code testChoiAsianTodayFixingDelta}.
+     */
+    @Test
+    public void testChoiAsianTodayFixingDelta() {
+        Date today = Settings.instance.evaluationDate().Date();
+        DayCounter dc = new Actual365Fixed();
+        SimpleQuote spot = new SimpleQuote(100.0);
+        YieldTermStructure qTS = flatRate(today, 0.0, dc);
+        YieldTermStructure rTS = flatRate(today, 0.0, dc);
+        BlackVolTermStructure volTS = flatVol(today, 0.2, dc);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), new Handle<>(qTS, true),
+                new Handle<>(rTS, true), new Handle<>(volTS, true));
+        PricingEngine engine = new ChoiAsianEngine(process);
+
+        List<Date> fixingDates = List.of(today, today.add(30));
+        Exercise exercise = new EuropeanExercise(today.add(30));
+        PlainVanillaPayoff payoff =
+                new PlainVanillaPayoff(Option.Type.Call, 40.0);
+        DiscreteAveragingAsianOption option =
+                new DiscreteAveragingAsianOption(
+                        Average.Type.Arithmetic, 0.0, 0,
+                        fixingDates, payoff, exercise);
+        option.setPricingEngine(engine);
+
+        checkSmall("today fixing NPV",
+                option.NPV() - (spot.value() - 40.0), 1.0e-12);
+        checkSmall("today fixing delta", option.delta() - 1.0, 1.0e-12);
+    }
+
+    /**
+     * QuantLib {@code testChoiAsianMixedZeroVariance}.
+     */
+    @Test
+    public void testChoiAsianMixedZeroVariance() {
+        Date today = Settings.instance.evaluationDate().Date();
+        DayCounter dc = new Actual365Fixed();
+        SimpleQuote spot = new SimpleQuote(100.0);
+        YieldTermStructure qTS = flatRate(today, 0.01, dc);
+        YieldTermStructure rTS = flatRate(today, 0.03, dc);
+        BlackVarianceCurve volTS = new BlackVarianceCurve(
+                today, List.of(today.add(30), today.add(60)),
+                List.of(0.0, 0.25), dc, true);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), new Handle<>(qTS, true),
+                new Handle<>(rTS, true), new Handle<>(volTS, true));
+        PricingEngine engine = new ChoiAsianEngine(process);
+        PricingEngine twEngine = new TurnbullWakemanAsianEngine(process);
+
+        List<Date> fixingDates = List.of(today.add(30), today.add(60));
+        Exercise exercise = new EuropeanExercise(today.add(60));
+        double discount = rTS.discount(exercise.lastDate());
+        double m = fixingDates.size();
+
+        double forward1 = spot.value() * qTS.discount(fixingDates.get(0))
+                / rTS.discount(fixingDates.get(0));
+        double forward2 = spot.value() * qTS.discount(fixingDates.get(1))
+                / rTS.discount(fixingDates.get(1));
+        double variance2 = volTS.blackVariance(fixingDates.get(1), 100.0);
+
+        for (Option.Type type : List.of(Option.Type.Call, Option.Type.Put)) {
+            for (double strike : new double[]{45.0, 90.0, 110.0}) {
+                PlainVanillaPayoff payoff =
+                        new PlainVanillaPayoff(type, strike);
+                DiscreteAveragingAsianOption option =
+                        new DiscreteAveragingAsianOption(
+                                Average.Type.Arithmetic, 0.0, 0,
+                                fixingDates, payoff, exercise);
+                option.setPricingEngine(engine);
+                DiscreteAveragingAsianOption twOption =
+                        new DiscreteAveragingAsianOption(
+                                Average.Type.Arithmetic, 0.0, 0,
+                                fixingDates, payoff, exercise);
+                twOption.setPricingEngine(twEngine);
+
+                double residualStrike = strike - forward1 / m;
+                double expected = BlackFormula.blackFormula(
+                        type, Math.max(residualStrike, 0.0),
+                        forward2 / m, Math.sqrt(variance2), discount, 0.0);
+                if (residualStrike <= 0.0 && type == Option.Type.Call) {
+                    expected = discount
+                            * ((forward1 + forward2) / m - strike);
+                    double expectedDelta = discount
+                            * (forward1 + forward2) / m / spot.value();
+                    checkSmall("mixed zero variance delta "
+                                    + type + " " + strike,
+                            option.delta() - expectedDelta, 1.0e-12);
+                }
+                checkSmall("mixed zero variance NPV "
+                                + type + " " + strike,
+                        option.NPV() - expected, 1.0e-12);
+                checkSmall("mixed zero variance TW NPV "
+                                + type + " " + strike,
+                        twOption.NPV() - expected, 0.05);
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testChoiAsianMixedZeroVarianceMultipleStochastic}.
+     */
+    @Test
+    public void testChoiAsianMixedZeroVarianceMultipleStochastic() {
+        Date today = Settings.instance.evaluationDate().Date();
+        DayCounter dc = new Actual365Fixed();
+        SimpleQuote spot = new SimpleQuote(100.0);
+        YieldTermStructure qTS = flatRate(today, 0.01, dc);
+        YieldTermStructure rTS = flatRate(today, 0.03, dc);
+        BlackVarianceCurve volTS = new BlackVarianceCurve(
+                today,
+                List.of(today.add(30), today.add(60), today.add(90)),
+                List.of(0.0, 0.20, 0.25), dc, true);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), new Handle<>(qTS, true),
+                new Handle<>(rTS, true), new Handle<>(volTS, true));
+        PricingEngine engine = new ChoiAsianEngine(process);
+        PricingEngine twEngine = new TurnbullWakemanAsianEngine(process);
+
+        List<Date> fixingDates = List.of(
+                today.add(30), today.add(60), today.add(90));
+        Exercise exercise = new EuropeanExercise(today.add(90));
+
+        for (Option.Type type : List.of(Option.Type.Call, Option.Type.Put)) {
+            for (double strike : new double[]{45.0, 90.0, 110.0}) {
+                PlainVanillaPayoff payoff =
+                        new PlainVanillaPayoff(type, strike);
+                DiscreteAveragingAsianOption option =
+                        new DiscreteAveragingAsianOption(
+                                Average.Type.Arithmetic, 0.0, 0,
+                                fixingDates, payoff, exercise);
+                option.setPricingEngine(engine);
+                DiscreteAveragingAsianOption twOption =
+                        new DiscreteAveragingAsianOption(
+                                Average.Type.Arithmetic, 0.0, 0,
+                                fixingDates, payoff, exercise);
+                twOption.setPricingEngine(twEngine);
+
+                checkSmall("multiple stochastic Choi vs TW "
+                                + type + " " + strike,
+                        option.NPV() - twOption.NPV(), 0.05);
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testChoiAsianNegativeEffectiveStrike}.
+     */
+    @Test
+    public void testChoiAsianNegativeEffectiveStrike() {
+        Date today = Settings.instance.evaluationDate().Date();
+        DayCounter dc = new Actual365Fixed();
+        SimpleQuote spot = new SimpleQuote(100.0);
+        YieldTermStructure qTS = flatRate(today, 0.01, dc);
+        YieldTermStructure rTS = flatRate(today, 0.03, dc);
+        BlackVolTermStructure volTS = flatVol(today, 0.25, dc);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), new Handle<>(qTS, true),
+                new Handle<>(rTS, true), new Handle<>(volTS, true));
+        PricingEngine engine = new ChoiAsianEngine(process);
+        PricingEngine twEngine = new TurnbullWakemanAsianEngine(process);
+
+        List<Date> fixingDates = List.of(today.add(30), today.add(60));
+        Exercise exercise = new EuropeanExercise(today.add(60));
+        double discount = rTS.discount(exercise.lastDate());
+        double m = 1 + fixingDates.size();
+
+        double expectedAverage = 200.0 / m;
+        for (Date fd : fixingDates) {
+            expectedAverage += spot.value() * qTS.discount(fd)
+                    / rTS.discount(fd) / m;
+        }
+
+        for (Option.Type type : List.of(Option.Type.Call, Option.Type.Put)) {
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(type, 50.0);
+            DiscreteAveragingAsianOption option =
+                    new DiscreteAveragingAsianOption(
+                            Average.Type.Arithmetic, 200.0, 1,
+                            fixingDates, payoff, exercise);
+            option.setPricingEngine(engine);
+            DiscreteAveragingAsianOption twOption =
+                    new DiscreteAveragingAsianOption(
+                            Average.Type.Arithmetic, 200.0, 1,
+                            fixingDates, payoff, exercise);
+            twOption.setPricingEngine(twEngine);
+
+            double expected = payoff.value(expectedAverage) * discount;
+            checkSmall("negative effective strike Choi NPV " + type,
+                    option.NPV() - expected, 1.0e-12);
+            checkSmall("negative effective strike TW NPV " + type,
+                    twOption.NPV() - expected, 1.0e-12);
+            double expectedDelta = 0.0;
+            if (type == Option.Type.Call) {
+                expectedDelta = discount
+                        * (expectedAverage - 200.0 / m) / spot.value();
+            }
+            checkSmall("negative effective strike delta " + type,
+                    option.delta() - expectedDelta, 1.0e-12);
+            if (option.gamma() != 0.0) {
+                fail("negative effective strike gamma is not exactly zero: "
+                        + option.gamma());
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testMCDiscreteArithmeticAveragePrice}.
      *
      * <p>Data from "Asian Option", Levy, 1997, in "Exotic Options: The
      * State of the Art", edited by Clewlow, Strickland.
      */
     @Test
-    public void testMCDiscreteArithmeticAveragePricePartial() {
+    public void testMCDiscreteArithmeticAveragePrice() {
         DayCounter dc = new Actual360();
         Date today = Settings.instance.evaluationDate().Date();
 
@@ -1589,6 +2049,8 @@ public class AsianOptionTest {
                 new FdBlackScholesAsianEngine(stochProcess, 100, 100, 100);
         PricingEngine twEngine =
                 new TurnbullWakemanAsianEngine(stochProcess);
+        PricingEngine choiEngine =
+                new ChoiAsianEngine(stochProcess, 10, 2 << 12);
 
         Average.Type averageType = Average.Type.Arithmetic;
         double runningSum = 0.0;
@@ -1661,19 +2123,30 @@ public class AsianOptionTest {
                         rRate.value(), today, vol.value(), expected,
                         calculated, tolerance));
             }
+
+            // Official test reuses the current `tolerance` after the TW
+            // assignment (3.0e-2); it is not reset to 2.0e-2.
+            if (l.fixings < 100) {
+                option.setPricingEngine(choiEngine);
+                calculated = option.NPV();
+                if (Math.abs(calculated - expected) > tolerance) {
+                    fail("The consistency check of the Choi Asian engine "
+                            + "failed\n"
+                            + failureMessage("value", averageType,
+                            runningSum, pastFixings, List.of(fixingDates),
+                            payoff, exercise, spot.value(), qRate.value(),
+                            rRate.value(), today, vol.value(), expected,
+                            calculated, tolerance));
+                }
+            }
         }
     }
 
     /**
-     * Partial port of QuantLib {@code testAllFixingsInThePast}.
-     *
-     * <p>Only the three Monte Carlo engines (arithmetic average-price,
-     * arithmetic average-strike and geometric average-price) are covered.
-     * The official case also checks that the Choi Asian engine throws a
-     * plain {@code Error}; that engine is deliberately omitted in this step.
+     * QuantLib {@code testAllFixingsInThePast}.
      */
     @Test
-    public void testAllFixingsInThePastPartial() {
+    public void testAllFixingsInThePast() {
         DayCounter dc = new Actual360();
         Date today = Settings.instance.evaluationDate().Date();
 
@@ -1727,6 +2200,12 @@ public class AsianOptionTest {
                 stochProcess, RngType.LOW_DISCREPANCY)
                 .withSamples(2047).build());
 
+        DiscreteAveragingAsianOption option4 =
+                new DiscreteAveragingAsianOption(
+                        Average.Type.Arithmetic, runningSum, pastFixings,
+                        fixingDates, payoff, exercise);
+        option4.setPricingEngine(new ChoiAsianEngine(stochProcess));
+
         List<DiscreteAveragingAsianOption> options =
                 List.of(option1, option2, option3);
         for (DiscreteAveragingAsianOption option : options) {
@@ -1739,6 +2218,16 @@ public class AsianOptionTest {
             if (!raised) {
                 fail("exception expected");
             }
+        }
+
+        boolean choiRaised = false;
+        try {
+            option4.NPV();
+        } catch (IllegalArgumentException e) {
+            choiRaised = true;
+        }
+        if (!choiRaised) {
+            fail("exception expected");
         }
 
         // also check with the evaluation date on last fixing
@@ -1755,6 +2244,16 @@ public class AsianOptionTest {
             if (!raised) {
                 fail("exception expected");
             }
+        }
+
+        choiRaised = false;
+        try {
+            option4.NPV();
+        } catch (IllegalArgumentException e) {
+            choiRaised = true;
+        }
+        if (!choiRaised) {
+            fail("exception expected");
         }
     }
 
