@@ -9,6 +9,7 @@ import jquant.Exercise;
 import jquant.Handle;
 import jquant.Option;
 import jquant.PricingEngine;
+import jquant.Quote;
 import jquant.SavedSettings;
 import jquant.Settings;
 import jquant.indexes.IndexManager;
@@ -22,6 +23,7 @@ import jquant.pricingengines.asian.AnalyticDiscreteGeometricAveragePriceAsianEng
 import jquant.pricingengines.asian.AnalyticDiscreteGeometricAverageStrikeAsianEngine;
 import jquant.pricingengines.asian.ChoiAsianEngine;
 import jquant.pricingengines.asian.ContinuousArithmeticAsianLevyEngine;
+import jquant.pricingengines.asian.ContinuousArithmeticAsianVecerEngine;
 import jquant.pricingengines.asian.FdBlackScholesAsianEngine;
 import jquant.pricingengines.asian.MakeMCDiscreteArithmeticAPEngine;
 import jquant.pricingengines.asian.MakeMCDiscreteArithmeticASEngine;
@@ -1560,6 +1562,58 @@ public class AsianOptionTest {
     }
 
     /**
+     * QuantLib {@code testVecerEngine}.
+     */
+    @Test
+    public void testVecerEngine() {
+        Date today = Settings.instance.evaluationDate().Date();
+        DayCounter dayCounter = new Actual360();
+
+        Option.Type type = Option.Type.Call;
+        Handle<YieldTermStructure> q = new Handle<>(
+                flatRate(today, 0.0, dayCounter), true);
+
+        int timeSteps = 200;
+        int assetSteps = 200;
+
+        for (VecerData i : casesVecer) {
+            Handle<Quote> u = new Handle<>(new SimpleQuote(i.spot()), true);
+            Handle<YieldTermStructure> r = new Handle<>(
+                    flatRate(today, i.riskFreeRate(), dayCounter), true);
+            Handle<BlackVolTermStructure> sigma = new Handle<>(
+                    flatVol(today, i.volatility(), dayCounter), true);
+            BlackScholesMertonProcess process =
+                    new BlackScholesMertonProcess(u, q, r, sigma);
+
+            Date maturity = today.add(i.length() * 360);
+            Exercise exercise = new EuropeanExercise(maturity);
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(type, i.strike());
+            Handle<Quote> average =
+                    new Handle<>(new SimpleQuote(0.0), true);
+
+            ContinuousAveragingAsianOption option =
+                    new ContinuousAveragingAsianOption(
+                            Average.Type.Arithmetic, payoff, exercise);
+            option.setPricingEngine(
+                    new ContinuousArithmeticAsianVecerEngine(
+                            process, average, today, timeSteps, assetSteps,
+                            -1.0, 1.0));
+
+            double calculated = option.NPV();
+            double error = Math.abs(calculated - i.result());
+            if (error > i.tolerance()) {
+                fail("Failed to reproduce expected NPV"
+                        + "\n    calculated: " + calculated
+                        + "\n    expected:   " + i.result()
+                        + "\n    expected:   " + i.result()
+                        + "\n    error:      " + error
+                        + "\n    tolerance:  " + i.tolerance());
+            }
+        }
+    }
+
+    /**
      * QuantLib {@code testChoiAsianEngineVsMC}.
      */
     @Test
@@ -2601,6 +2655,27 @@ public class AsianOptionTest {
                             100.0, 120.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
                             26, 0.2, "down", 19.7609)
             );
+
+    /** QuantLib {@code VecerData}. */
+    private record VecerData(
+            double spot,
+            double riskFreeRate,
+            double volatility,
+            double strike,
+            int length,
+            double result,
+            double tolerance) {
+    }
+
+    private static final List<VecerData> casesVecer = List.of(
+            new VecerData(1.9, 0.05, 0.5, 2.0, 1, 0.193174, 1.0e-5),
+            new VecerData(2.0, 0.05, 0.5, 2.0, 1, 0.246416, 1.0e-5),
+            new VecerData(2.1, 0.05, 0.5, 2.0, 1, 0.306220, 1.0e-4),
+            new VecerData(2.0, 0.02, 0.1, 2.0, 1, 0.055986, 2.0e-4),
+            new VecerData(2.0, 0.18, 0.3, 2.0, 1, 0.218388, 1.0e-4),
+            new VecerData(2.0, 0.0125, 0.25, 2.0, 2, 0.172269, 1.0e-4),
+            new VecerData(2.0, 0.05, 0.5, 2.0, 2, 0.350095, 2.0e-4)
+    );
 
     /** QuantLib {@code ContinuousAverageData} for the Levy test. */
     private record ContinuousAverageData(

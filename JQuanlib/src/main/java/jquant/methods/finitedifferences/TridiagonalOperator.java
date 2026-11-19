@@ -236,5 +236,39 @@ public class TridiagonalOperator {
         from.timeSetter_ =tp1;
     }
 
-    //todo 运算符重载暂未实现
+    // Time constant algebra, as in the official inline operators.
+    public TridiagonalOperator add(TridiagonalOperator other) {
+        Array low = lowerDiagonal_.add(other.lowerDiagonal_);
+        Array mid = diagonal_.add(other.diagonal_);
+        Array high = upperDiagonal_.add(other.upperDiagonal_);
+        return new TridiagonalOperator(low, mid, high);
+    }
+
+    public TridiagonalOperator subtract(TridiagonalOperator other) {
+        Array low = lowerDiagonal_.subtract(other.lowerDiagonal_);
+        Array mid = diagonal_.subtract(other.diagonal_);
+        Array high = upperDiagonal_.subtract(other.upperDiagonal_);
+        return new TridiagonalOperator(low, mid, high);
+    }
+
+    public TridiagonalOperator negate() {
+        Array low = lowerDiagonal_.mutiply(-1.0);
+        Array mid = diagonal_.mutiply(-1.0);
+        Array high = upperDiagonal_.mutiply(-1.0);
+        return new TridiagonalOperator(low, mid, high);
+    }
+
+    public TridiagonalOperator multiply(double a) {
+        Array low = lowerDiagonal_.mutiply(a);
+        Array mid = diagonal_.mutiply(a);
+        Array high = upperDiagonal_.mutiply(a);
+        return new TridiagonalOperator(low, mid, high);
+    }
+
+    public TridiagonalOperator divide(double a) {
+        Array low = lowerDiagonal_.div(a);
+        Array mid = diagonal_.div(a);
+        Array high = upperDiagonal_.div(a);
+        return new TridiagonalOperator(low, mid, high);
+    }
 }
