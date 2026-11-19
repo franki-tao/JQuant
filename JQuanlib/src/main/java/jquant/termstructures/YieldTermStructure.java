@@ -126,6 +126,14 @@ public abstract class YieldTermStructure extends TermStructure {
     /*! The resulting interest rate has the required daycounting
         rule.
     */
+    // extrapolate = false
+    public InterestRate zeroRate(final Date d,
+                                 final DayCounter dayCounter,
+                                 Compounding comp,
+                                 Frequency freq) {
+        return zeroRate(d, dayCounter, comp, freq, false);
+    }
+
     public InterestRate zeroRate(final Date d,
                                  final DayCounter dayCounter,
                                  Compounding comp,
