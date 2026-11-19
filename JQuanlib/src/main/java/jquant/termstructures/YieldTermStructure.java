@@ -79,8 +79,16 @@ public abstract class YieldTermStructure extends TermStructure {
     */
     //@{
     // extrapolate = false
+    public double discount(final Date d) {
+        return discount(d, false);
+    }
+
     public double discount(final Date d, boolean extrapolate) {
         return discount(timeFromReference(d), extrapolate);
+    }
+
+    public double discount(double t) {
+        return discount(t, false);
     }
 
     /*! The same day-counting rule used by the term structure

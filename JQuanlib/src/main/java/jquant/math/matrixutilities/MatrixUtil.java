@@ -219,7 +219,7 @@ public class MatrixUtil {
               CovarianceDecomposition
     */
     // default tolerance = 1.0e-12
-    Matrix getCovariance(List<Double> stdDev,
+    public static Matrix getCovariance(List<Double> stdDev,
                          Matrix corr,
                          double tolerance) {
         int size = stdDev.size();

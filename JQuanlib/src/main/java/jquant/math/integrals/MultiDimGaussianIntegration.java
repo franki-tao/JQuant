@@ -55,6 +55,10 @@ public class MultiDimGaussianIntegration {
         }
     }
 
+    public Array weights() {
+        return weights_;
+    }
+
     public double value(SharePtr<Double, Array> f) {
         double s = 0.0;
         final int n = x_.size();
