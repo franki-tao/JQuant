@@ -5,6 +5,8 @@ import jquant.TimeGrid;
 import jquant.math.MathUtils;
 import jquant.math.statistics.IncrementalStatistics;
 import jquant.methods.montecarlo.MonteCarloModel;
+import jquant.methods.montecarlo.MultiPathGenerator;
+import jquant.methods.montecarlo.MultiPathPricer;
 import jquant.methods.montecarlo.PathGenerator;
 import jquant.methods.montecarlo.PathPricer;
 
@@ -21,13 +23,29 @@ public abstract class McSimulation {
         controlVariate_ = controlVariate;
     }
 
-    protected abstract PathPricer pathPricer();
+    protected PathPricer pathPricer() {
+        return null;
+    }
 
-    protected abstract PathGenerator pathGenerator();
+    protected PathGenerator pathGenerator() {
+        return null;
+    }
+
+    protected MultiPathPricer multiPathPricer() {
+        return null;
+    }
+
+    protected MultiPathGenerator multiPathGenerator() {
+        return null;
+    }
 
     protected abstract TimeGrid timeGrid();
 
     protected PathPricer controlPathPricer() {
+        return null;
+    }
+
+    protected MultiPathPricer controlMultiPathPricer() {
         return null;
     }
 
@@ -124,7 +142,28 @@ public abstract class McSimulation {
                         || requiredSamples != MathUtils.NULL_SIZE,
                 "neither tolerance nor number of samples set");
 
-        if (controlVariate_) {
+        final MultiPathPricer multiPP = multiPathPricer();
+
+        if (multiPP != null) {
+            if (controlVariate_) {
+                double controlVariateValue = controlVariateValue();
+                QL_REQUIRE(controlVariateValue != MathUtils.NULL_REAL,
+                        "engine does not provide control-variation price");
+
+                MultiPathPricer controlPP = controlMultiPathPricer();
+                QL_REQUIRE(controlPP != null,
+                        "engine does not provide control-variation path pricer");
+
+                mcModel_ = new MonteCarloModel(multiPathGenerator(),
+                        multiPP, new IncrementalStatistics(),
+                        antitheticVariate_, controlPP, controlVariateValue,
+                        null);
+            } else {
+                mcModel_ = new MonteCarloModel(multiPathGenerator(),
+                        multiPP, new IncrementalStatistics(),
+                        antitheticVariate_);
+            }
+        } else if (controlVariate_) {
             double controlVariateValue = controlVariateValue();
             QL_REQUIRE(controlVariateValue != MathUtils.NULL_REAL,
                     "engine does not provide control-variation price");
