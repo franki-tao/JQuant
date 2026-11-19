@@ -13,27 +13,32 @@ import jquant.SavedSettings;
 import jquant.Settings;
 import jquant.indexes.IndexManager;
 import jquant.math.MathUtils;
+import jquant.math.integrals.GaussLegendreIntegration;
 import jquant.math.randomnumbers.RngType;
 import jquant.pricingengines.BlackFormula;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.asian.AnalyticContinuousGeometricAveragePriceAsianEngine;
 import jquant.pricingengines.asian.AnalyticDiscreteGeometricAveragePriceAsianEngine;
 import jquant.pricingengines.asian.AnalyticDiscreteGeometricAverageStrikeAsianEngine;
+import jquant.pricingengines.asian.ContinuousArithmeticAsianLevyEngine;
 import jquant.pricingengines.asian.FdBlackScholesAsianEngine;
 import jquant.pricingengines.asian.MakeMCDiscreteArithmeticAPEngine;
 import jquant.pricingengines.asian.MakeMCDiscreteArithmeticASEngine;
 import jquant.pricingengines.asian.MakeMCDiscreteGeometricAPEngine;
 import jquant.pricingengines.asian.PastFixingsOnly;
+import jquant.pricingengines.asian.TurnbullWakemanAsianEngine;
 import jquant.processes.BlackScholesMertonProcess;
 import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.equityfx.BlackConstantVol;
+import jquant.termstructures.volatility.equityfx.BlackVarianceCurve;
 import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
 import jquant.termstructures.yield.FlatForward;
 import jquant.termstructures.yield.ZeroCurve;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.Frequency;
+import jquant.time.Month;
 import jquant.time.Period;
 import jquant.time.TimeUnit;
 import jquant.time.TimeUtils;
@@ -1033,12 +1038,532 @@ public class AsianOptionTest {
     }
 
     /**
+     * QuantLib {@code testTurnbullWakemanAsianEngine}.
+     *
+     * <p>Data from Haug, "Option Pricing Formulas", Table 4-28, p.201,
+     * with flat, upward- and downward-sloping volatility term structures.
+     */
+    @Test
+    public void testTurnbullWakemanAsianEngine() {
+        DayCounter dc = new Actual360();
+        Date today = Settings.instance.evaluationDate().Date();
+
+        for (DiscreteAverageDataTermStructure l : casesTW) {
+            double dt = (l.expiry - l.first) / (l.fixings - 1);
+            List<Date> fixingDates = new ArrayList<>(l.fixings);
+            fixingDates.add(today.add(timeToDays(l.first)));
+            for (int i = 1; i < l.fixings; i++) {
+                fixingDates.add(today.add(timeToDays(i * dt + l.first)));
+            }
+
+            SimpleQuote spot = new SimpleQuote(l.underlying);
+            YieldTermStructure qTS =
+                    flatRate(today, l.b + l.riskFreeRate, dc);
+            YieldTermStructure rTS = flatRate(today, l.riskFreeRate, dc);
+            BlackVolTermStructure volTS;
+            double volSlope = 0.005;
+            if ("flat".equals(l.slope)) {
+                volTS = flatVol(today, l.volatility, dc);
+            } else {
+                List<Double> volatilities = new ArrayList<>(l.fixings);
+                for (int i = 0; i < l.fixings; ++i) {
+                    if ("up".equals(l.slope)) {
+                        volatilities.add(l.volatility
+                                - (l.fixings - 1) * volSlope + i * volSlope);
+                    } else if ("down".equals(l.slope)) {
+                        volatilities.add(l.volatility
+                                + (l.fixings - 1) * volSlope - i * volSlope);
+                    } else {
+                        fail("unexpected slope type in engine test case");
+                    }
+                }
+                volTS = new BlackVarianceCurve(today, fixingDates,
+                        volatilities, dc, "up".equals(l.slope));
+            }
+
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(l.type, l.strike);
+            Date maturity = today.add(timeToDays(l.expiry));
+            Exercise exercise = new EuropeanExercise(maturity);
+
+            BlackScholesMertonProcess stochProcess =
+                    new BlackScholesMertonProcess(
+                            new Handle<>(spot, true), new Handle<>(qTS, true),
+                            new Handle<>(rTS, true), new Handle<>(volTS, true));
+
+            PricingEngine engine = new TurnbullWakemanAsianEngine(stochProcess);
+
+            DiscreteAveragingAsianOption option =
+                    new DiscreteAveragingAsianOption(
+                            Average.Type.Arithmetic, 0.0, 0, fixingDates,
+                            payoff, exercise);
+            option.setPricingEngine(engine);
+
+            double calculated = option.NPV();
+            double expected = l.result;
+            double tolerance = 2.5e-3;
+            double error = Math.abs(expected - calculated);
+            if (error > tolerance) {
+                fail("Failed to reproduce expected NPV:"
+                        + "\n    type:            " + l.type
+                        + "\n    spot:            " + l.underlying
+                        + "\n    strike:          " + l.strike
+                        + "\n    dividend yield:  "
+                        + (l.b + l.riskFreeRate)
+                        + "\n    risk-free rate:  " + l.riskFreeRate
+                        + "\n    volatility:      " + l.volatility
+                        + "\n    slope:           " + l.slope
+                        + "\n    reference date:  " + today
+                        + "\n    expiry:          " + l.expiry
+                        + "\n    expected value:  " + expected
+                        + "\n    calculated:      " + calculated
+                        + "\n    error:           " + error);
+            }
+
+            // Compare greeks to numerical greeks
+            double dS = 0.001;
+            double delta = option.delta();
+            double gamma = option.gamma();
+
+            SimpleQuote spotUp = new SimpleQuote(l.underlying + dS);
+            SimpleQuote spotDown = new SimpleQuote(l.underlying - dS);
+
+            BlackScholesMertonProcess stochProcessUp =
+                    new BlackScholesMertonProcess(
+                            new Handle<>(spotUp, true), new Handle<>(qTS, true),
+                            new Handle<>(rTS, true), new Handle<>(volTS, true));
+            BlackScholesMertonProcess stochProcessDown =
+                    new BlackScholesMertonProcess(
+                            new Handle<>(spotDown, true), new Handle<>(qTS, true),
+                            new Handle<>(rTS, true), new Handle<>(volTS, true));
+
+            option.setPricingEngine(
+                    new TurnbullWakemanAsianEngine(stochProcessUp));
+            double calculatedUp = option.NPV();
+
+            option.setPricingEngine(
+                    new TurnbullWakemanAsianEngine(stochProcessDown));
+            double calculatedDown = option.NPV();
+
+            double deltaBump = (calculatedUp - calculatedDown) / (2.0 * dS);
+            double gammaBump = (calculatedUp + calculatedDown
+                    - 2.0 * calculated) / (dS * dS);
+
+            tolerance = 1.0e-6;
+            double deltaError = Math.abs(deltaBump - delta);
+            if (deltaError > tolerance) {
+                fail("Analytical delta failed to match bump delta:"
+                        + "\n    type:            " + l.type
+                        + "\n    spot:            " + l.underlying
+                        + "\n    strike:          " + l.strike
+                        + "\n    dividend yield:  "
+                        + (l.b + l.riskFreeRate)
+                        + "\n    risk-free rate:  " + l.riskFreeRate
+                        + "\n    volatility:      " + l.volatility
+                        + "\n    slope:           " + l.slope
+                        + "\n    reference date:  " + today
+                        + "\n    expiry:          " + l.expiry
+                        + "\n    analytic delta:  " + delta
+                        + "\n    bump delta:      " + deltaBump
+                        + "\n    error:           " + deltaError);
+            }
+
+            double gammaError = Math.abs(gammaBump - gamma);
+            if (gammaError > tolerance) {
+                fail("Analytical gamma failed to match bump gamma:"
+                        + "\n    type:            " + l.type
+                        + "\n    spot:            " + l.underlying
+                        + "\n    strike:          " + l.strike
+                        + "\n    dividend yield:  "
+                        + (l.b + l.riskFreeRate)
+                        + "\n    risk-free rate:  " + l.riskFreeRate
+                        + "\n    volatility:      " + l.volatility
+                        + "\n    slope:           " + l.slope
+                        + "\n    reference date:  " + today
+                        + "\n    expiry:          " + l.expiry
+                        + "\n    analytic gamma:  " + gamma
+                        + "\n    bump gamma:      " + gammaBump
+                        + "\n    error:           " + gammaError);
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testTurnbullWakemanAllFixingsInThePast}.
+     */
+    @Test
+    public void testTurnbullWakemanAllFixingsInThePast() {
+        Date today = Settings.instance.evaluationDate().Date();
+        DayCounter dc = new Actual365Fixed();
+        SimpleQuote spot = new SimpleQuote(100.0);
+        YieldTermStructure qTS = flatRate(today, 0.01, dc);
+        YieldTermStructure rTS = flatRate(today, 0.03, dc);
+        BlackVolTermStructure volTS = flatVol(today, 0.25, dc);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), new Handle<>(qTS, true),
+                new Handle<>(rTS, true), new Handle<>(volTS, true));
+        PricingEngine engine = new TurnbullWakemanAsianEngine(process);
+
+        List<Date> fixingDates = new ArrayList<>();
+        for (int i = 12; i > 0; --i) {
+            fixingDates.add(today.substract(30 * i));
+        }
+        List<Double> pastFixings = new ArrayList<>();
+        for (int i = 0; i < 12; ++i) {
+            pastFixings.add(100.0);
+        }
+        Exercise exercise = new EuropeanExercise(today.add(14));
+
+        for (Option.Type type : List.of(Option.Type.Call, Option.Type.Put)) {
+            for (double strike : new double[]{95.0, 100.0, 105.0}) {
+                PlainVanillaPayoff payoff =
+                        new PlainVanillaPayoff(type, strike);
+                DiscreteAveragingAsianOption option =
+                        new DiscreteAveragingAsianOption(
+                                Average.Type.Arithmetic, fixingDates, payoff,
+                                exercise, pastFixings);
+                option.setPricingEngine(engine);
+
+                // The fixed average is 100; only discounting to the payment
+                // date remains.
+                double expected = payoff.value(100.0)
+                        * rTS.discount(exercise.lastDate(), false);
+                double npvError = option.NPV() - expected;
+                if (!(Math.abs(npvError) <= 1.0e-12)) {
+                    fail("NPV failed: |" + npvError + "| > " + 1.0e-12);
+                }
+                if (option.delta() != 0.0) {
+                    fail("delta should be exactly zero, got " + option.delta());
+                }
+                if (option.gamma() != 0.0) {
+                    fail("gamma should be exactly zero, got " + option.gamma());
+                }
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testTurnbullWakemanLastFixingToday}.
+     */
+    @Test
+    public void testTurnbullWakemanLastFixingToday() {
+        Date today = Settings.instance.evaluationDate().Date();
+        DayCounter dc = new Actual365Fixed();
+        SimpleQuote spot = new SimpleQuote(100.0);
+        YieldTermStructure qTS = flatRate(today, 0.01, dc);
+        YieldTermStructure rTS = flatRate(today, 0.03, dc);
+        BlackVolTermStructure volTS = flatVol(today, 0.25, dc);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), new Handle<>(qTS, true),
+                new Handle<>(rTS, true), new Handle<>(volTS, true));
+        PricingEngine engine = new TurnbullWakemanAsianEngine(process);
+
+        List<Date> fixingDates = new ArrayList<>();
+        for (int i = 5; i > 0; --i) {
+            fixingDates.add(today.substract(30 * i));
+        }
+        fixingDates.add(today);
+        List<Double> pastFixings = new ArrayList<>();
+        for (int i = 0; i < 5; ++i) {
+            pastFixings.add(100.0);
+        }
+        Exercise exercise = new EuropeanExercise(today.add(2));
+
+        for (Option.Type type : List.of(Option.Type.Call, Option.Type.Put)) {
+            for (double strike : new double[]{95.0, 105.0}) {
+                PlainVanillaPayoff payoff =
+                        new PlainVanillaPayoff(type, strike);
+                DiscreteAveragingAsianOption option =
+                        new DiscreteAveragingAsianOption(
+                                Average.Type.Arithmetic, fixingDates, payoff,
+                                exercise, pastFixings);
+                option.setPricingEngine(engine);
+
+                // Today's fixing equals spot, so the average is
+                // (5 * 100 + 100) / 6.
+                double discount = rTS.discount(exercise.lastDate(), false);
+                double expected = payoff.value(100.0) * discount;
+                int typeSign = type == Option.Type.Call ? 1 : -1;
+                double expectedDelta = expected > 0.0
+                        ? typeSign * discount / 6.0 : 0.0;
+                double npvError = option.NPV() - expected;
+                if (!(Math.abs(npvError) <= 1.0e-12)) {
+                    fail("NPV failed: |" + npvError + "| > " + 1.0e-12);
+                }
+                double deltaError = option.delta() - expectedDelta;
+                if (!(Math.abs(deltaError) <= 1.0e-12)) {
+                    fail("delta failed: |" + deltaError + "| > " + 1.0e-12);
+                }
+                if (option.gamma() != 0.0) {
+                    fail("gamma should be exactly zero, got " + option.gamma());
+                }
+                if (option.result("sigma", Double.class) != 0.0) {
+                    fail("sigma should be exactly zero, got "
+                            + option.result("sigma", Double.class));
+                }
+                @SuppressWarnings("unchecked")
+                List<Double> spotVols = option.result("spotVols", List.class);
+                if (spotVols.size() != 1) {
+                    fail("expected one spot volatility, got "
+                            + spotVols.size());
+                }
+                double spotVolError = spotVols.get(0) - 0.25;
+                if (!(Math.abs(spotVolError) <= 1.0e-12)) {
+                    fail("spot volatility failed: |" + spotVolError
+                            + "| > " + 1.0e-12);
+                }
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testLevyEngine}.
+     *
+     * <p>Data from Haug, "Option Pricing Formulas", p.99-100.
+     */
+    @Test
+    public void testLevyEngine() {
+        DayCounter dc = new Actual360();
+        Date today = Settings.instance.evaluationDate().Date();
+
+        for (ContinuousAverageData l : casesLevy) {
+            SimpleQuote spot = new SimpleQuote(l.spot);
+            YieldTermStructure qTS =
+                    flatRate(today, l.dividendYield, dc);
+            YieldTermStructure rTS =
+                    flatRate(today, l.riskFreeRate, dc);
+            BlackVolTermStructure volTS = flatVol(today, l.volatility, dc);
+
+            SimpleQuote average = new SimpleQuote(l.currentAverage);
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(l.type, l.strike);
+
+            Date startDate = today.substract(l.elapsed);
+            Date maturity = startDate.add(l.length);
+            Exercise exercise = new EuropeanExercise(maturity);
+
+            BlackScholesMertonProcess stochProcess =
+                    new BlackScholesMertonProcess(
+                            new Handle<>(spot, true), new Handle<>(qTS, true),
+                            new Handle<>(rTS, true), new Handle<>(volTS, true));
+
+            PricingEngine engine = new ContinuousArithmeticAsianLevyEngine(
+                    stochProcess, new Handle<>(average, true));
+
+            ContinuousAveragingAsianOption option =
+                    new ContinuousAveragingAsianOption(
+                            Average.Type.Arithmetic, startDate, payoff,
+                            exercise);
+            option.setPricingEngine(engine);
+
+            double calculated = option.NPV();
+            double expected = l.result;
+            double tolerance = 1.0e-4;
+            double error = Math.abs(expected - calculated);
+            if (error > tolerance) {
+                fail("Asian option with Levy engine:"
+                        + "\n    spot:            " + l.spot
+                        + "\n    current average: " + l.currentAverage
+                        + "\n    strike:          " + l.strike
+                        + "\n    dividend yield:  " + l.dividendYield
+                        + "\n    risk-free rate:  " + l.riskFreeRate
+                        + "\n    volatility:      " + l.volatility
+                        + "\n    reference date:  " + today
+                        + "\n    length:          " + l.length
+                        + "\n    elapsed:         " + l.elapsed
+                        + "\n    expected value:  " + expected
+                        + "\n    calculated:      " + calculated
+                        + "\n    error:           " + error);
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testLevyZeroVolatility}.
+     */
+    @Test
+    public void testLevyZeroVolatility() {
+        Date today = new Date(20, Month.OCTOBER, 2026);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual360();
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote vol = new SimpleQuote(0.0);
+        SimpleQuote q = new SimpleQuote(0.05);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), new Handle<>(flatRate(today, q, dc), true),
+                new Handle<>(flatRate(today, 0.05, dc), true),
+                new Handle<>(flatVol(today, vol, dc), true));
+        SimpleQuote average = new SimpleQuote(97.0);
+        PricingEngine engine = new ContinuousArithmeticAsianLevyEngine(
+                process, new Handle<>(average, true));
+        Exercise exercise = new EuropeanExercise(today.add(360));
+
+        double previousCutoff = Math.sqrt(MathUtils.QL_EPSILON);
+        double[] sigmaValues = {
+                0.0, 1.0e-8, 0.99 * previousCutoff, previousCutoff,
+                1.01 * previousCutoff, 2.0 * previousCutoff, 1.0e-7
+        };
+        for (int elapsed : new int[]{0, 180}) {
+            for (Option.Type type : List.of(Option.Type.Call, Option.Type.Put)) {
+                for (double strike : new double[]{30.0, 90.0, 100.0, 110.0}) {
+                    PlainVanillaPayoff payoff =
+                            new PlainVanillaPayoff(type, strike);
+                    ContinuousAveragingAsianOption option =
+                            new ContinuousAveragingAsianOption(
+                                    Average.Type.Arithmetic,
+                                    today.substract(elapsed), payoff, exercise);
+                    option.setPricingEngine(engine);
+                    for (double yield : new double[]{0.05, 0.02, 0.08}) {
+                        q.setValue(yield);
+                        // Integrate the deterministic forward
+                        // S(t)=100 exp((r-q)t), and combine it with the
+                        // already observed running average.
+                        double b = 0.05 - yield;
+                        double futureIntegral = b == 0.0 ? 100.0
+                                : 100.0 * Math.expm1(b) / b;
+                        double mean = (97.0 * elapsed / 360.0
+                                + futureIntegral)
+                                / (1.0 + elapsed / 360.0);
+                        double expected = Math.exp(-0.05)
+                                * payoff.value(mean);
+                        for (double sigma : sigmaValues) {
+                            vol.setValue(sigma);
+                            double calculated = option.NPV();
+                            if (!Double.isFinite(calculated)) {
+                                fail("Levy " + type + ", elapsed=" + elapsed
+                                        + ", strike=" + strike + ", q=" + yield
+                                        + ", vol=" + sigma
+                                        + ": calculated is not finite");
+                            }
+                            // At the kink the true time value is
+                            // O(sigma * spot).
+                            double tolerance = sigma == 0.0
+                                    ? 1.0e-12 : 1.0e-5;
+                            if (!(Math.abs(calculated - expected) < tolerance)) {
+                                fail("Levy " + type + ", elapsed=" + elapsed
+                                        + ", strike=" + strike + ", q=" + yield
+                                        + ", vol=" + sigma + ": calculated "
+                                        + calculated + ", expected " + expected);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testLevyLowVolatilityContinuity}.
+     */
+    @Test
+    public void testLevyLowVolatilityContinuity() {
+        Date today = new Date(20, Month.OCTOBER, 2026);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual360();
+        SimpleQuote vol = new SimpleQuote(0.0);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(new SimpleQuote(100.0), true),
+                new Handle<>(flatRate(today, 0.05, dc), true),
+                new Handle<>(flatRate(today, 0.05, dc), true),
+                new Handle<>(flatVol(today, vol, dc), true));
+        PricingEngine engine = new ContinuousArithmeticAsianLevyEngine(
+                process, new Handle<>(new SimpleQuote(100.0), true));
+
+        for (int elapsed : new int[]{0, 180}) {
+            for (Option.Type type : List.of(Option.Type.Call, Option.Type.Put)) {
+                ContinuousAveragingAsianOption option =
+                        new ContinuousAveragingAsianOption(
+                                Average.Type.Arithmetic,
+                                today.substract(elapsed),
+                                new PlainVanillaPayoff(type, 100.0),
+                                new EuropeanExercise(today.add(360)));
+                option.setPricingEngine(engine);
+                vol.setValue(0.0);
+                double zeroVolNpv = option.NPV();
+                if (!(Math.abs(zeroVolNpv) <= 1.0e-12)) {
+                    fail("zero-volatility NPV failed: |" + zeroVolNpv
+                            + "| > " + 1.0e-12);
+                }
+                // At zero carry Var(A_future) ~ (100/T)^2 sigma^2/3.
+                // An ATM call or put has value ~ discount * stddev /
+                // sqrt(2*pi).
+                double slope = Math.exp(-0.05) * 100.0
+                        / ((1.0 + elapsed / 360.0)
+                        * Math.sqrt(6.0 * MathUtils.M_PI));
+                double previous = MathUtils.QL_MAX_REAL;
+                for (double sigma : new double[]{1.0e-3, 1.0e-4, 1.0e-5,
+                        1.0e-6, 1.0e-7, 1.0e-8}) {
+                    vol.setValue(sigma);
+                    double npv = option.NPV();
+                    if (!Double.isFinite(npv)) {
+                        fail("type=" + type + ", elapsed=" + elapsed
+                                + ", vol=" + sigma + ": NPV is not finite");
+                    }
+                    if (!(npv > 0.0)) {
+                        fail("type=" + type + ", elapsed=" + elapsed
+                                + ", vol=" + sigma + ": NPV is not positive");
+                    }
+                    if (!(npv < previous)) {
+                        fail("type=" + type + ", elapsed=" + elapsed
+                                + ", vol=" + sigma
+                                + ": NPV is not decreasing");
+                    }
+                    if (!(Math.abs(npv / sigma - slope) <= 1.0e-5)) {
+                        fail("type=" + type + ", elapsed=" + elapsed
+                                + ", vol=" + sigma + ": npv/sigma - slope = "
+                                + (npv / sigma - slope));
+                    }
+                    previous = npv;
+                }
+            }
+        }
+    }
+
+    /**
+     * QuantLib {@code testLevyVarianceReference}.
+     */
+    @Test
+    public void testLevyVarianceReference() {
+        Date today = new Date(20, Month.OCTOBER, 2026);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual360();
+        SimpleQuote q = new SimpleQuote(0.05);
+        SimpleQuote vol = new SimpleQuote(1.0e-3);
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                new Handle<>(new SimpleQuote(100.0), true),
+                new Handle<>(flatRate(today, q, dc), true),
+                new Handle<>(flatRate(today, 0.05, dc), true),
+                new Handle<>(flatVol(today, vol, dc), true));
+        PricingEngine engine = new ContinuousArithmeticAsianLevyEngine(
+                process, new Handle<>(new SimpleQuote(97.0), true));
+        GaussLegendreIntegration integrate = new GaussLegendreIntegration(32);
+
+        for (int elapsed : new int[]{0, 180}) {
+            // Include near-zero carry, both signs, and the series scaling
+            // boundary.
+            for (double b : new double[]{0.0, -1.0e-10, 1.0e-10, -0.03,
+                    0.03, -1.0, 1.0}) {
+                for (double sigma : new double[]{1.0e-8, 1.0e-3,
+                        Math.sqrt(0.499), Math.sqrt(0.501)}) {
+                    checkLevyVariancePrice(today, q, vol, engine, integrate,
+                            360, elapsed, b, sigma);
+                }
+            }
+            for (int remaining : new int[]{1, 10800}) {
+                for (double b : new double[]{-0.03, 0.0, 0.03}) {
+                    checkLevyVariancePrice(today, q, vol, engine, integrate,
+                            remaining, elapsed, b, 1.0e-3);
+                }
+            }
+        }
+    }
+
+    /**
      * Partial port of QuantLib {@code testMCDiscreteArithmeticAveragePrice}.
      *
-     * <p>Only the Monte Carlo and finite-differences sections are covered.
-     * The official case also checks the Turnbull-Wakeman analytic
-     * approximation (tolerance 3.0e-2) and the Choi Asian engine; those
-     * engines are deliberately omitted in this step.
+     * <p>The Monte Carlo, finite-differences and Turnbull-Wakeman analytic
+     * approximation sections are covered. The official case also checks the
+     * Choi Asian engine; that engine is deliberately omitted in this step.
      *
      * <p>Data from "Asian Option", Levy, 1997, in "Exotic Options: The
      * State of the Art", edited by Clewlow, Strickland.
@@ -1062,6 +1587,8 @@ public class AsianOptionTest {
 
         PricingEngine fdEngine =
                 new FdBlackScholesAsianEngine(stochProcess, 100, 100, 100);
+        PricingEngine twEngine =
+                new TurnbullWakemanAsianEngine(stochProcess);
 
         Average.Type averageType = Average.Type.Arithmetic;
         double runningSum = 0.0;
@@ -1120,6 +1647,19 @@ public class AsianOptionTest {
                             rRate.value(), today, vol.value(), expected,
                             calculated, tolerance));
                 }
+            }
+
+            option.setPricingEngine(twEngine);
+            calculated = option.NPV();
+            tolerance = 3.0e-2;
+            if (Math.abs(calculated - expected) > tolerance) {
+                fail("The consistency check of the analytic approximation "
+                        + "engine failed\n"
+                        + failureMessage("value", averageType, runningSum,
+                        pastFixings, List.of(fixingDates), payoff,
+                        exercise, spot.value(), qRate.value(),
+                        rRate.value(), today, vol.value(), expected,
+                        calculated, tolerance));
             }
         }
     }
@@ -1390,6 +1930,236 @@ public class AsianOptionTest {
     private static int timeToDays(double t) {
         return (int) Math.round(t * 360.0);
     }
+
+    /**
+     * Integrate the exact Levy variance and compare it with the engine price
+     * of the corresponding at-the-money call.
+     */
+    private static void checkLevyVariancePrice(
+            Date today,
+            SimpleQuote q,
+            SimpleQuote vol,
+            PricingEngine engine,
+            GaussLegendreIntegration integrate,
+            int remaining,
+            int elapsed,
+            double b,
+            double sigma) {
+        double tau = remaining / 360.0;
+        double t = tau + elapsed / 360.0;
+        double x = b * tau;
+        double w = sigma * sigma * tau;
+        double meanFactor = 100.0 * tau / t;
+        q.setValue(0.05 - b);
+        vol.setValue(sigma);
+        double mean = meanFactor / 2.0 * integrate.value(
+                u -> Math.exp(x * (u + 1.0) / 2.0));
+        double strike = (t - tau) / t * 97.0 + mean;
+        ContinuousAveragingAsianOption option =
+                new ContinuousAveragingAsianOption(
+                        Average.Type.Arithmetic, today.substract(elapsed),
+                        new PlainVanillaPayoff(Option.Type.Call, strike),
+                        new EuropeanExercise(today.add(remaining)));
+        option.setPricingEngine(engine);
+
+        // Integrate the covariance over the normalized triangle
+        // 0 <= s <= t <= 1.
+        double variance = 2.0 * meanFactor * meanFactor
+                * integrate.value(u -> {
+                    double tt = (u + 1.0) / 2.0;
+                    return tt / 4.0 * integrate.value(v -> {
+                        double s = tt * (v + 1.0) / 2.0;
+                        return Math.exp(x * (s + tt)) * Math.expm1(w * s);
+                    });
+                });
+        double logVariance = Math.log1p(variance / (mean * mean));
+        double expected = BlackFormula.blackFormula(
+                Option.Type.Call, mean, mean, Math.sqrt(logVariance),
+                Math.exp(-0.05 * tau), 0.0);
+
+        double calculated = option.NPV();
+        if (!Double.isFinite(calculated)) {
+            fail("remaining=" + remaining + ", elapsed=" + elapsed
+                    + ", carry=" + b + ", vol=" + sigma
+                    + ": calculated is not finite");
+        }
+        // Allow for quadrature and pricing roundoff across platforms.
+        checkSmall("remaining=" + remaining + ", elapsed=" + elapsed
+                + ", carry=" + b + ", vol=" + sigma,
+                calculated - expected, 2.0e-11);
+    }
+
+    /** QuantLib {@code DiscreteAverageDataTermStructure} for the TW tests. */
+    private record DiscreteAverageDataTermStructure(
+            Option.Type type,
+            double underlying,
+            double strike,
+            double b,
+            double riskFreeRate,
+            double first,
+            double expiry,
+            int fixings,
+            double volatility,
+            String slope,
+            double result) {
+    }
+
+    /** Data from Haug, "Option Pricing Formulas", Table 4-28, p.201. */
+    private static final List<DiscreteAverageDataTermStructure> casesTW =
+            List.of(
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 80.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "flat", 19.5152),
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 80.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "up", 19.5063),
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 80.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "down", 19.5885),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 80.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "flat", 0.0090),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 80.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "up", 0.0001),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 80.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "down", 0.0823),
+
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 90.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "flat", 10.1437),
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 90.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "up", 9.8313),
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 90.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "down", 10.7062),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 90.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "flat", 0.3906),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 90.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "up", 0.0782),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 90.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "down", 0.9531),
+
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 100.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "flat", 3.2700),
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 100.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "up", 2.2819),
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 100.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "down", 4.3370),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 100.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "flat", 3.2700),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 100.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "up", 2.2819),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 100.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "down", 4.3370),
+
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 110.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "flat", 0.5515),
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 110.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "up", 0.1314),
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 110.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "down", 1.2429),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 110.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "flat", 10.3046),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 110.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "up", 9.8845),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 110.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "down", 10.9960),
+
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 120.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "flat", 0.0479),
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 120.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "up", 0.0016),
+                    new DiscreteAverageDataTermStructure(Option.Type.Call,
+                            100.0, 120.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "down", 0.2547),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 120.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "flat", 19.5541),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 120.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "up", 19.5078),
+                    new DiscreteAverageDataTermStructure(Option.Type.Put,
+                            100.0, 120.0, 0.0, 0.05, 1.0 / 52.0, 0.5,
+                            26, 0.2, "down", 19.7609)
+            );
+
+    /** QuantLib {@code ContinuousAverageData} for the Levy test. */
+    private record ContinuousAverageData(
+            Option.Type type,
+            double spot,
+            double currentAverage,
+            double strike,
+            double dividendYield,
+            double riskFreeRate,
+            double volatility,
+            int length,
+            int elapsed,
+            double result) {
+    }
+
+    /** Data from Haug, "Option Pricing Formulas", p.99-100. */
+    private static final List<ContinuousAverageData> casesLevy = List.of(
+            new ContinuousAverageData(Option.Type.Call, 6.80, 6.80, 6.90,
+                    0.09, 0.07, 0.14, 180, 0, 0.0944),
+            new ContinuousAverageData(Option.Type.Put, 6.80, 6.80, 6.90,
+                    0.09, 0.07, 0.14, 180, 0, 0.2237),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 95.0,
+                    0.05, 0.1, 0.15, 270, 0, 7.0544),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 95.0,
+                    0.05, 0.1, 0.15, 270, 90, 5.6731),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 95.0,
+                    0.05, 0.1, 0.15, 270, 180, 5.0806),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 95.0,
+                    0.05, 0.1, 0.35, 270, 0, 10.1213),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 95.0,
+                    0.05, 0.1, 0.35, 270, 90, 6.9705),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 95.0,
+                    0.05, 0.1, 0.35, 270, 180, 5.1411),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 100.0,
+                    0.05, 0.1, 0.15, 270, 0, 3.7845),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 100.0,
+                    0.05, 0.1, 0.15, 270, 90, 1.9964),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 100.0,
+                    0.05, 0.1, 0.15, 270, 180, 0.6722),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 100.0,
+                    0.05, 0.1, 0.35, 270, 0, 7.5038),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 100.0,
+                    0.05, 0.1, 0.35, 270, 90, 4.0687),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 100.0,
+                    0.05, 0.1, 0.35, 270, 180, 1.4222),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 105.0,
+                    0.05, 0.1, 0.15, 270, 0, 1.6729),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 105.0,
+                    0.05, 0.1, 0.15, 270, 90, 0.3565),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 105.0,
+                    0.05, 0.1, 0.15, 270, 180, 0.0004),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 105.0,
+                    0.05, 0.1, 0.35, 270, 0, 5.4071),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 105.0,
+                    0.05, 0.1, 0.35, 270, 90, 2.1359),
+            new ContinuousAverageData(Option.Type.Call, 100.0, 100.0, 105.0,
+                    0.05, 0.1, 0.35, 270, 180, 0.1552)
+    );
 
     /** QuantLib {@code DiscreteAverageData} from the Asian test suite. */
     private record DiscreteAverageData(
