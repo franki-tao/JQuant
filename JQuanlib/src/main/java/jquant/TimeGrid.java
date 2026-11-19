@@ -55,6 +55,7 @@ public class TimeGrid {
                 "negative times not allowed");
         unique(mandatoryTimes_);
 
+        times_ = new ArrayList<>();
         if (mandatoryTimes_.get(0) > 0.0)
             times_.add(0.0);
 
@@ -95,6 +96,7 @@ public class TimeGrid {
         }
 
         double periodBegin = 0.0;
+        times_ = new ArrayList<>();
         times_.add(periodBegin);
         for (int t = 0;
              t < mandatoryTimes_.size();
