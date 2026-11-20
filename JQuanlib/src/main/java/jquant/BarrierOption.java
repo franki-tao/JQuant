@@ -5,12 +5,14 @@ import jquant.math.Function;
 import jquant.math.solvers1d.Brent;
 import jquant.pricingengines.GenericEngine;
 import jquant.pricingengines.barrier.AnalyticBarrierEngine;
+import jquant.pricingengines.barrier.FdBlackScholesBarrierEngine;
 import jquant.processes.BlackScholesMertonProcess;
 import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.quotes.SimpleQuote;
 import jquant.termstructures.volatility.equityfx.BlackConstantVol;
 import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -163,6 +165,15 @@ public class BarrierOption extends OneAssetOption {
             double targetValue,
             GeneralizedBlackScholesProcess process,
             List<? extends Dividend> dividends,
+            double accuracy) {
+        return impliedVolatility(targetValue, process, dividends,
+                accuracy, 100, 1.0e-7, 4.0);
+    }
+
+    public double impliedVolatility(
+            double targetValue,
+            GeneralizedBlackScholesProcess process,
+            List<? extends Dividend> dividends,
             double accuracy,
             int maxEvaluations) {
         return impliedVolatility(targetValue, process, dividends,
@@ -172,8 +183,9 @@ public class BarrierOption extends OneAssetOption {
     /**
      * QuantLib {@code BarrierOption::impliedVolatility} with a discrete
      * dividend schedule. European options with an empty schedule use
-     * {@link AnalyticBarrierEngine}; the dividend path and non-European
-     * exercise are not implemented, as in the official engine selection.
+     * {@link AnalyticBarrierEngine}, otherwise
+     * {@link FdBlackScholesBarrierEngine}; non-European exercise fails, as in
+     * the official engine selection.
      */
     public double impliedVolatility(
             double targetValue,
@@ -197,9 +209,8 @@ public class BarrierOption extends OneAssetOption {
                 if (dividends == null || dividends.isEmpty()) {
                     solverEngine = new AnalyticBarrierEngine(newProcess);
                 } else {
-                    QL_FAIL("implied-volatility calculation for barrier "
-                            + "options with dividends is not implemented yet");
-                    return Double.NaN;
+                    solverEngine = new FdBlackScholesBarrierEngine(
+                            newProcess, new ArrayList<>(dividends));
                 }
                 break;
             case American:
