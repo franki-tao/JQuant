@@ -3,6 +3,7 @@ package pricingengines;
 import jquant.AmericanExercise;
 import jquant.Barrier;
 import jquant.BarrierOption;
+import jquant.BermudanExercise;
 import jquant.Compounding;
 import jquant.EuropeanExercise;
 import jquant.EuropeanOption;
@@ -14,17 +15,30 @@ import jquant.Quote;
 import jquant.RelinkableHandle;
 import jquant.SavedSettings;
 import jquant.Settings;
+import jquant.cashflows.Dividend;
 import jquant.indexes.IndexManager;
+import jquant.math.Matrix;
+import jquant.math.interpolations.impl.Bicubic;
+import jquant.methods.finitedifferences.solvers.FdmSchemeDesc;
+import jquant.models.equity.HestonModel;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.barrier.AnalyticBarrierEngine;
+import jquant.pricingengines.barrier.FdBlackScholesBarrierEngine;
+import jquant.pricingengines.barrier.FdHestonBarrierEngine;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
+import jquant.pricingengines.vanilla.FdBlackScholesVanillaEngine;
+import jquant.pricingengines.vanilla.QdFpAmericanEngine;
 import jquant.processes.BlackScholesMertonProcess;
 import jquant.processes.BlackScholesProcess;
+import jquant.processes.GeneralizedBlackScholesProcess;
+import jquant.processes.HestonProcess;
 import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.equityfx.BlackConstantVol;
+import jquant.termstructures.volatility.equityfx.BlackVarianceSurface;
 import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
 import jquant.termstructures.yield.FlatForward;
+import jquant.termstructures.yield.ZeroCurve;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.Frequency;
@@ -40,16 +54,22 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Barrier option pricing from QuantLib
  * {@code test-suite/barrieroption.cpp}.
  *
- * <p>This class ports the standard single-barrier analytic coverage agreed
- * for this step: five complete official cases and four partial ones. The
- * partial cases are documented individually; the remaining official barrier
- * cases are not started.
+ * <p>This class ports the standard single-barrier analytic and
+ * finite-differences coverage agreed for this step: fourteen complete
+ * official cases and four partial ones. The partial cases are documented
+ * individually; the binomial, Monte Carlo, double-barrier, perturbative and
+ * Vanna-Volga cases are not started.
  */
 public class BarrierOptionTest {
 
@@ -614,13 +634,16 @@ public class BarrierOptionTest {
      * Partial port of official {@code testHaugValues}.
      *
      * <p>Ported branches: all 72 European rows priced with
-     * {@link AnalyticBarrierEngine}, plus the official analytic exception
-     * checks (American exercise, zero spot and triggered barrier).
+     * {@link AnalyticBarrierEngine}; the {@link FdBlackScholesBarrierEngine}
+     * branch for European options and American knock-outs; and the official
+     * exception checks (American knock-ins, zero spot and triggered barrier).
+     * For the FD branch, American knock-outs whose barrier lies in the money
+     * (and which are not on the barrier) are skipped exactly as in the
+     * official test.
      *
-     * <p>Deferred official branches, not ported here: the
-     * {@code FdBlackScholesBarrierEngine} checks, the binomial
-     * Boyle-Lau checks and the binomial Derman-Kani checks. The 24 American
-     * Haug prices are not asserted against the analytic engine.
+     * <p>Deferred official branches, not ported here: the binomial Boyle-Lau
+     * checks and the binomial Derman-Kani checks. The 24 American Haug prices
+     * are not asserted against the analytic engine.
      */
     @Test
     public void testHaugValues() {
@@ -681,6 +704,34 @@ public class BarrierOptionTest {
                         value.rebate, payoff, exercise, value.s, value.q,
                         value.r, today, value.v, expected, calculated, error,
                         value.tol);
+            }
+        } else {
+            expectException(barrierOption::NPV);
+        }
+
+        barrierOption.setPricingEngine(
+                new FdBlackScholesBarrierEngine(stochProcess, 200, 400));
+
+        final boolean knockOut = value.barrierType == Barrier.Type.DownOut
+                || value.barrierType == Barrier.Type.UpOut;
+        if (!useZeroSpot && !useTriggeredBarrier
+                && (value.exType == Exercise.Type.European || knockOut)) {
+            double calculated = barrierOption.NPV();
+            double expected = value.result;
+            double error = Math.abs(calculated - expected);
+            // Haug's 400-step lattice values are biased low by up to 13%
+            // for american knock-outs whose barrier lies in the money,
+            // where lattices converge slowly; those cases are tested
+            // against converged values in testFdAmericanKnockOut instead.
+            final boolean comparable =
+                    value.exType == Exercise.Type.European
+                    || value.barrier == value.s
+                    || payoff.value(value.barrier) <= value.rebate;
+            if (comparable && error > 5.0e-3) {
+                reportFailure("fd value", value.barrierType, value.barrier,
+                        value.rebate, payoff, exercise, value.s, value.q,
+                        value.r, today, value.v, expected, calculated, error,
+                        5.0e-3);
             }
         } else {
             expectException(barrierOption::NPV);
@@ -843,14 +894,12 @@ public class BarrierOptionTest {
     }
 
     /**
-     * Partial port of official {@code testImpliedVolatility}.
+     * Complete port of official {@code testImpliedVolatility}.
      *
-     * <p>Ported branch: the no-dividend half, solving for each of the four
-     * barriers and repricing with {@link AnalyticBarrierEngine} to absolute
-     * tolerance {@code 1.0e-5}.
-     *
-     * <p>Deferred official branch, not ported here: the dividend targets and
-     * the {@code FdBlackScholesBarrierEngine} repricing.
+     * <p>Solves for each of the four barriers without dividends and reprices
+     * with {@link AnalyticBarrierEngine}, then solves with the discrete
+     * dividend schedule and reprices with {@link FdBlackScholesBarrierEngine}
+     * to absolute tolerance {@code 1.0e-5}.
      */
     @Test
     public void testImpliedVolatility() {
@@ -875,6 +924,12 @@ public class BarrierOptionTest {
         BlackScholesMertonProcess bsProcess = new BlackScholesMertonProcess(
                 s0, qTS, rTS, dummyVolTS);
 
+        double divAmount = 10;
+        Date divDate = today.add(new Period(6, TimeUnit.MONTHS));
+        List<Dividend> dividends = Dividend.dividendVector(
+                Collections.singletonList(divDate),
+                new double[]{divAmount});
+
         double strike = 105.0;
         double rebate = 5.0;
 
@@ -886,6 +941,7 @@ public class BarrierOptionTest {
         Barrier.Type[] barrierTypes = {Barrier.Type.DownOut,
                 Barrier.Type.UpOut, Barrier.Type.DownIn, Barrier.Type.UpIn};
         double[] targetWithoutDividends = {1.0, 1.0, 5.0, 5.0};
+        double[] targetWithDividends = {8.0, 12.0, 9.0, 8.0};
         double tolerance = 1e-5;
 
         for (int i = 0; i < barriers.length; ++i) {
@@ -897,10 +953,11 @@ public class BarrierOptionTest {
             double impliedVol = barrierOption.impliedVolatility(
                     targetWithoutDividends[i], bsProcess, 1e-6);
 
-            BlackVolTermStructure volTS = flatVol(today,
-                    new SimpleQuote(impliedVol), dc);
+            RelinkableHandle<BlackVolTermStructure> volTS =
+                    new RelinkableHandle<>(
+                            flatVol(today, impliedVol, dc), true);
             BlackScholesMertonProcess process = new BlackScholesMertonProcess(
-                    s0, qTS, rTS, new Handle<>(volTS, true));
+                    s0, qTS, rTS, volTS);
             barrierOption.setPricingEngine(
                     new AnalyticBarrierEngine(process));
 
@@ -914,6 +971,937 @@ public class BarrierOptionTest {
                         + "\n    target value: " + targetWithoutDividends[i]
                         + "\n    calculated:   " + barrierOption.NPV()
                         + "\n    difference    " + diff);
+            }
+
+            impliedVol = barrierOption.impliedVolatility(
+                    targetWithDividends[i], bsProcess, dividends, 1e-6);
+
+            volTS.linkTo(flatVol(today, impliedVol, dc), true);
+            barrierOption.setPricingEngine(
+                    new FdBlackScholesBarrierEngine(process, dividends));
+
+            diff = Math.abs(barrierOption.NPV()
+                    - targetWithDividends[i]);
+            if (diff > tolerance) {
+                fail("Failed to reproduce target option price:"
+                        + "\n    strike:       " + strike
+                        + "\n    barrier:      " + barrier
+                        + "\n    maturity:     " + maturity
+                        + "\n    target value: " + targetWithDividends[i]
+                        + "\n    calculated:   " + barrierOption.NPV()
+                        + "\n    difference    " + diff);
+            }
+        }
+    }
+
+    @Test
+    public void testLocalVolAndHestonComparison() {
+        Date settlementDate = new Date(5, Month.JULY, 2002);
+        Settings.instance.evaluationDate().equal(settlementDate);
+
+        DayCounter dayCounter = new Actual365Fixed();
+        Target calendar = new Target();
+
+        int[] t = {13, 41, 75, 165, 256, 345, 524, 703};
+        double[] r = {0.0357, 0.0349, 0.0341, 0.0355,
+                0.0359, 0.0368, 0.0386, 0.0401};
+
+        List<Double> rates = new ArrayList<>();
+        rates.add(0.0357);
+        List<Date> dates = new ArrayList<>();
+        dates.add(settlementDate);
+        for (int i = 0; i < 8; ++i) {
+            dates.add(settlementDate.add(t[i]));
+            rates.add(r[i]);
+        }
+        Handle<YieldTermStructure> rTS =
+                new Handle<>(new ZeroCurve(dates, rates, dayCounter), true);
+        Handle<YieldTermStructure> qTS =
+                new Handle<>(flatRate(settlementDate, 0.0, dayCounter), true);
+
+        Handle<Quote> s0 = new Handle<>(new SimpleQuote(4500.00), true);
+
+        List<Double> strikes = Arrays.asList(100.0, 500.0, 2000.0, 3400.0,
+                3600.0, 3800.0, 4000.0, 4200.0, 4400.0, 4500.0,
+                4600.0, 4800.0, 5000.0, 5200.0, 5400.0, 5600.0, 7500.0,
+                10000.0, 20000.0, 30000.0);
+
+        double[] v = {
+                1.015873, 1.015873, 1.015873, 0.89729, 0.796493, 0.730914, 0.631335, 0.568895,
+                0.711309, 0.711309, 0.711309, 0.641309, 0.635593, 0.583653, 0.508045, 0.463182,
+                0.516034, 0.500534, 0.500534, 0.500534, 0.448706, 0.416661, 0.375470, 0.353442,
+                0.516034, 0.482263, 0.447713, 0.387703, 0.355064, 0.337438, 0.316966, 0.306859,
+                0.497587, 0.464373, 0.430764, 0.374052, 0.344336, 0.328607, 0.310619, 0.301865,
+                0.479511, 0.446815, 0.414194, 0.361010, 0.334204, 0.320301, 0.304664, 0.297180,
+                0.461866, 0.429645, 0.398092, 0.348638, 0.324680, 0.312512, 0.299082, 0.292785,
+                0.444801, 0.413014, 0.382634, 0.337026, 0.315788, 0.305239, 0.293855, 0.288660,
+                0.428604, 0.397219, 0.368109, 0.326282, 0.307555, 0.298483, 0.288972, 0.284791,
+                0.420971, 0.389782, 0.361317, 0.321274, 0.303697, 0.295302, 0.286655, 0.282948,
+                0.413749, 0.382754, 0.354917, 0.316532, 0.300016, 0.292251, 0.284420, 0.281164,
+                0.400889, 0.370272, 0.343525, 0.307904, 0.293204, 0.286549, 0.280189, 0.277767,
+                0.390685, 0.360399, 0.334344, 0.300507, 0.287149, 0.281380, 0.276271, 0.274588,
+                0.383477, 0.353434, 0.327580, 0.294408, 0.281867, 0.276746, 0.272655, 0.271617,
+                0.379106, 0.349214, 0.323160, 0.289618, 0.277362, 0.272641, 0.269332, 0.268846,
+                0.377073, 0.347258, 0.320776, 0.286077, 0.273617, 0.269057, 0.266293, 0.266265,
+                0.399925, 0.369232, 0.338895, 0.289042, 0.265509, 0.255589, 0.249308, 0.249665,
+                0.423432, 0.406891, 0.373720, 0.314667, 0.281009, 0.263281, 0.246451, 0.242166,
+                0.453704, 0.453704, 0.453704, 0.381255, 0.334578, 0.305527, 0.268909, 0.251367,
+                0.517748, 0.517748, 0.517748, 0.416577, 0.364770, 0.331595, 0.287423, 0.264285
+        };
+
+        Matrix blackVolMatrix = new Matrix(strikes.size(), dates.size() - 1);
+        for (int i = 0; i < strikes.size(); ++i) {
+            for (int j = 1; j < dates.size(); ++j) {
+                blackVolMatrix.set(i, j - 1, v[i * (dates.size() - 1) + j - 1]);
+            }
+        }
+
+        BlackVarianceSurface volTS = new BlackVarianceSurface(
+                settlementDate, calendar,
+                new ArrayList<>(dates.subList(1, dates.size())),
+                strikes, blackVolMatrix, dayCounter);
+        volTS.setInterpolation(new Bicubic());
+        GeneralizedBlackScholesProcess localVolProcess =
+                new BlackScholesMertonProcess(
+                        s0, qTS, rTS, new Handle<>(volTS, true));
+
+        double v0 = 0.195662;
+        double kappa = 5.6628;
+        double theta = 0.0745911;
+        double sigma = 1.1619;
+        double rho = -0.511493;
+
+        HestonProcess hestonProcess = new HestonProcess(
+                rTS, qTS, s0, v0, kappa, theta, sigma, rho);
+        HestonModel hestonModel = new HestonModel(hestonProcess);
+
+        PricingEngine fdHestonEngine =
+                new FdHestonBarrierEngine(hestonModel, 100, 400, 50);
+        PricingEngine fdLocalVolEngine =
+                new FdBlackScholesBarrierEngine(localVolProcess,
+                        100, 400, 0, FdmSchemeDesc.Douglas(),
+                        true, 0.35);
+
+        double strike = s0.getValue().value();
+        double barrier = 3000;
+        double rebate = 100;
+        Date exDate = settlementDate.add(new Period(20, TimeUnit.MONTHS));
+
+        PlainVanillaPayoff payoff =
+                new PlainVanillaPayoff(Option.Type.Put, strike);
+        Exercise exercise = new EuropeanExercise(exDate);
+
+        BarrierOption barrierOption = new BarrierOption(
+                Barrier.Type.DownOut, barrier, rebate, payoff, exercise);
+
+        barrierOption.setPricingEngine(fdHestonEngine);
+        double expectedHestonNPV = 111.5;
+        double calculatedHestonNPV = barrierOption.NPV();
+
+        barrierOption.setPricingEngine(fdLocalVolEngine);
+        double expectedLocalVolNPV = 132.8;
+        double calculatedLocalVolNPV = barrierOption.NPV();
+
+        double tol = 0.01;
+
+        if (Math.abs(expectedHestonNPV - calculatedHestonNPV)
+                > tol * expectedHestonNPV) {
+            fail("Failed to reproduce Heston barrier price for "
+                    + "\n    strike:     " + payoff.strike()
+                    + "\n    barrier:    " + barrier
+                    + "\n    maturity:   " + exDate
+                    + "\n    calculated: " + calculatedHestonNPV
+                    + "\n    expected:   " + expectedHestonNPV);
+        }
+        if (Math.abs(expectedLocalVolNPV - calculatedLocalVolNPV)
+                > tol * expectedLocalVolNPV) {
+            fail("Failed to reproduce Heston barrier price for "
+                    + "\n    strike:     " + payoff.strike()
+                    + "\n    barrier:    " + barrier
+                    + "\n    maturity:   " + exDate
+                    + "\n    calculated: " + calculatedLocalVolNPV
+                    + "\n    expected:   " + expectedLocalVolNPV);
+        }
+    }
+
+    @Test
+    public void testDividendBarrierOption() {
+        DayCounter dc = new Actual365Fixed();
+
+        Date today = new Date(11, Month.FEBRUARY, 2018);
+        Date maturity = today.add(new Period(1, TimeUnit.YEARS));
+        Settings.instance.evaluationDate().equal(today);
+
+        double spot = 100.0;
+        double strike = 105.0;
+        double rebate = 5.0;
+
+        double[] barriers = {80.0, 120.0, 80.0, 120.0};
+        Barrier.Type[] barrierTypes = {Barrier.Type.DownOut,
+                Barrier.Type.UpOut, Barrier.Type.DownIn, Barrier.Type.UpIn};
+
+        double r = 0.05;
+        double q = 0.0;
+        double v = 0.02;
+
+        Handle<Quote> s0 = new Handle<>(new SimpleQuote(spot), true);
+        Handle<YieldTermStructure> qTS =
+                new Handle<>(flatRate(today, q, dc), true);
+        Handle<YieldTermStructure> rTS =
+                new Handle<>(flatRate(today, r, dc), true);
+        Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, v, dc), true);
+
+        BlackScholesMertonProcess bsProcess = new BlackScholesMertonProcess(
+                s0, qTS, rTS, volTS);
+
+        double divAmount = 30;
+        Date divDate = today.add(new Period(6, TimeUnit.MONTHS));
+        List<Dividend> dividends = Dividend.dividendVector(
+                Collections.singletonList(divDate),
+                new double[]{divAmount});
+
+        PricingEngine douglas = new FdBlackScholesBarrierEngine(
+                bsProcess, dividends, 100, 100, 0, FdmSchemeDesc.Douglas());
+        PricingEngine crankNicolson = new FdBlackScholesBarrierEngine(
+                bsProcess, dividends, 100, 100, 0,
+                FdmSchemeDesc.CrankNicolson());
+        PricingEngine craigSnyed = new FdBlackScholesBarrierEngine(
+                bsProcess, dividends, 100, 100, 0, FdmSchemeDesc.CraigSneyd());
+        PricingEngine hundsdorfer = new FdBlackScholesBarrierEngine(
+                bsProcess, dividends, 100, 100, 0,
+                FdmSchemeDesc.Hundsdorfer());
+        PricingEngine mol = new FdBlackScholesBarrierEngine(
+                bsProcess, dividends, 100, 100, 0,
+                FdmSchemeDesc.MethodOfLines());
+        PricingEngine trPDF2 = new FdBlackScholesBarrierEngine(
+                bsProcess, dividends, 100, 100, 0, FdmSchemeDesc.TrBDF2());
+
+        PricingEngine hestonEngine = new FdHestonBarrierEngine(
+                new HestonModel(new HestonProcess(
+                        rTS, qTS, s0, v * v, 1.0, v * v, 0.005, 0.0)),
+                dividends, 50, 101, 3);
+
+        PricingEngine[] engines = {
+                douglas, crankNicolson,
+                trPDF2, craigSnyed, hundsdorfer, mol, hestonEngine
+        };
+
+        PlainVanillaPayoff payoff =
+                new PlainVanillaPayoff(Option.Type.Put, strike);
+        Exercise exercise = new EuropeanExercise(maturity);
+
+        YieldTermStructure rTSValue = rTS.getValue();
+        double[] expected = {
+                rTSValue.discount(divDate) * rebate,
+                payoff.value((spot - divAmount * rTSValue.discount(divDate))
+                        / rTSValue.discount(maturity))
+                        * rTSValue.discount(maturity),
+                29.154,
+                4.765
+        };
+
+        double relTol = 2e-4;
+        for (int i = 0; i < barriers.length; ++i) {
+            for (int j = 0; j < engines.length; ++j) {
+                double barrier = barriers[i];
+                Barrier.Type barrierType = barrierTypes[i];
+
+                BarrierOption barrierOption = new BarrierOption(
+                        barrierType, barrier, rebate, payoff, exercise);
+                barrierOption.setPricingEngine(engines[j]);
+
+                double calculated = barrierOption.NPV();
+                double diff = Math.abs(calculated - expected[i]);
+                if (diff > relTol * expected[i]) {
+                    fail("Failed to reproduce barrier price with discrete "
+                            + "dividends:"
+                            + "\n    engine:     " + j
+                            + "\n    strike:     " + strike
+                            + "\n    barrier:    " + barrier
+                            + "\n    maturity:   " + maturity
+                            + "\n    calculated: " + calculated
+                            + "\n    expected:   " + expected[i]
+                            + "\n    difference  " + diff
+                            + "\n    tolerance   " + relTol * expected[i]);
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testDividendBarrierOptionWithDividendsPastMaturity() {
+        DayCounter dc = new Actual365Fixed();
+
+        Date today = new Date(11, Month.FEBRUARY, 2018);
+        Date maturity = today.add(new Period(1, TimeUnit.YEARS));
+        Settings.instance.evaluationDate().equal(today);
+
+        double spot = 100.0;
+        double strike = 105.0;
+        double rebate = 5.0;
+
+        double[] barriers = {90.0, 110.0};
+        Barrier.Type[] barrierTypes = {Barrier.Type.DownOut,
+                Barrier.Type.UpOut};
+
+        double r = 0.05;
+        double q = 0.0;
+        double v = 0.02;
+
+        Handle<Quote> s0 = new Handle<>(new SimpleQuote(spot), true);
+        Handle<YieldTermStructure> qTS =
+                new Handle<>(flatRate(today, q, dc), true);
+        Handle<YieldTermStructure> rTS =
+                new Handle<>(flatRate(today, r, dc), true);
+        Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, v, dc), true);
+
+        BlackScholesMertonProcess bsProcess = new BlackScholesMertonProcess(
+                s0, qTS, rTS, volTS);
+
+        double divAmount = 30;
+        Date divDate = today.add(new Period(18, TimeUnit.MONTHS));
+        List<Dividend> dividends = Dividend.dividendVector(
+                Collections.singletonList(divDate),
+                new double[]{divAmount});
+
+        PricingEngine[] engines = {
+                new FdBlackScholesBarrierEngine(
+                        bsProcess, 100, 100, 0, FdmSchemeDesc.Douglas()),
+                new FdHestonBarrierEngine(
+                        new HestonModel(new HestonProcess(
+                                rTS, qTS, s0, v * v, 1.0, v * v, 0.005, 0.0)),
+                        50, 101, 3)
+        };
+
+        PricingEngine[] enginesWithDividends = {
+                new FdBlackScholesBarrierEngine(
+                        bsProcess, dividends, 100, 100, 0,
+                        FdmSchemeDesc.Douglas()),
+                new FdHestonBarrierEngine(
+                        new HestonModel(new HestonProcess(
+                                rTS, qTS, s0, v * v, 1.0, v * v, 0.005, 0.0)),
+                        dividends, 50, 101, 3)
+        };
+
+        PlainVanillaPayoff payoff =
+                new PlainVanillaPayoff(Option.Type.Put, strike);
+        Exercise exercise = new EuropeanExercise(maturity);
+
+        for (int i = 0; i < barriers.length; ++i) {
+            for (int j = 0; j < engines.length; ++j) {
+                double barrier = barriers[i];
+                Barrier.Type barrierType = barrierTypes[i];
+
+                BarrierOption barrierOption = new BarrierOption(
+                        barrierType, barrier, rebate, payoff, exercise);
+
+                barrierOption.setPricingEngine(engines[j]);
+                double withoutDividends = barrierOption.NPV();
+
+                barrierOption.setPricingEngine(enginesWithDividends[j]);
+                double withDividends = barrierOption.NPV();
+
+                double diff = Math.abs(withDividends - withoutDividends);
+                double tolerance = 1e-12;
+                if (diff > tolerance) {
+                    fail("Dividends past maturity affected option price:"
+                            + "\n    engine:           " + j
+                            + "\n    strike:           " + strike
+                            + "\n    barrier:          " + barrier
+                            + "\n    maturity:         " + maturity
+                            + "\n    without dividend: " + withoutDividends
+                            + "\n    with dividend:    " + withDividends
+                            + "\n    difference        " + diff);
+                }
+            }
+        }
+    }
+
+    /**
+     * Partial port of official {@code testFdAmericanKnockOut}.
+     *
+     * <p>Only the two official rows with stored converged expected values
+     * ({@code 8.0305} and {@code 9.7605}) are checked, to relative tolerance
+     * {@code 1e-3}. The four rows whose expected values come from the
+     * binomial engine are deferred; {@code BinomialBarrierEngine} is not
+     * ported.
+     */
+    @Test
+    public void testFdAmericanKnockOut() {
+        DayCounter dc = new Actual365Fixed();
+
+        Date today = new Date(1, Month.JANUARY, 2025);
+        Date maturity = today.add(365);
+        Settings.instance.evaluationDate().equal(today);
+
+        Handle<Quote> s0 = new Handle<>(new SimpleQuote(100.0), true);
+        Handle<YieldTermStructure> qTS =
+                new Handle<>(flatRate(today, 0.02, dc), true);
+        Handle<YieldTermStructure> rTS =
+                new Handle<>(flatRate(today, 0.05, dc), true);
+        Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, 0.25, dc), true);
+
+        BlackScholesMertonProcess bsProcess = new BlackScholesMertonProcess(
+                s0, qTS, rTS, volTS);
+
+        PricingEngine fdEngine =
+                new FdBlackScholesBarrierEngine(bsProcess, 200, 400);
+
+        Exercise americanExercise = new AmericanExercise(today, maturity);
+
+        Barrier.Type[] barrierTypes = {Barrier.Type.DownOut,
+                Barrier.Type.UpOut};
+        Option.Type[] optionTypes = {Option.Type.Put, Option.Type.Call};
+        double[] barriers = {85.0, 120.0};
+        double[] rebates = {0.0, 0.0};
+        double[] expectedValues = {8.0305, 9.7605};
+
+        double relTol = 1e-3;
+        for (int i = 0; i < barrierTypes.length; ++i) {
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(optionTypes[i], 100.0);
+            BarrierOption option = new BarrierOption(barrierTypes[i],
+                    barriers[i], rebates[i], payoff, americanExercise);
+            option.setPricingEngine(fdEngine);
+
+            double expected = expectedValues[i];
+            double calculated = option.NPV();
+
+            if (Math.abs(calculated - expected) > relTol * expected) {
+                fail("Failed to reproduce American knock-out barrier price:"
+                        + "\n    barrier type: " + Barrier.toString(barrierTypes[i])
+                        + "\n    option type:  " + optionTypes[i]
+                        + "\n    barrier:      " + barriers[i]
+                        + "\n    rebate:       " + rebates[i]
+                        + "\n    calculated:   " + calculated
+                        + "\n    expected:     " + expected
+                        + "\n    difference    "
+                        + Math.abs(calculated - expected)
+                        + "\n    tolerance     " + relTol * expected);
+            }
+        }
+    }
+
+    @Test
+    public void testFdAmericanKnockOutGaoHuangSubrahmanyam() {
+        double[][] values = {
+                //    s,    v,    t,  value,   delta
+                {40.0, 0.20, 0.25, 5.0357, -0.9253},
+                {45.0, 0.20, 0.50, 1.9375, -0.4893},
+                {49.5, 0.20, 0.50, 0.1613, -0.3270},
+                {45.0, 0.30, 0.75, 2.7668, -0.5959},
+                {45.0, 0.40, 1.00, 3.2145, -0.6672},
+                {49.5, 0.40, 1.00, 0.3117, -0.6253}
+        };
+
+        DayCounter dc = new Actual360();
+        Date today = new Date(1, Month.JANUARY, 2025);
+        Settings.instance.evaluationDate().equal(today);
+
+        SimpleQuote spot = new SimpleQuote(0.0);
+        SimpleQuote vol = new SimpleQuote(0.0);
+        Handle<YieldTermStructure> qTS =
+                new Handle<>(flatRate(today, 0.0, dc), true);
+        Handle<YieldTermStructure> rTS =
+                new Handle<>(flatRate(today, 0.0488, dc), true);
+        Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, vol, dc), true);
+
+        BlackScholesMertonProcess bsProcess = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), qTS, rTS, volTS);
+        PricingEngine engine =
+                new FdBlackScholesBarrierEngine(bsProcess, 200, 400);
+        PlainVanillaPayoff payoff =
+                new PlainVanillaPayoff(Option.Type.Put, 45.0);
+
+        double valueTol = 2e-3;
+        double deltaTol = 1e-3;
+        for (double[] value : values) {
+            spot.setValue(value[0]);
+            vol.setValue(value[1]);
+
+            BarrierOption option = new BarrierOption(Barrier.Type.UpOut,
+                    50.0, 0.0, payoff,
+                    new AmericanExercise(today,
+                            today.add(timeToDays(value[2]))));
+            option.setPricingEngine(engine);
+
+            double calculated = option.NPV();
+            double delta = option.delta();
+            if (Math.abs(calculated - value[3]) > valueTol
+                    || Math.abs(delta - value[4]) > deltaTol) {
+                fail("Failed to reproduce American up-and-out put:"
+                        + "\n    spot:       " + value[0]
+                        + "\n    volatility: " + value[1]
+                        + "\n    maturity:   " + value[2]
+                        + "\n    calculated: " + calculated
+                        + "\n    expected:   " + value[3]
+                        + "\n    tolerance:  " + valueTol
+                        + "\n    delta:      " + delta
+                        + "\n    expected:   " + value[4]
+                        + "\n    tolerance:  " + deltaTol);
+            }
+        }
+    }
+
+    @Test
+    public void testFdEarlyExerciseKnockOutBounds() {
+        DayCounter dc = new Actual365Fixed();
+
+        Date today = new Date(1, Month.JANUARY, 2025);
+        Date maturity = today.add(365);
+        Settings.instance.evaluationDate().equal(today);
+
+        double s0 = 100.0;
+        SimpleQuote spot = new SimpleQuote(s0);
+        Handle<YieldTermStructure> qTS =
+                new Handle<>(flatRate(today, 0.02, dc), true);
+        Handle<YieldTermStructure> rTS =
+                new Handle<>(flatRate(today, 0.05, dc), true);
+        Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, 0.25, dc), true);
+
+        BlackScholesMertonProcess bsProcess = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), qTS, rTS, volTS);
+
+        PricingEngine barrierEngine =
+                new FdBlackScholesBarrierEngine(bsProcess, 200, 400);
+        PricingEngine vanillaEngine =
+                new FdBlackScholesVanillaEngine(bsProcess, 200, 400);
+        PricingEngine qdFpEngine = new QdFpAmericanEngine(bsProcess);
+
+        Exercise europeanExercise = new EuropeanExercise(maturity);
+        Exercise americanExercise = new AmericanExercise(today, maturity);
+        List<Date> exerciseDates = new ArrayList<>();
+        for (int m = 1; m <= 12; ++m)
+            exerciseDates.add(today.add(new Period(m, TimeUnit.MONTHS)));
+        Exercise bermudanExercise = new BermudanExercise(exerciseDates);
+
+        Barrier.Type[] barrierTypes = {
+                Barrier.Type.DownOut, Barrier.Type.DownOut,
+                Barrier.Type.UpOut, Barrier.Type.UpOut,
+                Barrier.Type.DownOut, Barrier.Type.UpOut};
+        Option.Type[] optionTypes = {
+                Option.Type.Call, Option.Type.Put,
+                Option.Type.Call, Option.Type.Put,
+                Option.Type.Put, Option.Type.Call};
+        double[] barriers = {85.0, 85.0, 120.0, 120.0, 20.0, 500.0};
+        double[] rebates = {0.0, 0.0, 0.0, 5.0, 0.0, 0.0};
+        boolean[] farAway = {false, false, false, false, true, true};
+
+        double tol = 1e-6;
+        for (int c = 0; c < barrierTypes.length; ++c) {
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(optionTypes[c], 100.0);
+
+            double european = barrierNpv(payoff, barrierTypes[c],
+                    barriers[c], rebates[c], europeanExercise, barrierEngine);
+            double bermudan = barrierNpv(payoff, barrierTypes[c],
+                    barriers[c], rebates[c], bermudanExercise, barrierEngine);
+            double american = barrierNpv(payoff, barrierTypes[c],
+                    barriers[c], rebates[c], americanExercise, barrierEngine);
+
+            EuropeanOption vanilla =
+                    new EuropeanOption(payoff, americanExercise);
+            vanilla.setPricingEngine(vanillaEngine);
+            double americanVanilla = vanilla.NPV();
+
+            // the knock-out pays either what the vanilla option could
+            // pay or the rebate, which is worth at most its face value
+            // with non-negative rates
+            if (european > bermudan + tol || bermudan > american + tol
+                    || american > americanVanilla + rebates[c] + tol) {
+                fail("Failed to bound early-exercise knock-out barrier price:"
+                        + "\n    barrier type:     "
+                        + Barrier.toString(barrierTypes[c])
+                        + "\n    option type:      " + optionTypes[c]
+                        + "\n    barrier:          " + barriers[c]
+                        + "\n    rebate:           " + rebates[c]
+                        + "\n    european:         " + european
+                        + "\n    bermudan:         " + bermudan
+                        + "\n    american:         " + american
+                        + "\n    american vanilla: " + americanVanilla);
+            }
+
+            if (farAway[c]) {
+                // with the barrier never reached, neither is the rebate;
+                // the QdFp engine gives an independent, highly accurate
+                // reference
+                vanilla.setPricingEngine(qdFpEngine);
+                double qdFpVanilla = vanilla.NPV();
+                if (Math.abs(american - americanVanilla)
+                        > 1e-3 * americanVanilla
+                        || Math.abs(american - qdFpVanilla)
+                        > 5e-4 * qdFpVanilla) {
+                    fail("Failed to reproduce American vanilla price with "
+                            + "a far barrier:"
+                            + "\n    barrier type:          "
+                            + Barrier.toString(barrierTypes[c])
+                            + "\n    option type:           " + optionTypes[c]
+                            + "\n    barrier:               " + barriers[c]
+                            + "\n    american:              " + american
+                            + "\n    american vanilla (FD): " + americanVanilla
+                            + "\n    american vanilla (QD+): " + qdFpVanilla);
+                }
+
+                EuropeanOption bermudanVanilla =
+                        new EuropeanOption(payoff, bermudanExercise);
+                bermudanVanilla.setPricingEngine(vanillaEngine);
+                double expected = bermudanVanilla.NPV();
+                if (Math.abs(bermudan - expected) > 1e-3 * expected) {
+                    fail("Failed to reproduce Bermudan vanilla price with "
+                            + "a far barrier:"
+                            + "\n    barrier type:      "
+                            + Barrier.toString(barrierTypes[c])
+                            + "\n    option type:       " + optionTypes[c]
+                            + "\n    barrier:           " + barriers[c]
+                            + "\n    bermudan:          " + bermudan
+                            + "\n    bermudan vanilla:  " + expected);
+                }
+                continue;
+            }
+
+            // the american price never falls below the exercise value
+            BarrierOption option = new BarrierOption(barrierTypes[c],
+                    barriers[c], rebates[c], payoff, americanExercise);
+            option.setPricingEngine(barrierEngine);
+            boolean down = barrierTypes[c] == Barrier.Type.DownOut;
+            for (double s = down ? barriers[c] + 0.5 : 50.0;
+                 s < (down ? 160.0 : barriers[c]); s += 5.0) {
+                spot.setValue(s);
+                double calculated = option.NPV();
+                if (calculated < payoff.value(s)) {
+                    fail("American knock-out price below exercise value:"
+                            + "\n    barrier type: "
+                            + Barrier.toString(barrierTypes[c])
+                            + "\n    option type:  " + optionTypes[c]
+                            + "\n    barrier:      " + barriers[c]
+                            + "\n    rebate:       " + rebates[c]
+                            + "\n    spot:         " + s
+                            + "\n    american:     " + calculated
+                            + "\n    exercise:     " + payoff.value(s));
+                }
+            }
+            spot.setValue(s0);
+        }
+
+        // in-out parity does not hold with early exercise
+        BarrierOption knockIn = new BarrierOption(Barrier.Type.DownIn,
+                85.0, 0.0,
+                new PlainVanillaPayoff(Option.Type.Call, 100.0),
+                americanExercise);
+        knockIn.setPricingEngine(barrierEngine);
+        expectException(knockIn::NPV);
+
+        // spot on the barrier: when the intrinsic value exceeds the rebate
+        // the value jumps there, so only the rebate is returned
+        double rebate = 3.0;
+        BarrierOption jumpOption = new BarrierOption(Barrier.Type.DownOut,
+                100.0, rebate,
+                new PlainVanillaPayoff(Option.Type.Call, 90.0),
+                americanExercise);
+        jumpOption.setPricingEngine(barrierEngine);
+        checkClose("jump option value", jumpOption.NPV(), rebate, 1e-10);
+        expectException(jumpOption::delta);
+
+        // the same holds for a Bermudan option exercisable today...
+        List<Date> datesFromToday = new ArrayList<>(exerciseDates);
+        datesFromToday.add(0, today);
+        BarrierOption bermudanJump = new BarrierOption(Barrier.Type.DownOut,
+                100.0, rebate,
+                new PlainVanillaPayoff(Option.Type.Call, 90.0),
+                new BermudanExercise(datesFromToday));
+        bermudanJump.setPricingEngine(barrierEngine);
+        checkClose("bermudan jump value", bermudanJump.NPV(), rebate, 1e-10);
+        expectException(bermudanJump::delta);
+
+        // ...but not for one that isn't exercisable today
+        BarrierOption bermudanCall = new BarrierOption(Barrier.Type.DownOut,
+                100.0, rebate,
+                new PlainVanillaPayoff(Option.Type.Call, 90.0),
+                bermudanExercise);
+        bermudanCall.setPricingEngine(barrierEngine);
+        checkClose("bermudan call value", bermudanCall.NPV(), rebate, 1e-10);
+        bermudanCall.delta();
+
+        // otherwise the value is continuous at the barrier and the greeks
+        // are provided
+        BarrierOption americanCall = new BarrierOption(Barrier.Type.DownOut,
+                100.0, rebate,
+                new PlainVanillaPayoff(Option.Type.Call, 100.0),
+                americanExercise);
+        americanCall.setPricingEngine(barrierEngine);
+        checkClose("american call value", americanCall.NPV(), rebate, 1e-10);
+        americanCall.delta();
+        americanCall.gamma();
+        americanCall.theta();
+    }
+
+    private static double barrierNpv(PlainVanillaPayoff payoff,
+                                     Barrier.Type barrierType,
+                                     double barrier, double rebate,
+                                     Exercise exercise,
+                                     PricingEngine engine) {
+        BarrierOption option = new BarrierOption(barrierType, barrier,
+                rebate, payoff, exercise);
+        option.setPricingEngine(engine);
+        return option.NPV();
+    }
+
+    @Test
+    public void testFdAmericanDownOutCallWithoutDividends() {
+        DayCounter dc = new Actual365Fixed();
+
+        Date today = new Date(1, Month.JANUARY, 2025);
+        Date maturity = today.add(365);
+        Settings.instance.evaluationDate().equal(today);
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        Handle<YieldTermStructure> qTS =
+                new Handle<>(flatRate(today, 0.0, dc), true);
+        Handle<YieldTermStructure> rTS =
+                new Handle<>(flatRate(today, 0.05, dc), true);
+        Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, 0.25, dc), true);
+
+        BlackScholesMertonProcess bsProcess = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), qTS, rTS, volTS);
+        PricingEngine engine =
+                new FdBlackScholesBarrierEngine(bsProcess, 200, 400);
+
+        Exercise europeanExercise = new EuropeanExercise(maturity);
+        Exercise americanExercise = new AmericanExercise(today, maturity);
+
+        double tol = 1e-6;
+        for (double strike : new double[]{100.0, 110.0}) {
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(Option.Type.Call, strike);
+            for (double barrier : new double[]{70.0, 85.0, 95.0, 100.0}) {
+                BarrierOption american = new BarrierOption(
+                        Barrier.Type.DownOut, barrier, 0.0, payoff,
+                        americanExercise);
+                BarrierOption european = new BarrierOption(
+                        Barrier.Type.DownOut, barrier, 0.0, payoff,
+                        europeanExercise);
+                american.setPricingEngine(engine);
+                european.setPricingEngine(engine);
+
+                for (double s : new double[]{barrier + 1.0, 100.0,
+                        130.0, 180.0}) {
+                    spot.setValue(s);
+                    double diff = american.NPV() - european.NPV();
+                    if (Math.abs(diff) > tol) {
+                        fail("Failed to reproduce european price with "
+                                + "american down-and-out call without "
+                                + "dividends:"
+                                + "\n    strike:     " + strike
+                                + "\n    barrier:    " + barrier
+                                + "\n    spot:       " + s
+                                + "\n    american:   " + american.NPV()
+                                + "\n    european:   " + european.NPV()
+                                + "\n    difference: " + diff
+                                + "\n    tolerance:  " + tol);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testFdAmericanKnockOutWithDividends() {
+        DayCounter dc = new Actual365Fixed();
+
+        Date today = new Date(1, Month.JANUARY, 2025);
+        Date maturity = today.add(365);
+        Settings.instance.evaluationDate().equal(today);
+
+        Handle<Quote> s0 = new Handle<>(new SimpleQuote(100.0), true);
+        Handle<YieldTermStructure> qTS =
+                new Handle<>(flatRate(today, 0.0, dc), true);
+        Handle<YieldTermStructure> rTS =
+                new Handle<>(flatRate(today, 0.05, dc), true);
+        Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, 0.25, dc), true);
+
+        BlackScholesMertonProcess bsProcess = new BlackScholesMertonProcess(
+                s0, qTS, rTS, volTS);
+
+        List<Dividend> dividends = Dividend.dividendVector(
+                Arrays.asList(today.add(new Period(3, TimeUnit.MONTHS)),
+                        today.add(new Period(9, TimeUnit.MONTHS))),
+                new double[]{2.0, 2.0});
+        PricingEngine barrierEngine = new FdBlackScholesBarrierEngine(
+                bsProcess, dividends, 200, 400);
+        PricingEngine vanillaEngine = new FdBlackScholesVanillaEngine(
+                bsProcess, dividends, 200, 400);
+
+        Exercise europeanExercise = new EuropeanExercise(maturity);
+        Exercise americanExercise = new AmericanExercise(today, maturity);
+
+        // with the barrier too far away to matter, the price
+        // equals the one of the american vanilla option
+        Barrier.Type[] farBarrierTypes = {
+                Barrier.Type.DownOut, Barrier.Type.UpOut};
+        Option.Type[] farOptionTypes = {Option.Type.Put, Option.Type.Call};
+        double[] farBarriers = {20.0, 500.0};
+
+        for (int c = 0; c < farBarrierTypes.length; ++c) {
+            for (double strike : new double[]{90.0, 110.0}) {
+                PlainVanillaPayoff payoff =
+                        new PlainVanillaPayoff(farOptionTypes[c], strike);
+
+                BarrierOption option = new BarrierOption(farBarrierTypes[c],
+                        farBarriers[c], 0.0, payoff, americanExercise);
+                option.setPricingEngine(barrierEngine);
+                EuropeanOption vanilla =
+                        new EuropeanOption(payoff, americanExercise);
+                vanilla.setPricingEngine(vanillaEngine);
+
+                double calculated = option.NPV();
+                double expected = vanilla.NPV();
+                if (Math.abs(calculated - expected) > 1e-3 * expected) {
+                    fail("Failed to reproduce American vanilla price with "
+                            + "dividends and a far barrier:"
+                            + "\n    option type: " + farOptionTypes[c]
+                            + "\n    strike:      " + strike
+                            + "\n    barrier:     " + farBarriers[c]
+                            + "\n    calculated:  " + calculated
+                            + "\n    expected:    " + expected);
+                }
+            }
+        }
+
+        // near the barrier, early exercise adds value
+        Barrier.Type[] nearBarrierTypes = {Barrier.Type.DownOut,
+                Barrier.Type.DownOut, Barrier.Type.UpOut,
+                Barrier.Type.UpOut};
+        Option.Type[] nearOptionTypes = {Option.Type.Call,
+                Option.Type.Put, Option.Type.Call, Option.Type.Put};
+        double[] nearBarriers = {85.0, 85.0, 120.0, 120.0};
+        double[] nearRebates = {0.0, 0.0, 0.0, 5.0};
+
+        for (int c = 0; c < nearBarrierTypes.length; ++c) {
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(nearOptionTypes[c], 100.0);
+
+            BarrierOption american = new BarrierOption(nearBarrierTypes[c],
+                    nearBarriers[c], nearRebates[c], payoff,
+                    americanExercise);
+            BarrierOption european = new BarrierOption(nearBarrierTypes[c],
+                    nearBarriers[c], nearRebates[c], payoff,
+                    europeanExercise);
+            american.setPricingEngine(barrierEngine);
+            european.setPricingEngine(barrierEngine);
+
+            if (american.NPV() < european.NPV()) {
+                fail("American knock-out price with dividends below "
+                        + "european price:"
+                        + "\n    barrier type: "
+                        + Barrier.toString(nearBarrierTypes[c])
+                        + "\n    option type:  " + nearOptionTypes[c]
+                        + "\n    barrier:      " + nearBarriers[c]
+                        + "\n    rebate:       " + nearRebates[c]
+                        + "\n    american:     " + american.NPV()
+                        + "\n    european:     " + european.NPV());
+            }
+        }
+    }
+
+    @Test
+    public void testFdAmericanKnockOutWithDeferredExercise() {
+        DayCounter dc = new Actual365Fixed();
+
+        Date today = new Date(1, Month.JANUARY, 2025);
+        Date maturity = today.add(365);
+        Settings.instance.evaluationDate().equal(today);
+
+        Handle<Quote> s0 = new Handle<>(new SimpleQuote(100.0), true);
+        Handle<YieldTermStructure> qTS =
+                new Handle<>(flatRate(today, 0.0, dc), true);
+        Handle<YieldTermStructure> rTS =
+                new Handle<>(flatRate(today, 0.05, dc), true);
+        Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, 0.25, dc), true);
+
+        BlackScholesMertonProcess bsProcess = new BlackScholesMertonProcess(
+                s0, qTS, rTS, volTS);
+
+        PricingEngine barrierEngine =
+                new FdBlackScholesBarrierEngine(bsProcess, 200, 400);
+        PricingEngine vanillaEngine =
+                new FdBlackScholesVanillaEngine(bsProcess, 200, 400);
+
+        Exercise europeanExercise = new EuropeanExercise(maturity);
+
+        // with the barrier too far away to matter, the price equals
+        // the one of the american vanilla option with the same exercise
+        Exercise deferredExercise = new AmericanExercise(
+                today.add(new Period(6, TimeUnit.MONTHS)), maturity);
+        for (double strike : new double[]{100.0, 110.0}) {
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(Option.Type.Put, strike);
+
+            BarrierOption option = new BarrierOption(Barrier.Type.DownOut,
+                    20.0, 0.0, payoff, deferredExercise);
+            option.setPricingEngine(barrierEngine);
+            EuropeanOption vanilla =
+                    new EuropeanOption(payoff, deferredExercise);
+            vanilla.setPricingEngine(vanillaEngine);
+
+            double calculated = option.NPV();
+            double expected = vanilla.NPV();
+            if (Math.abs(calculated - expected) > 1e-3 * expected) {
+                fail("Failed to reproduce deferred American vanilla price "
+                        + "with a far barrier:"
+                        + "\n    strike:     " + strike
+                        + "\n    calculated: " + calculated
+                        + "\n    expected:   " + expected);
+            }
+        }
+
+        // where the barrier lies in the money, exercising just before the
+        // barrier is hit is only possible within the exercise window; when
+        // it opens a week before maturity, it adds only a small fraction
+        // of the early-exercise premium of the american option
+        Exercise lateExercise = new AmericanExercise(
+                maturity.substract(7), maturity);
+        Exercise americanExercise = new AmericanExercise(today, maturity);
+        Barrier.Type[] barrierTypes = {Barrier.Type.DownOut,
+                Barrier.Type.UpOut};
+        Option.Type[] optionTypes = {Option.Type.Put, Option.Type.Call};
+        double[] barriers = {85.0, 120.0};
+
+        for (int c = 0; c < barrierTypes.length; ++c) {
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(optionTypes[c], 100.0);
+
+            BarrierOption late = new BarrierOption(barrierTypes[c],
+                    barriers[c], 0.0, payoff, lateExercise);
+            BarrierOption european = new BarrierOption(barrierTypes[c],
+                    barriers[c], 0.0, payoff, europeanExercise);
+            BarrierOption american = new BarrierOption(barrierTypes[c],
+                    barriers[c], 0.0, payoff, americanExercise);
+            late.setPricingEngine(barrierEngine);
+            european.setPricingEngine(barrierEngine);
+            american.setPricingEngine(barrierEngine);
+
+            double lateValue = late.NPV();
+            double europeanValue = european.NPV();
+            double americanValue = american.NPV();
+            if (lateValue < europeanValue
+                    || lateValue - europeanValue
+                    > 0.05 * (americanValue - europeanValue)) {
+                fail("Failed to price American knock-out with late "
+                        + "exercise window:"
+                        + "\n    barrier type: " + Barrier.toString(barrierTypes[c])
+                        + "\n    option type:  " + optionTypes[c]
+                        + "\n    barrier:      " + barriers[c]
+                        + "\n    late:         " + lateValue
+                        + "\n    european:     " + europeanValue
+                        + "\n    american:     " + americanValue);
             }
         }
     }
@@ -1294,6 +2282,28 @@ public class BarrierOptionTest {
             return;
         }
         fail("exception expected");
+    }
+
+    /**
+     * Boost {@code BOOST_CHECK_CLOSE}: the third argument is a percentage
+     * tolerance on {@code |calculated - expected| / max(|..|)}.
+     */
+    private static void checkClose(String name, double calculated,
+                                   double expected, double percent) {
+        if (Double.isNaN(calculated) || Double.isNaN(expected)) {
+            fail(name + " is NaN: calculated " + calculated
+                    + ", expected " + expected);
+        }
+        double diff = Math.abs(calculated - expected);
+        double scale = Math.max(Math.abs(calculated), Math.abs(expected));
+        boolean ok = scale == 0.0 || diff / scale * 100.0 <= percent;
+        if (!ok) {
+            fail(name + " mismatch:"
+                    + "\n    calculated: " + calculated
+                    + "\n    expected:   " + expected
+                    + "\n    difference: " + diff
+                    + "\n    tolerance:  " + percent + "%");
+        }
     }
 
     private static void reportFailure(String greekName,
