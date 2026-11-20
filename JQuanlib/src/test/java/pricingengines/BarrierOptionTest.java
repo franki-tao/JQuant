@@ -16,18 +16,26 @@ import jquant.RelinkableHandle;
 import jquant.SavedSettings;
 import jquant.Settings;
 import jquant.cashflows.Dividend;
+import jquant.experimental.barrieroption.PerturbativeBarrierOptionEngine;
+import jquant.experimental.barrieroption.VannaVolgaBarrierEngine;
 import jquant.indexes.IndexManager;
 import jquant.math.Matrix;
 import jquant.math.interpolations.impl.Bicubic;
+import jquant.math.randomnumbers.RngType;
 import jquant.methods.finitedifferences.solvers.FdmSchemeDesc;
 import jquant.models.equity.HestonModel;
+import jquant.pricingengines.BlackFormula;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.barrier.AnalyticBarrierEngine;
+import jquant.pricingengines.barrier.BinomialBarrierEngine;
 import jquant.pricingengines.barrier.FdBlackScholesBarrierEngine;
 import jquant.pricingengines.barrier.FdHestonBarrierEngine;
+import jquant.pricingengines.barrier.MakeMCBarrierEngine;
 import jquant.pricingengines.vanilla.AnalyticEuropeanEngine;
+import jquant.pricingengines.vanilla.BinomialVanillaEngine;
 import jquant.pricingengines.vanilla.FdBlackScholesVanillaEngine;
 import jquant.pricingengines.vanilla.QdFpAmericanEngine;
+import jquant.quotes.DeltaVolQuote;
 import jquant.processes.BlackScholesMertonProcess;
 import jquant.processes.BlackScholesProcess;
 import jquant.processes.GeneralizedBlackScholesProcess;
@@ -35,6 +43,7 @@ import jquant.processes.HestonProcess;
 import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.equityfx.BlackConstantVol;
+import jquant.termstructures.volatility.equityfx.BlackVarianceCurve;
 import jquant.termstructures.volatility.equityfx.BlackVarianceSurface;
 import jquant.termstructures.volatility.equityfx.BlackVolTermStructure;
 import jquant.termstructures.yield.FlatForward;
@@ -65,11 +74,10 @@ import static org.junit.jupiter.api.Assertions.fail;
  * Barrier option pricing from QuantLib
  * {@code test-suite/barrieroption.cpp}.
  *
- * <p>This class ports the standard single-barrier analytic and
- * finite-differences coverage agreed for this step: fourteen complete
- * official cases and four partial ones. The partial cases are documented
- * individually; the binomial, Monte Carlo, double-barrier, perturbative and
- * Vanna-Volga cases are not started.
+ * <p>This class ports the complete official single-barrier coverage agreed
+ * for this step: all 24 official cases are complete, using the analytic,
+ * finite-differences, binomial (Boyle-Lau and Derman-Kani), Monte Carlo,
+ * perturbative and Vanna-Volga engines.
  */
 public class BarrierOptionTest {
 
@@ -631,19 +639,17 @@ public class BarrierOptionTest {
     };
 
     /**
-     * Partial port of official {@code testHaugValues}.
+     * Complete port of official {@code testHaugValues}.
      *
-     * <p>Ported branches: all 72 European rows priced with
-     * {@link AnalyticBarrierEngine}; the {@link FdBlackScholesBarrierEngine}
-     * branch for European options and American knock-outs; and the official
-     * exception checks (American knock-ins, zero spot and triggered barrier).
-     * For the FD branch, American knock-outs whose barrier lies in the money
-     * (and which are not on the barrier) are skipped exactly as in the
-     * official test.
-     *
-     * <p>Deferred official branches, not ported here: the binomial Boyle-Lau
-     * checks and the binomial Derman-Kani checks. The 24 American Haug prices
-     * are not asserted against the analytic engine.
+     * <p>All 72 European rows are priced with {@link AnalyticBarrierEngine};
+     * the {@link FdBlackScholesBarrierEngine} branch covers European options
+     * and American knock-outs; the 400-step Boyle-Lau and Derman-Kani
+     * binomial branches use {@link BinomialBarrierEngine}; and the official
+     * exception checks (American knock-ins, zero spot and triggered barrier)
+     * are kept. For the FD branch, American knock-outs whose barrier lies in
+     * the money (and which are not on the barrier) are skipped exactly as in
+     * the official test. The Derman-Kani branch follows the official engine
+     * construction, leaving the default Boyle-Lau adjustment enabled.
      */
     @Test
     public void testHaugValues() {
@@ -736,6 +742,50 @@ public class BarrierOptionTest {
         } else {
             expectException(barrierOption::NPV);
         }
+
+        // Binomial barrier engine, standard discretization with the
+        // Boyle-Lau timestep adjustment (maxTimeSteps defaults to zero).
+        barrierOption.setPricingEngine(new BinomialBarrierEngine(stochProcess,
+                400));
+
+        if (!useZeroSpot && !useTriggeredBarrier) {
+            double calculated = barrierOption.NPV();
+            double expected = value.result;
+            double error = Math.abs(calculated - expected);
+            double tol = 1.1e-2;
+            if (error > tol) {
+                reportFailure("Binomial (Boyle-lau) value", value.barrierType,
+                        value.barrier, value.rebate, payoff, exercise, value.s,
+                        value.q, value.r, today, value.v, expected, calculated,
+                        error, tol);
+            }
+        } else {
+            expectException(barrierOption::NPV);
+        }
+
+        // Derman-Kani discretization. The official test passes only the
+        // number of time steps (its comment about forcing maxTimeSteps to
+        // timeSteps is stale: at exactly 400 steps the knock-out barrier
+        // phase makes the official 4e-2 tolerance unachievable). The
+        // default maxTimeSteps therefore leaves Boyle-Lau enabled, as in
+        // the official source.
+        barrierOption.setPricingEngine(new BinomialBarrierEngine(stochProcess,
+                400, 0, BinomialBarrierEngine.Discretization.DERMAN_KANI));
+
+        if (!useZeroSpot && !useTriggeredBarrier) {
+            double calculated = barrierOption.NPV();
+            double expected = value.result;
+            double error = Math.abs(calculated - expected);
+            double tol = 4e-2;
+            if (error > tol) {
+                reportFailure("Binomial (Derman) value", value.barrierType,
+                        value.barrier, value.rebate, payoff, exercise, value.s,
+                        value.q, value.r, today, value.v, expected, calculated,
+                        error, tol);
+            }
+        } else {
+            expectException(barrierOption::NPV);
+        }
     }
 
     private static final BarrierOptionData[] BABSIRI_VALUES = {
@@ -764,13 +814,13 @@ public class BarrierOptionTest {
     };
 
     /**
-     * Partial port of official {@code testBabsiriValues}.
+     * Complete port of official {@code testBabsiriValues}.
      *
-     * <p>Ported branch: the 10 official analytic Call rows against
-     * {@link AnalyticBarrierEngine} with absolute tolerance {@code 1.0e-5}.
-     *
-     * <p>Deferred official branch, not ported here: the Monte Carlo checks
-     * using {@code MakeMCBarrierEngine}.
+     * <p>The 10 official analytic Call rows are priced with
+     * {@link AnalyticBarrierEngine} to absolute tolerance {@code 1.0e-5};
+     * the Monte Carlo branch uses
+     * {@link MakeMCBarrierEngine} with low-discrepancy numbers, a Brownian
+     * bridge, 131071 samples, seed 5, and relative tolerance {@code 2.0e-2}.
      */
     @Test
     public void testBabsiriValues() {
@@ -821,6 +871,27 @@ public class BarrierOptionTest {
                         value.volatility, expected, calculated, error,
                         maxErrorAllowed);
             }
+
+            double maxMcRelativeErrorAllowed = 2.0e-2;
+
+            PricingEngine mcEngine = new MakeMCBarrierEngine(stochProcess,
+                    RngType.LOW_DISCREPANCY)
+                    .withStepsPerYear(1)
+                    .withBrownianBridge()
+                    .withSamples(131071)     // 2^17-1
+                    .withMaxSamples(1048575) // 2^20-1
+                    .withSeed(5)
+                    .build();
+
+            barrierCallOption.setPricingEngine(mcEngine);
+            calculated = barrierCallOption.NPV();
+            error = Math.abs(calculated - expected) / expected;
+            if (error > maxMcRelativeErrorAllowed) {
+                reportFailure("value", value.type, value.barrier, rebate,
+                        callPayoff, exercise, underlyingPrice, q, r, today,
+                        value.volatility, expected, calculated, error,
+                        maxMcRelativeErrorAllowed);
+            }
         }
     }
 
@@ -833,13 +904,13 @@ public class BarrierOptionTest {
     };
 
     /**
-     * Partial port of official {@code testBeagleholeValues}.
+     * Complete port of official {@code testBeagleholeValues}.
      *
-     * <p>Ported branch: the official analytic DownOut Call row with
-     * absolute tolerance {@code 1.0e-3}.
-     *
-     * <p>Deferred official branch, not ported here: the Monte Carlo check
-     * using {@code MakeMCBarrierEngine}.
+     * <p>The official analytic DownOut Call row is priced with
+     * {@link AnalyticBarrierEngine} to absolute tolerance {@code 1.0e-3};
+     * the Monte Carlo branch uses {@link MakeMCBarrierEngine} with
+     * low-discrepancy numbers, a Brownian bridge, 131071 samples, seed 10,
+     * and relative tolerance {@code 0.01}.
      */
     @Test
     public void testBeagleholeValues() {
@@ -889,6 +960,26 @@ public class BarrierOptionTest {
                         callPayoff, exercise, underlyingPrice, q, r, today,
                         value.volatility, expected, calculated, error,
                         maxErrorAllowed);
+            }
+
+            double maxMcRelativeErrorAllowed = 0.01;
+            PricingEngine mcEngine = new MakeMCBarrierEngine(stochProcess,
+                    RngType.LOW_DISCREPANCY)
+                    .withStepsPerYear(1)
+                    .withBrownianBridge()
+                    .withSamples(131071)     // 2^17-1
+                    .withMaxSamples(1048575) // 2^20-1
+                    .withSeed(10)
+                    .build();
+
+            barrierCallOption.setPricingEngine(mcEngine);
+            calculated = barrierCallOption.NPV();
+            error = Math.abs(calculated - expected) / expected;
+            if (error > maxMcRelativeErrorAllowed) {
+                reportFailure("value", value.type, value.barrier, rebate,
+                        callPayoff, exercise, underlyingPrice, q, r, today,
+                        value.volatility, expected, calculated, error,
+                        maxMcRelativeErrorAllowed);
             }
         }
     }
@@ -1320,13 +1411,13 @@ public class BarrierOptionTest {
     }
 
     /**
-     * Partial port of official {@code testFdAmericanKnockOut}.
+     * Complete port of official {@code testFdAmericanKnockOut}.
      *
-     * <p>Only the two official rows with stored converged expected values
-     * ({@code 8.0305} and {@code 9.7605}) are checked, to relative tolerance
-     * {@code 1e-3}. The four rows whose expected values come from the
-     * binomial engine are deferred; {@code BinomialBarrierEngine} is not
-     * ported.
+     * <p>Six American knock-out rows are checked to relative tolerance
+     * {@code 1e-3}. The four rows whose official expected values are
+     * {@code Null} are compared against the Derman-Kani binomial reference
+     * (1000 steps, Boyle-Lau adjustment enabled); the last two use the
+     * stored converged values {@code 8.0305} and {@code 9.7605}.
      */
     @Test
     public void testFdAmericanKnockOut() {
@@ -1349,15 +1440,23 @@ public class BarrierOptionTest {
 
         PricingEngine fdEngine =
                 new FdBlackScholesBarrierEngine(bsProcess, 200, 400);
+        PricingEngine binomialEngine = new BinomialBarrierEngine(bsProcess,
+                1000, 0, BinomialBarrierEngine.Discretization.DERMAN_KANI);
 
         Exercise americanExercise = new AmericanExercise(today, maturity);
 
-        Barrier.Type[] barrierTypes = {Barrier.Type.DownOut,
-                Barrier.Type.UpOut};
-        Option.Type[] optionTypes = {Option.Type.Put, Option.Type.Call};
-        double[] barriers = {85.0, 120.0};
-        double[] rebates = {0.0, 0.0};
-        double[] expectedValues = {8.0305, 9.7605};
+        Barrier.Type[] barrierTypes = {
+                Barrier.Type.DownOut, Barrier.Type.UpOut,
+                Barrier.Type.DownOut, Barrier.Type.UpOut,
+                Barrier.Type.DownOut, Barrier.Type.UpOut};
+        Option.Type[] optionTypes = {
+                Option.Type.Call, Option.Type.Put,
+                Option.Type.Call, Option.Type.Put,
+                Option.Type.Put, Option.Type.Call};
+        double[] barriers = {85.0, 120.0, 85.0, 120.0, 85.0, 120.0};
+        double[] rebates = {0.0, 0.0, 5.0, 5.0, 0.0, 0.0};
+        // Null values are taken from the binomial reference, as official.
+        Double[] expectedValues = {null, null, null, null, 8.0305, 9.7605};
 
         double relTol = 1e-3;
         for (int i = 0; i < barrierTypes.length; ++i) {
@@ -1365,9 +1464,16 @@ public class BarrierOptionTest {
                     new PlainVanillaPayoff(optionTypes[i], 100.0);
             BarrierOption option = new BarrierOption(barrierTypes[i],
                     barriers[i], rebates[i], payoff, americanExercise);
-            option.setPricingEngine(fdEngine);
 
-            double expected = expectedValues[i];
+            double expected;
+            if (expectedValues[i] == null) {
+                option.setPricingEngine(binomialEngine);
+                expected = option.NPV();
+            } else {
+                expected = expectedValues[i];
+            }
+
+            option.setPricingEngine(fdEngine);
             double calculated = option.NPV();
 
             if (Math.abs(calculated - expected) > relTol * expected) {
@@ -1381,6 +1487,448 @@ public class BarrierOptionTest {
                         + "\n    difference    "
                         + Math.abs(calculated - expected)
                         + "\n    tolerance     " + relTol * expected);
+            }
+        }
+    }
+
+    /**
+     * Complete port of official {@code testBinomialExerciseAtMaturity}.
+     *
+     * <p>All stock nodes lie between the two barriers, so neither can knock
+     * out and the barrier lattice must reproduce the vanilla binomial price
+     * for both European and American exercise. The Boyle-Lau adjustment is
+     * disabled so that the tree matches the vanilla reference exactly.
+     */
+    @Test
+    public void testBinomialExerciseAtMaturity() {
+        Date today = new Date(21, Month.SEPTEMBER, 2026);
+        Settings.instance.evaluationDate().equal(today);
+        DayCounter dc = new Actual365Fixed();
+        Date maturity = today.add(91);
+
+        Handle<Quote> spot = new Handle<>(new SimpleQuote(100.0), true);
+        Handle<YieldTermStructure> qTS =
+                new Handle<>(flatRate(today, 0.0, dc), true);
+        Handle<YieldTermStructure> rTS =
+                new Handle<>(flatRate(today, 0.05, dc), true);
+        Handle<BlackVolTermStructure> volTS =
+                new Handle<>(flatVol(today, 0.15, dc), true);
+
+        BlackScholesMertonProcess process = new BlackScholesMertonProcess(
+                spot, qTS, rTS, volTS);
+
+        PlainVanillaPayoff payoff =
+                new PlainVanillaPayoff(Option.Type.Call, 85.0);
+        Exercise europeanExercise = new EuropeanExercise(maturity);
+        Exercise americanExercise = new AmericanExercise(today, maturity);
+
+        int timeSteps = 51;
+        // Disable Boyle-Lau adjustment to keep the same tree as the vanilla
+        // reference.
+        BinomialBarrierEngine engine =
+                new BinomialBarrierEngine(process, timeSteps, timeSteps);
+
+        EuropeanOption vanilla = new EuropeanOption(payoff, europeanExercise);
+        vanilla.setPricingEngine(new BinomialVanillaEngine(process, timeSteps,
+                BinomialVanillaEngine.TreeType.COX_ROSS_RUBINSTEIN));
+        double expected = vanilla.NPV();
+        double tolerance = 1.0e-10;
+
+        Barrier.Type[] types = {Barrier.Type.DownOut, Barrier.Type.UpOut};
+        for (Barrier.Type type : types) {
+            double barrier = type == Barrier.Type.DownOut ? 1.0 : 1000.0;
+            BarrierOption european = new BarrierOption(type, barrier, 0.0,
+                    payoff, europeanExercise);
+            BarrierOption american = new BarrierOption(type, barrier, 0.0,
+                    payoff, americanExercise);
+            european.setPricingEngine(engine);
+            american.setPricingEngine(engine);
+
+            double europeanValue = european.NPV();
+            double americanValue = american.NPV();
+
+            if (Math.abs(europeanValue - expected) > tolerance) {
+                fail(type + ": European barrier value " + europeanValue
+                        + " differs from vanilla value " + expected);
+            }
+            if (americanValue < expected - tolerance) {
+                fail(type + ": American barrier value " + americanValue
+                        + " is below European vanilla value " + expected);
+            }
+            if (Math.abs(americanValue - expected) > tolerance) {
+                fail(type + ": non-dividend-paying American barrier value "
+                        + americanValue + " differs from vanilla value "
+                        + expected);
+            }
+        }
+    }
+
+    /**
+     * Official helper {@code perturbativeBarrierOptionValue}.
+     */
+    private static double perturbativeBarrierOptionValue(int order,
+                                                        int npoint,
+                                                        int npoint2) {
+        double s = 100.0;
+        double rebate = 0.0;
+        double r = 0.03;
+        double q = 0.02;
+
+        DayCounter dc = new Actual360();
+        Date today = Settings.instance.evaluationDate().Date();
+
+        SimpleQuote underlying = new SimpleQuote(s);
+        YieldTermStructure qTS = flatRate(today, q, dc);
+        YieldTermStructure rTS = flatRate(today, r, dc);
+
+        List<Date> dates = Arrays.asList(today.add(90), today.add(180));
+        List<Double> vols = Arrays.asList(0.105, 0.11);
+
+        BlackVolTermStructure volTS =
+                new BlackVarianceCurve(today, dates, vols, dc, true);
+
+        BlackScholesMertonProcess stochProcess = new BlackScholesMertonProcess(
+                new Handle<>(underlying, true),
+                new Handle<>(qTS, true),
+                new Handle<>(rTS, true),
+                new Handle<>(volTS, true));
+
+        double strike = 101.0;
+        double barrier = 101.0;
+        Date exDate = today.add(180);
+
+        Exercise exercise = new EuropeanExercise(exDate);
+        PlainVanillaPayoff payoff =
+                new PlainVanillaPayoff(Option.Type.Put, strike);
+
+        BarrierOption option = new BarrierOption(Barrier.Type.UpOut, barrier,
+                rebate, payoff, exercise);
+
+        boolean zeroGamma = false;
+        option.setPricingEngine(new PerturbativeBarrierOptionEngine(
+                stochProcess, order, zeroGamma, npoint, npoint2));
+
+        return option.NPV();
+    }
+
+    /** Official {@code testPerturbativeOrder0}. */
+    @Test
+    public void testPerturbativeOrder0() {
+        double value = perturbativeBarrierOptionValue(0, 1000, 100);
+        double error = Math.abs(value - 0.897365);
+        if (error > 1.0e-6) {
+            fail("perturbative barrier engine, order 0:"
+                    + "\n    calculated: " + value
+                    + "\n    expected:   0.897365"
+                    + "\n    error:      " + error
+                    + "\n    tolerance:  1.0e-6");
+        }
+    }
+
+    /** Official {@code testPerturbativeOrder1}. */
+    @Test
+    public void testPerturbativeOrder1() {
+        double value = perturbativeBarrierOptionValue(1, 1000, 100);
+        double error = Math.abs(value - 0.894374);
+        if (error > 1.0e-6) {
+            fail("perturbative barrier engine, order 1:"
+                    + "\n    calculated: " + value
+                    + "\n    expected:   0.894374"
+                    + "\n    error:      " + error
+                    + "\n    tolerance:  1.0e-6");
+        }
+    }
+
+    /** Official {@code testPerturbativeOrder2Fast}. */
+    @Test
+    public void testPerturbativeOrder2Fast() {
+        double value = perturbativeBarrierOptionValue(2, 100, 10);
+        double error = Math.abs(value - 0.8943754);
+        if (error > 1.0e-6) {
+            fail("perturbative barrier engine, fast order 2:"
+                    + "\n    calculated: " + value
+                    + "\n    expected:   0.8943754"
+                    + "\n    error:      " + error
+                    + "\n    tolerance:  1.0e-6");
+        }
+    }
+
+    /** Official {@code testPerturbativeOrder2FullResolution}. */
+    @Test
+    public void testPerturbativeOrder2FullResolution() {
+        double value = perturbativeBarrierOptionValue(2, 1000, 100);
+        double error = Math.abs(value - 0.8943754);
+        if (error > 1.0e-6) {
+            fail("perturbative barrier engine, full-resolution order 2:"
+                    + "\n    calculated: " + value
+                    + "\n    expected:   0.8943754"
+                    + "\n    error:      " + error
+                    + "\n    tolerance:  1.0e-6");
+        }
+    }
+
+    /** Official {@code BarrierFxOptionData}. */
+    private static class BarrierFxOptionData {
+        final Barrier.Type barrierType;
+        final double barrier;
+        final double rebate;
+        final Option.Type type;
+        final double strike;
+        final double s;
+        final double q;
+        final double r;
+        final double t;
+        final double vol25Put;
+        final double volAtm;
+        final double vol25Call;
+        final double v;
+        final double result;
+        final double tol;
+
+        BarrierFxOptionData(Barrier.Type barrierType, double barrier,
+                            double rebate, Option.Type type, double strike,
+                            double s, double q, double r, double t,
+                            double vol25Put, double volAtm, double vol25Call,
+                            double v, double result, double tol) {
+            this.barrierType = barrierType;
+            this.barrier = barrier;
+            this.rebate = rebate;
+            this.type = type;
+            this.strike = strike;
+            this.s = s;
+            this.q = q;
+            this.r = r;
+            this.t = t;
+            this.vol25Put = vol25Put;
+            this.volAtm = volAtm;
+            this.vol25Call = vol25Call;
+            this.v = v;
+            this.result = result;
+            this.tol = tol;
+        }
+    }
+
+    private static final BarrierFxOptionData[] VANNA_VOLGA_VALUES = {
+
+            //barrierType,barrier,rebate,type,strike,s,q,r,t,vol25Put,volAtm,vol25Call,vol, result, tol
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.5, 0, Option.Type.Call, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.148127, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.5, 0, Option.Type.Call, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.075943, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.5, 0, Option.Type.Call, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0.0274771, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.5, 0, Option.Type.Call, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.00573, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.5, 0, Option.Type.Call, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.00012, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.5, 0, Option.Type.Put, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.00697606, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.5, 0, Option.Type.Put, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.020078, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.5, 0, Option.Type.Put, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0.0489395, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.5, 0, Option.Type.Put, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.0969877, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.5, 0, Option.Type.Put, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.157, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.5, 0, Option.Type.Call, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.0322202, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.5, 0, Option.Type.Call, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.0241491, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.5, 0, Option.Type.Call, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0.0164275, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.5, 0, Option.Type.Call, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.01, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.5, 0, Option.Type.Call, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.00489, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.5, 0, Option.Type.Put, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.000560713, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.5, 0, Option.Type.Put, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.000546804, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.5, 0, Option.Type.Put, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0.000130649, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.5, 0, Option.Type.Put, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.000300828, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.5, 0, Option.Type.Put, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.00135, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.1, 0, Option.Type.Call, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.17746, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.1, 0, Option.Type.Call, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.0994142, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.1, 0, Option.Type.Call, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0.0439, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.1, 0, Option.Type.Call, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.01574, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.1, 0, Option.Type.Call, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.00501, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Call, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.00612, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Call, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.00426, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Call, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0.00257, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Call, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.00122, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Call, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.00045, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.1, 0, Option.Type.Put, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.00022, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.1, 0, Option.Type.Put, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.00284, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.1, 0, Option.Type.Put, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0.02032, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.1, 0, Option.Type.Put, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.058235, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.1, 0, Option.Type.Put, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.109432, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Put, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Put, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Put, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Put, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.00017, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Put, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.00083, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.1, 0, Option.Type.Call, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.00289, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.1, 0, Option.Type.Call, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.00067784, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.1, 0, Option.Type.Call, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.1, 0, Option.Type.Call, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.1, 0, Option.Type.Call, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Call, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.17423, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Call, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.09584, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Call, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0.04133, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Call, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.01452, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Call, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.00456, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.1, 0, Option.Type.Put, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.00732, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.1, 0, Option.Type.Put, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.01778, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.1, 0, Option.Type.Put, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0.02875, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.1, 0, Option.Type.Put, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.0390535, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.1, 0, Option.Type.Put, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.0489236, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Put, 1.13321, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.11638, 0.00753, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Put, 1.22687, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.10088, 0.02062, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Put, 1.31179, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08925, 0.04907, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Put, 1.38843, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08463, 0.09711, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Put, 1.46047, 1.30265, 0.0003541, 0.0033871, 1, 0.10087, 0.08925, 0.08463, 0.08412, 0.15752, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.6, 0, Option.Type.Call, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.20493, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.6, 0, Option.Type.Call, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.105577, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.6, 0, Option.Type.Call, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.0358872, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.6, 0, Option.Type.Call, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.00634958, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.6, 0, Option.Type.Call, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.6, 0, Option.Type.Put, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.0108218, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.6, 0, Option.Type.Put, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.0313339, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.6, 0, Option.Type.Put, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.0751237, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.6, 0, Option.Type.Put, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.153407, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpOut, 1.6, 0, Option.Type.Put, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.253767, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.6, 0, Option.Type.Call, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.05402, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.6, 0, Option.Type.Call, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.0410069, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.6, 0, Option.Type.Call, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.0279562, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.6, 0, Option.Type.Call, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.0173055, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.6, 0, Option.Type.Call, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.00764, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.6, 0, Option.Type.Put, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.000962737, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.6, 0, Option.Type.Put, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.00102637, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.6, 0, Option.Type.Put, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.000419834, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.6, 0, Option.Type.Put, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.00159277, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.UpIn, 1.6, 0, Option.Type.Put, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.00473629, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1, 0, Option.Type.Call, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.255098, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1, 0, Option.Type.Call, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.145701, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1, 0, Option.Type.Call, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.06384, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1, 0, Option.Type.Call, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.02366, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1, 0, Option.Type.Call, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.00764, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Call, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.00592, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Call, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.00421, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Call, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.00256, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Call, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.0012, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Call, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.0004, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1, 0, Option.Type.Put, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1, 0, Option.Type.Put, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.00280549, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1, 0, Option.Type.Put, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.0279945, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1, 0, Option.Type.Put, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.0896352, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1, 0, Option.Type.Put, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.175182, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Put, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.00000, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Put, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.00000, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Put, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.00000, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Put, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.0002, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownOut, 1.3, 0, Option.Type.Put, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.00096, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1, 0, Option.Type.Call, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.00384783, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1, 0, Option.Type.Call, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.000883232, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1, 0, Option.Type.Call, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1, 0, Option.Type.Call, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.00000, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1, 0, Option.Type.Call, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.00000, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Call, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.25302, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Call, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.14238, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Call, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.06128, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Call, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.02245, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Call, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.00725, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1, 0, Option.Type.Put, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.01178, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1, 0, Option.Type.Put, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.0295548, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1, 0, Option.Type.Put, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.047549, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1, 0, Option.Type.Put, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.0653642, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1, 0, Option.Type.Put, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.0833221, 1.0e-4),
+
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Put, 1.06145, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.12511, 0.01178, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Put, 1.19545, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.1089, 0.03236, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Put, 1.32238, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09444, 0.07554, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Put, 1.44298, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09197, 0.15479, 1.0e-4),
+            new BarrierFxOptionData(Barrier.Type.DownIn, 1.3, 0, Option.Type.Put, 1.56345, 1.30265, 0.0009418, 0.0039788, 2, 0.10891, 0.09525, 0.09197, 0.09261, 0.25754, 1.0e-4)
+    };
+
+    /**
+     * Complete port of official {@code testVannaVolgaSimpleBarrierValues}.
+     *
+     * <p>The 120 official FX barrier rows are priced with
+     * {@link VannaVolgaBarrierEngine} to absolute tolerance {@code 1.0e-4}.
+     */
+    @Test
+    public void testVannaVolgaSimpleBarrierValues() {
+        DayCounter dc = new Actual365Fixed();
+        Date today = new Date(5, Month.MARCH, 2013);
+        Settings.instance.evaluationDate().equal(today);
+
+        SimpleQuote spot = new SimpleQuote(0.0);
+        SimpleQuote qRate = new SimpleQuote(0.0);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.0);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+        SimpleQuote vol25Put = new SimpleQuote(0.0);
+        SimpleQuote volAtm = new SimpleQuote(0.0);
+        SimpleQuote vol25Call = new SimpleQuote(0.0);
+
+        for (BarrierFxOptionData value : VANNA_VOLGA_VALUES) {
+
+            spot.setValue(value.s);
+            qRate.setValue(value.q);
+            rRate.setValue(value.r);
+            vol25Put.setValue(value.vol25Put);
+            volAtm.setValue(value.volAtm);
+            vol25Call.setValue(value.vol25Call);
+
+            PlainVanillaPayoff payoff =
+                    new PlainVanillaPayoff(value.type, value.strike);
+
+            Date exDate = today.add(timeToDays(value.t, 365));
+            Exercise exercise = new EuropeanExercise(exDate);
+
+            Handle<DeltaVolQuote> volAtmQuote = new Handle<>(
+                    new DeltaVolQuote(new Handle<Quote>(volAtm, true),
+                            DeltaVolQuote.DeltaType.Fwd, value.t,
+                            DeltaVolQuote.AtmType.AtmDeltaNeutral), true);
+
+            Handle<DeltaVolQuote> vol25PutQuote = new Handle<>(
+                    new DeltaVolQuote(-0.25, new Handle<Quote>(vol25Put, true),
+                            value.t, DeltaVolQuote.DeltaType.Fwd), true);
+
+            Handle<DeltaVolQuote> vol25CallQuote = new Handle<>(
+                    new DeltaVolQuote(0.25, new Handle<Quote>(vol25Call, true),
+                            value.t, DeltaVolQuote.DeltaType.Fwd), true);
+
+            BarrierOption barrierOption = new BarrierOption(value.barrierType,
+                    value.barrier, value.rebate, payoff, exercise);
+
+            double bsVanillaPrice = BlackFormula.blackFormula(value.type,
+                    value.strike,
+                    spot.value() * qTS.discount(value.t) / rTS.discount(value.t),
+                    value.v * Math.sqrt(value.t),
+                    rTS.discount(value.t), 0.0);
+
+            PricingEngine vannaVolgaEngine = new VannaVolgaBarrierEngine(
+                    volAtmQuote, vol25PutQuote, vol25CallQuote,
+                    new Handle<Quote>(spot, true),
+                    new Handle<>(rTS, true),
+                    new Handle<>(qTS, true),
+                    true, bsVanillaPrice);
+
+            barrierOption.setPricingEngine(vannaVolgaEngine);
+
+            double calculated = barrierOption.NPV();
+            double expected = value.result;
+            double error = Math.abs(calculated - expected);
+            if (error > value.tol) {
+                reportFxFailure("value", value, payoff, exercise, spot.value(),
+                        today, expected, calculated, error);
             }
         }
     }
@@ -2332,6 +2880,34 @@ public class BarrierOptionTest {
                 + "    tolerance:        " + tolerance);
     }
 
+    /** Official {@code REPORT_FX_FAILURE} message fields. */
+    private static void reportFxFailure(String greekName,
+                                        BarrierFxOptionData value,
+                                        PlainVanillaPayoff payoff,
+                                        Exercise exercise, double s, Date today,
+                                        double expected, double calculated,
+                                        double error) {
+        fail("\n" + barrierTypeToString(value.barrierType) + " "
+                + exerciseTypeToString(exercise) + " "
+                + payoff.optionType() + " FX option with plain-vanilla payoff:\n"
+                + "    underlying value: " + s + "\n"
+                + "    strike:           " + payoff.strike() + "\n"
+                + "    barrier:          " + value.barrier + "\n"
+                + "    rebate:           " + value.rebate + "\n"
+                + "    dividend yield:   " + value.q + "\n"
+                + "    risk-free rate:   " + value.r + "\n"
+                + "    reference date:   " + today + "\n"
+                + "    maturity:         " + exercise.lastDate() + "\n"
+                + "    25PutVol:         " + value.vol25Put + "\n"
+                + "    atmVol:           " + value.volAtm + "\n"
+                + "    25CallVol:        " + value.vol25Call + "\n"
+                + "    volatility:       " + value.v + "\n\n"
+                + "    expected   " + greekName + ": " + expected + "\n"
+                + "    calculated " + greekName + ": " + calculated + "\n"
+                + "    error:            " + error + "\n"
+                + "    tolerance:        " + value.tol);
+    }
+
     /** Official {@code barrierTypeToString} from test-suite utilities. */
     private static String barrierTypeToString(Barrier.Type type) {
         switch (type) {
@@ -2363,6 +2939,10 @@ public class BarrierOptionTest {
 
     private static int timeToDays(double t) {
         return (int) Math.round(t * 360.0);
+    }
+
+    private static int timeToDays(double t, int daysPerYear) {
+        return (int) Math.round(t * daysPerYear);
     }
 
     private static YieldTermStructure flatRate(Date today, double rate,
