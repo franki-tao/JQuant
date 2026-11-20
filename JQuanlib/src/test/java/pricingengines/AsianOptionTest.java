@@ -51,6 +51,7 @@ import jquant.time.Period;
 import jquant.time.TimeUnit;
 import jquant.time.TimeUtils;
 import jquant.time.calendars.NullCalendar;
+import jquant.time.calendars.Target;
 import jquant.time.daycounters.Actual360;
 import jquant.time.daycounters.Actual365Fixed;
 import org.junit.jupiter.api.AfterEach;
@@ -3451,6 +3452,273 @@ public class AsianOptionTest {
             new DiscreteAverageData(Option.Type.Call, 90.0, 87.0, 0.06, 0.025,
                     3.0 / 12.0, 11.0 / 12.0, 1000, 0.13, true, 1.81145760308)
     );
+
+    /**
+     * QuantLib {@code testPastFixingsModelDependency}.
+     *
+     * <p>Turnbull-Wakeman discrete arithmetic averaging with the official
+     * all-fixing-dates constructor and two past fixings.  The evaluation date
+     * is deliberately not pinned, as in the official test.
+     */
+    @Test
+    public void testPastFixingsModelDependency() {
+        DayCounter dc = new Actual360();
+        Date today = Settings.instance.evaluationDate().Date();
+
+        SimpleQuote spot = new SimpleQuote(100.0);
+        SimpleQuote qRate = new SimpleQuote(0.03);
+        YieldTermStructure qTS = flatRate(today, qRate, dc);
+        SimpleQuote rRate = new SimpleQuote(0.06);
+        YieldTermStructure rTS = flatRate(today, rRate, dc);
+        SimpleQuote vol = new SimpleQuote(0.20);
+        BlackVolTermStructure volTS = flatVol(today, vol, dc);
+
+        PlainVanillaPayoff callPayoff =
+                new PlainVanillaPayoff(Option.Type.Call, 20.0);
+        PlainVanillaPayoff putPayoff =
+                new PlainVanillaPayoff(Option.Type.Put, 20.0);
+
+        List<Date> fixingDates = List.of(
+                today.substract(new Period(6, TimeUnit.WEEKS)),
+                today.substract(new Period(2, TimeUnit.WEEKS)),
+                today.add(new Period(2, TimeUnit.WEEKS)),
+                today.add(new Period(6, TimeUnit.WEEKS)));
+
+        Exercise exercise = new EuropeanExercise(
+                today.add(new Period(6, TimeUnit.WEEKS)));
+
+        BlackScholesMertonProcess stochProcess = new BlackScholesMertonProcess(
+                new Handle<>(spot, true), new Handle<>(qTS, true),
+                new Handle<>(rTS, true), new Handle<>(volTS, true));
+
+        // Test guaranteed exercise (calls) and permanent OTMness (puts),
+        // with the average price TW engine
+        PricingEngine engine = new TurnbullWakemanAsianEngine(stochProcess);
+
+        List<Double> allPastFixings = List.of(spot.value(), spot.value());
+
+        DiscreteAveragingAsianOption callOption =
+                new DiscreteAveragingAsianOption(Average.Type.Arithmetic,
+                        fixingDates, callPayoff, exercise, allPastFixings);
+        DiscreteAveragingAsianOption putOption =
+                new DiscreteAveragingAsianOption(Average.Type.Arithmetic,
+                        fixingDates, putPayoff, exercise, allPastFixings);
+
+        callOption.setPricingEngine(engine);
+        putOption.setPricingEngine(engine);
+
+        // The expected call NPV is equal to that of an averaging forward over
+        // the same fixing dates, since exercise is guaranteed
+        double expectedCallOptionNpv = rTS.discount(exercise.lastDate())
+                * ((100.0 + 100.0
+                    + 100.0 * qTS.discount(fixingDates.get(2))
+                            / rTS.discount(fixingDates.get(2))
+                    + 100.0 * qTS.discount(fixingDates.get(3))
+                            / rTS.discount(fixingDates.get(3)))
+                    / fixingDates.size()
+                    - callPayoff.strike());
+
+        if (callOption.NPV() != expectedCallOptionNpv) {
+            fail("Past fixings call NPV: expected " + expectedCallOptionNpv
+                    + " but calculated " + callOption.NPV());
+        }
+        if (putOption.NPV() != 0.0) {
+            fail("Past fixings put NPV: expected 0.0 but calculated "
+                    + putOption.NPV());
+        }
+
+        // Compare greeks to numerical greeks
+        double dS = 0.001;
+        double callPrice = callOption.NPV();
+        double putPrice = putOption.NPV();
+        double callDelta = callOption.delta();
+        double callGamma = callOption.gamma();
+        double putDelta = putOption.delta();
+        double putGamma = putOption.gamma();
+
+        SimpleQuote spotUp = new SimpleQuote(100.0 + dS);
+        SimpleQuote spotDown = new SimpleQuote(100.0 - dS);
+
+        BlackScholesMertonProcess stochProcessUp =
+                new BlackScholesMertonProcess(
+                        new Handle<>(spotUp, true), new Handle<>(qTS, true),
+                        new Handle<>(rTS, true), new Handle<>(volTS, true));
+
+        BlackScholesMertonProcess stochProcessDown =
+                new BlackScholesMertonProcess(
+                        new Handle<>(spotDown, true), new Handle<>(qTS, true),
+                        new Handle<>(rTS, true), new Handle<>(volTS, true));
+
+        PricingEngine engineUp = new TurnbullWakemanAsianEngine(stochProcessUp);
+        PricingEngine engineDown =
+                new TurnbullWakemanAsianEngine(stochProcessDown);
+
+        callOption.setPricingEngine(engineUp);
+        double callCalculatedUp = callOption.NPV();
+        putOption.setPricingEngine(engineUp);
+        double putCalculatedUp = putOption.NPV();
+
+        callOption.setPricingEngine(engineDown);
+        double callCalculatedDown = callOption.NPV();
+        putOption.setPricingEngine(engineDown);
+        double putCalculatedDown = putOption.NPV();
+
+        double callDeltaBump = (callCalculatedUp - callCalculatedDown) / (2 * dS);
+        double callGammaBump =
+                (callCalculatedUp + callCalculatedDown - 2 * callPrice)
+                        / (dS * dS);
+
+        double putDeltaBump = (putCalculatedUp - putCalculatedDown) / (2 * dS);
+        double putGammaBump =
+                (putCalculatedUp + putCalculatedDown - 2 * putPrice) / (dS * dS);
+
+        double tolerance = 1.0e-8;
+        if (Math.abs(callDeltaBump - callDelta) > tolerance) {
+            fail("Seasoned analytic call delta did not match numerical delta:"
+                    + "\n    analytic delta:  " + callDelta
+                    + "\n    bump delta:      " + callDeltaBump
+                    + "\n    error:           "
+                    + Math.abs(callDeltaBump - callDelta));
+        }
+        if (Math.abs(callGammaBump - callGamma) > tolerance) {
+            fail("Seasoned analytic call gamma did not match numerical gamma:"
+                    + "\n    analytic gamma:  " + callGamma
+                    + "\n    bump gamma:      " + callGammaBump
+                    + "\n    error:           "
+                    + Math.abs(callGammaBump - callGamma));
+        }
+        if (Math.abs(putDeltaBump - putDelta) > tolerance) {
+            fail("Seasoned analytic put delta did not match numerical delta:"
+                    + "\n    analytic delta:  " + putDelta
+                    + "\n    bump delta:      " + putDeltaBump
+                    + "\n    error:           "
+                    + Math.abs(putDeltaBump - putDelta));
+        }
+        if (Math.abs(putGammaBump - putGamma) > tolerance) {
+            fail("Seasoned analytic put gamma did not match numerical gamma:"
+                    + "\n    analytic gamma:  " + putGamma
+                    + "\n    bump gamma:      " + putGammaBump
+                    + "\n    error:           "
+                    + Math.abs(putGammaBump - putGamma));
+        }
+    }
+
+    /**
+     * QuantLib {@code testContinuousSeasonedAsianOptions}.
+     *
+     * <p>Continuous arithmetic Levy pricing of fresh and seasoned options.
+     * The official case pins the evaluation date to 15 November 2025; the
+     * surrounding {@link SavedSettings} restores it after the test.
+     */
+    @Test
+    public void testContinuousSeasonedAsianOptions() {
+        DayCounter dc = new Actual365Fixed();
+        Date today = new Date(15, Month.NOVEMBER, 2025);
+        Date settlementDate = new Date(17, Month.NOVEMBER, 2025);
+        Settings.instance.evaluationDate().equal(today);
+
+        // Market data
+        double spot = 100.0;
+        double dividendYield = 0.03;
+        double riskFreeRate = 0.06;
+        double volatility = 0.20;
+        Date maturity = new Date(17, Month.NOVEMBER, 2026);
+        Date startDate = new Date(17, Month.AUGUST, 2025);  // Started 3 months ago
+
+        Handle<Quote> underlyingH = new Handle<>(new SimpleQuote(spot), true);
+        Handle<YieldTermStructure> flatTermStructure = new Handle<>(
+                new FlatForward(settlementDate, riskFreeRate, dc), true);
+        Handle<YieldTermStructure> flatDividendTS = new Handle<>(
+                new FlatForward(settlementDate, dividendYield, dc), true);
+        Handle<BlackVolTermStructure> flatVolTS = new Handle<>(
+                new BlackConstantVol(settlementDate, new Target(), volatility, dc),
+                true);
+
+        BlackScholesMertonProcess bsmProcess = new BlackScholesMertonProcess(
+                underlyingH, flatDividendTS, flatTermStructure, flatVolTS);
+
+        double strike = 100.0;
+        PlainVanillaPayoff payoff =
+                new PlainVanillaPayoff(Option.Type.Put, strike);
+        Exercise europeanExercise = new EuropeanExercise(maturity);
+
+        // Test 1: Fresh (unseasoned) continuous arithmetic option
+        ContinuousAveragingAsianOption freshOption =
+                new ContinuousAveragingAsianOption(Average.Type.Arithmetic,
+                        settlementDate, payoff, europeanExercise);
+
+        freshOption.setPricingEngine(new ContinuousArithmeticAsianLevyEngine(
+                bsmProcess, new Handle<>(new SimpleQuote(0.0), true)));
+
+        double freshNpv = freshOption.NPV();
+
+        // Test 2: Seasoned continuous arithmetic option
+        // startDate goes in the option (contract term), currentAverage goes
+        // in the engine (market data)
+        double currentAverage = 98.5;  // Running average below spot
+        ContinuousAveragingAsianOption seasonedOption =
+                new ContinuousAveragingAsianOption(Average.Type.Arithmetic,
+                        startDate, payoff, europeanExercise);
+
+        seasonedOption.setPricingEngine(
+                new ContinuousArithmeticAsianLevyEngine(
+                        bsmProcess,
+                        new Handle<>(new SimpleQuote(currentAverage), true)));
+
+        double seasonedNpv = seasonedOption.NPV();
+
+        // Seasoned option should be worth less than fresh option for a put
+        // when current average is below strike
+        if (seasonedNpv >= freshNpv) {
+            fail("Seasoned Asian put option NPV (" + seasonedNpv
+                    + ") should be less than fresh option NPV (" + freshNpv
+                    + ") when current average (" + currentAverage
+                    + ") is below strike (" + strike + ")");
+        }
+
+        // Test 3: Seasoned option with high current average
+        double highAverage = 102.0;  // Running average above strike
+        ContinuousAveragingAsianOption seasonedHighOption =
+                new ContinuousAveragingAsianOption(Average.Type.Arithmetic,
+                        startDate, payoff, europeanExercise);
+
+        seasonedHighOption.setPricingEngine(
+                new ContinuousArithmeticAsianLevyEngine(
+                        bsmProcess,
+                        new Handle<>(new SimpleQuote(highAverage), true)));
+
+        double seasonedHighNpv = seasonedHighOption.NPV();
+
+        // Seasoned option with higher average should be worth even less
+        if (seasonedHighNpv >= seasonedNpv) {
+            fail("Seasoned Asian put with higher average (" + highAverage
+                    + ") should have lower NPV (" + seasonedHighNpv
+                    + ") than seasoned option with lower average ("
+                    + currentAverage + ", NPV=" + seasonedNpv + ")");
+        }
+
+        // Test 4: Continuous geometric should fail for seasoned options
+        // (not yet implemented)
+        ContinuousAveragingAsianOption seasonedGeometric =
+                new ContinuousAveragingAsianOption(Average.Type.Geometric,
+                        startDate, payoff, europeanExercise);
+
+        seasonedGeometric.setPricingEngine(
+                new AnalyticContinuousGeometricAveragePriceAsianEngine(
+                        bsmProcess));
+
+        boolean caughtExpectedError = false;
+        try {
+            seasonedGeometric.NPV();
+        } catch (IllegalArgumentException e) {
+            caughtExpectedError = true;
+        }
+
+        if (!caughtExpectedError) {
+            fail("Seasoned continuous geometric Asian options should "
+                    + "throw an error (not yet implemented)");
+        }
+    }
 
     private static void compareGreeks(Map<String, Double> calculated,
                                       Map<String, Double> expected,
