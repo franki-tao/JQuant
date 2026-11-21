@@ -397,6 +397,71 @@ public class BlackFormula {
         return new CumulativeNormalDistribution().value(sign * d1);
     }
 
+    /**
+     * Bachelier formula derivative with respect to the standard deviation.
+     * If T is the time to maturity the Bachelier vega is this quantity
+     * times {@code sqrt(T)}.
+     */
+    public static double bachelierBlackFormulaStdDevDerivative(double strike,
+                                                               double forward,
+                                                               double stdDev,
+                                                               double discount) {
+        QL_REQUIRE(stdDev >= 0.0,
+                "stdDev (" + stdDev + ") must be non-negative");
+        QL_REQUIRE(discount > 0.0,
+                "discount (" + discount + ") must be positive");
+
+        if (stdDev == 0.0)
+            return 0.0;
+
+        double d1 = (forward - strike) / stdDev;
+        return discount *
+                new CumulativeNormalDistribution().derivative(d1);
+    }
+
+    public static double bachelierBlackFormulaStdDevDerivative(
+            PlainVanillaPayoff payoff,
+            double forward,
+            double stdDev,
+            double discount) {
+        return bachelierBlackFormulaStdDevDerivative(payoff.strike(), forward,
+                stdDev, discount);
+    }
+
+    public static double bachelierBlackFormulaStdDevDerivative(
+            PlainVanillaPayoff payoff,
+            double forward,
+            double stdDev) {
+        return bachelierBlackFormulaStdDevDerivative(payoff.strike(), forward,
+                stdDev, 1.0);
+    }
+
+    /**
+     * Bachelier formula for probability of being in the money in the asset
+     * martingale measure, i.e. {@code N(d)}.
+     */
+    public static double bachelierBlackFormulaAssetItmProbability(
+            Option.Type optionType,
+            double strike,
+            double forward,
+            double stdDev) {
+        QL_REQUIRE(stdDev >= 0.0,
+                "stdDev (" + stdDev + ") must be non-negative");
+        double d = (forward - strike) * (optionType == Option.Type.Put ? -1 : 1);
+        if (stdDev == 0.0)
+            return (d > 0.0 ? 1.0 : 0.0);
+        CumulativeNormalDistribution phi = new CumulativeNormalDistribution();
+        return phi.value(d / stdDev);
+    }
+
+    public static double bachelierBlackFormulaAssetItmProbability(
+            PlainVanillaPayoff payoff,
+            double forward,
+            double stdDev) {
+        return bachelierBlackFormulaAssetItmProbability(payoff.optionType(),
+                payoff.strike(), forward, stdDev);
+    }
+
     public static void checkParameters(double strike,
                                        double forward,
                                        double displacement) {
