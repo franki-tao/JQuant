@@ -99,27 +99,12 @@ public class CapFloorTest {
             Schedule schedule = new Schedule(startDate, endDate,
                     new Period(frequency), calendar, convention, convention,
                     DateGenerationRule.FORWARD, false, new Date(), new Date());
-            List<jquant.CashFlow> leg = new jquant.cashflows.IborLeg(schedule, index)
+            return new jquant.cashflows.IborLeg(schedule, index)
                     .withNotionals(nominals)
                     .withPaymentDayCounter(index.dayCounter())
                     .withPaymentAdjustment(convention)
                     .withFixingDays(fixingDays)
                     .leg();
-            // The first coupon's fixing date is settlement minus two business
-            // days; on weekends that falls before today and the coupon needs
-            // a historic fixing. Real Euribor history would provide it.
-            Date today = Settings.instance.evaluationDate().Date();
-            for (jquant.CashFlow cashFlow : leg) {
-                if (cashFlow instanceof FloatingRateCoupon) {
-                    Date fixingDate = ((FloatingRateCoupon) cashFlow).fixingDate();
-                    if (TimeUtils.less(fixingDate, today)
-                            && !index.hasHistoricalFixing(fixingDate)) {
-                        IndexManager.Instance.addFixing(
-                                index.name(), fixingDate, 0.05, true);
-                    }
-                }
-            }
-            return leg;
         }
 
         PricingEngine makeEngine(double volatility) {
