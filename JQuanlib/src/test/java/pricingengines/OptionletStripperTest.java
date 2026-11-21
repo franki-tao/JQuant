@@ -5,6 +5,8 @@ import jquant.Quote;
 import jquant.RelinkableHandle;
 import jquant.SavedSettings;
 import jquant.Settings;
+import jquant.cashflows.IborCoupon;
+import jquant.cashflows.IborLeg;
 import jquant.indexes.Euribor6M;
 import jquant.indexes.IborIndex;
 import jquant.indexes.IndexManager;
@@ -28,9 +30,12 @@ import jquant.time.BusinessDayConvention;
 import jquant.time.Calendar;
 import jquant.time.Date;
 import jquant.time.DayCounter;
+import jquant.time.DateGenerationRule;
 import jquant.time.Month;
 import jquant.time.Period;
+import jquant.time.Schedule;
 import jquant.time.TimeUnit;
+import jquant.time.TimeUtils;
 import jquant.time.calendars.Target;
 import jquant.time.daycounters.Actual365Fixed;
 import org.junit.jupiter.api.AfterEach;
@@ -678,5 +683,437 @@ public class OptionletStripperTest {
             }
         }
         System.out.println("testTermVolatilityStripping2 max error: " + maxError);
+    }
+
+    @Test
+    public void testSwitchStrike() {
+        boolean usingAtParCoupons =
+                IborCoupon.Settings.instance().usingAtParCoupons();
+
+        CommonVars vars = new CommonVars();
+        Settings.instance.evaluationDate().equal(new Date(28, Month.OCTOBER, 2013));
+        vars.setCapFloorTermVolSurface();
+
+        RelinkableHandle<YieldTermStructure> yieldTermStructure =
+                new RelinkableHandle<>();
+        yieldTermStructure.linkTo(new FlatForward(0, vars.calendar, 0.03,
+                vars.dayCounter), true);
+
+        IborIndex iborIndex = new Euribor6M(yieldTermStructure);
+
+        OptionletStripper1 optionletStripper1 = new OptionletStripper1(
+                vars.capFloorVolSurface, iborIndex, null, vars.accuracy);
+
+        double expected = usingAtParCoupons ? 0.02981223 : 0.02981258;
+
+        double error = Math.abs(optionletStripper1.switchStrike() - expected);
+        double firstError = error;
+        if (error > vars.tolerance)
+            fail("\nSwitchstrike not correctly computed:  "
+                    + "\nexpected switch strike: " + expected
+                    + "\ncomputed switch strike: "
+                    + optionletStripper1.switchStrike()
+                    + "\nerror:         " + error
+                    + "\ntolerance:     " + vars.tolerance);
+
+        yieldTermStructure.linkTo(new FlatForward(0, vars.calendar, 0.05,
+                vars.dayCounter), true);
+
+        expected = usingAtParCoupons ? 0.0499371 : 0.0499381;
+
+        error = Math.abs(optionletStripper1.switchStrike() - expected);
+        if (error > vars.tolerance)
+            fail("\nSwitchstrike not correctly computed:  "
+                    + "\nexpected switch strike: " + expected
+                    + "\ncomputed switch strike: "
+                    + optionletStripper1.switchStrike()
+                    + "\nerror:         " + error
+                    + "\ntolerance:     " + vars.tolerance);
+
+        System.out.println("testSwitchStrike max error: "
+                + Math.max(firstError, error));
+    }
+
+    private static double checkIborOptionletStripping(
+            CommonVars vars,
+            CapFloorTermVolSurface surface,
+            int paymentLag) {
+        IborIndex iborIndex = new Euribor6M(vars.yieldTermStructure);
+
+        OptionletStripper1 optionletStripper1 = new OptionletStripper1(
+                surface, iborIndex, null, vars.accuracy, 100, null,
+                Sarb.VolatilityType.ShiftedLognormal, 0.0, false, paymentLag);
+
+        StrippedOptionletAdapter strippedOptionletAdapter =
+                new StrippedOptionletAdapter(optionletStripper1);
+
+        Handle<OptionletVolatilityStructure> vol =
+                new Handle<>(strippedOptionletAdapter, true);
+        vol.currentLink().enableExtrapolation();
+
+        BlackCapFloorEngine strippedVolEngine =
+                BlackCapFloorEngine.withVolatility(vars.yieldTermStructure,
+                        vol, null);
+
+        Date startDate = iborIndex.valueDate(
+                iborIndex.fixingCalendar().adjust(
+                        Settings.instance.evaluationDate().Date(),
+                        BusinessDayConvention.FOLLOWING));
+
+        double maxError = 0.0;
+        for (int tenorIndex = 0;
+             tenorIndex < vars.optionTenors.size(); ++tenorIndex) {
+            Date endDate = startDate.add(vars.optionTenors.get(tenorIndex));
+            Schedule schedule = new Schedule(startDate, endDate,
+                    iborIndex.tenor(), iborIndex.fixingCalendar(),
+                    iborIndex.businessDayConvention(),
+                    iborIndex.businessDayConvention(),
+                    DateGenerationRule.BACKWARD, false,
+                    new Date(), new Date());
+            List<jquant.CashFlow> leg = new IborLeg(schedule, iborIndex)
+                    .withNotionals(1.0)
+                    .withPaymentDayCounter(iborIndex.dayCounter())
+                    .withPaymentAdjustment(iborIndex.businessDayConvention())
+                    .withPaymentLag(paymentLag)
+                    .leg();
+
+            for (int strikeIndex = 0;
+                 strikeIndex < vars.strikes.length; ++strikeIndex) {
+                List<Double> strikes =
+                        List.of(vars.strikes[strikeIndex]);
+
+                CapFloor strippedCap = new CapFloor(CapFloor.Type.Cap, leg,
+                        strikes);
+                strippedCap.setPricingEngine(strippedVolEngine);
+                double priceFromStrippedVolatility = strippedCap.NPV();
+
+                BlackCapFloorEngine constantVolEngine =
+                        new BlackCapFloorEngine(vars.yieldTermStructure,
+                                vars.termV[tenorIndex][strikeIndex]);
+                CapFloor cap = new CapFloor(CapFloor.Type.Cap, leg, strikes);
+                cap.setPricingEngine(constantVolEngine);
+                double priceFromConstantVolatility = cap.NPV();
+
+                double error = Math.abs(priceFromStrippedVolatility
+                        - priceFromConstantVolatility);
+                maxError = Math.max(maxError, error);
+                if (error > vars.tolerance)
+                    fail("\noption tenor:       "
+                            + vars.optionTenors.get(tenorIndex)
+                            + "\nstrike:             " + vars.strikes[strikeIndex]
+                            + "\nstripped vol price: " + priceFromStrippedVolatility
+                            + "\nconstant vol price: " + priceFromConstantVolatility
+                            + "\nerror:              " + error
+                            + "\ntolerance:          " + vars.tolerance);
+            }
+        }
+        return maxError;
+    }
+
+    @Test
+    public void testFlatTermVolatilityStripping1IborPaymentLag() {
+        CommonVars vars = new CommonVars();
+        Settings.instance.evaluationDate().equal(new Date(28, Month.OCTOBER, 2013));
+        vars.setFlatTermVolSurface();
+
+        double maxError = checkIborOptionletStripping(
+                vars, vars.flatTermVolSurface, 2);
+        System.out.println(
+                "testFlatTermVolatilityStripping1IborPaymentLag max error: "
+                        + maxError);
+    }
+
+    @Test
+    public void testTermVolatilityStripping1IborPaymentLag() {
+        CommonVars vars = new CommonVars();
+        Settings.instance.evaluationDate().equal(new Date(28, Month.OCTOBER, 2013));
+        vars.setCapFloorTermVolSurface();
+
+        double maxError = checkIborOptionletStripping(
+                vars, vars.capFloorVolSurface, 2);
+        System.out.println(
+                "testTermVolatilityStripping1IborPaymentLag max error: "
+                        + maxError);
+    }
+
+    @Test
+    public void testIborReferenceDateCompatibility() {
+        CommonVars vars = new CommonVars();
+        Settings.instance.evaluationDate().equal(new Date(28, Month.OCTOBER, 2013));
+        vars.setFlatTermVolSurface();
+
+        CapFloorTermVolSurface surface = new CapFloorTermVolSurface(2,
+                vars.calendar, BusinessDayConvention.FOLLOWING,
+                vars.optionTenors, vars.strikes, new Matrix(vars.termV),
+                vars.dayCounter);
+        IborIndex iborIndex = new Euribor6M(vars.yieldTermStructure);
+        OptionletStripper1 stripper1 = new OptionletStripper1(
+                surface, iborIndex, null, vars.accuracy);
+
+        SimpleQuote volQuote = new SimpleQuote();
+        Handle<Quote> volHandle = new Handle<>(volQuote, true);
+        BlackCapFloorEngine legacyEngine = new BlackCapFloorEngine(
+                vars.yieldTermStructure, volHandle, vars.dayCounter);
+        double[][] capFloorPrices = stripper1.capFloorPrices();
+        Period capFloorLength = new Period(
+                2 * iborIndex.tenor().length(), iborIndex.tenor().units());
+        double maxError = 0.0;
+        for (int i = 0; i < capFloorPrices.length; ++i) {
+            for (int j = 0; j < vars.strikes.length; ++j) {
+                volQuote.setValue(surface.volatility(capFloorLength,
+                        vars.strikes[j], true));
+                CapFloor.Type type =
+                        vars.strikes[j] < stripper1.switchStrike()
+                                ? CapFloor.Type.Floor : CapFloor.Type.Cap;
+                CapFloor legacyCap = new MakeCapFloor(type, capFloorLength,
+                        iborIndex)
+                        .withStrike(vars.strikes[j])
+                        .withPricingEngine(legacyEngine)
+                        .makeCapFloor();
+                double error = Math.abs(
+                        capFloorPrices[i][j] - legacyCap.NPV());
+                maxError = Math.max(maxError, error);
+                if (error > 1.0e-12)
+                    fail("\ncapFloorPrices mismatch"
+                            + "\noptionlet row: " + i
+                            + "\nstrike:        " + vars.strikes[j]
+                            + "\nstored price:  " + capFloorPrices[i][j]
+                            + "\nlegacy price:  " + legacyCap.NPV()
+                            + "\nerror:         " + error
+                            + "\ntolerance:     1.0e-12");
+            }
+            capFloorLength = TimeUtils.add(capFloorLength, iborIndex.tenor());
+        }
+
+        List<Handle<Quote>> atmVols = new ArrayList<>();
+        for (int i = 0; i < vars.optionTenors.size(); ++i)
+            atmVols.add(new Handle<>(new SimpleQuote(0.18), true));
+        CapFloorTermVolCurve atmCurve = new CapFloorTermVolCurve(2,
+                vars.calendar, BusinessDayConvention.FOLLOWING,
+                vars.optionTenors, atmVols, vars.dayCounter);
+        OptionletStripper2 stripper2 = new OptionletStripper2(
+                stripper1, atmCurve);
+        double[] atmStrikes = stripper2.atmCapFloorStrikes();
+        double[] atmPrices = stripper2.atmCapFloorPrices();
+        volQuote.setValue(0.18);
+        for (int i = 0; i < vars.optionTenors.size(); ++i) {
+            CapFloor legacyCap = new MakeCapFloor(CapFloor.Type.Cap,
+                    vars.optionTenors.get(i), iborIndex)
+                    .withStrike(atmStrikes[i])
+                    .withPricingEngine(legacyEngine)
+                    .makeCapFloor();
+            double error = Math.abs(atmPrices[i] - legacyCap.NPV());
+            maxError = Math.max(maxError, error);
+            if (error > 1.0e-12)
+                fail("\nATM cap price mismatch"
+                        + "\noption tenor:  " + vars.optionTenors.get(i)
+                        + "\nATM strike:    " + atmStrikes[i]
+                        + "\nstored price:  " + atmPrices[i]
+                        + "\nlegacy price:  " + legacyCap.NPV()
+                        + "\nerror:         " + error
+                        + "\ntolerance:     1.0e-12");
+        }
+        System.out.println("testIborReferenceDateCompatibility max error: "
+                + maxError);
+    }
+
+    @Test
+    public void testTermVolatilityStripping2IborPaymentLag() {
+        CommonVars vars = new CommonVars();
+        Settings.instance.evaluationDate().equal(new Date(28, Month.OCTOBER, 2013));
+        vars.setFlatTermVolCurve();
+        vars.setFlatTermVolSurface();
+
+        IborIndex iborIndex = new Euribor6M(vars.yieldTermStructure);
+        OptionletStripper1 stripper1 = new OptionletStripper1(
+                vars.flatTermVolSurface, iborIndex, null, vars.accuracy, 100,
+                null, Sarb.VolatilityType.ShiftedLognormal, 0.0, false, 2);
+        OptionletStripper2 stripper2 = new OptionletStripper2(
+                stripper1, vars.flatTermVolCurve);
+
+        // The flat ATM curve and flat surface imply an exact zero adjustment;
+        // the tight price tolerance below therefore isolates leg conventions.
+        double maxSpread = 0.0;
+        for (double spread : stripper2.spreadsVol()) {
+            maxSpread = Math.max(maxSpread, Math.abs(spread));
+            if (Math.abs(spread) > 1.0e-12)
+                fail("\nspread is not zero"
+                        + "\nspread:    " + spread
+                        + "\ntolerance: 1.0e-12");
+        }
+
+        StrippedOptionletAdapter strippedOptionletAdapter =
+                new StrippedOptionletAdapter(stripper2);
+        Handle<OptionletVolatilityStructure> vol =
+                new Handle<>(strippedOptionletAdapter, true);
+        vol.currentLink().enableExtrapolation();
+        BlackCapFloorEngine engine = BlackCapFloorEngine.withVolatility(
+                vars.yieldTermStructure, vol, null);
+
+        double[] strikes = stripper2.atmCapFloorStrikes();
+        double[] targetPrices = stripper2.atmCapFloorPrices();
+        Date startDate = iborIndex.valueDate(
+                iborIndex.fixingCalendar().adjust(
+                        Settings.instance.evaluationDate().Date(),
+                        BusinessDayConvention.FOLLOWING));
+
+        double maxError = 0.0;
+        for (int i = 0; i < vars.optionTenors.size(); ++i) {
+            Date endDate = startDate.add(vars.optionTenors.get(i));
+            Schedule schedule = new Schedule(startDate, endDate,
+                    iborIndex.tenor(), iborIndex.fixingCalendar(),
+                    iborIndex.businessDayConvention(),
+                    iborIndex.businessDayConvention(),
+                    DateGenerationRule.BACKWARD, false,
+                    new Date(), new Date());
+            List<jquant.CashFlow> leg = new IborLeg(schedule, iborIndex)
+                    .withNotionals(1.0)
+                    .withPaymentDayCounter(iborIndex.dayCounter())
+                    .withPaymentAdjustment(iborIndex.businessDayConvention())
+                    .withPaymentLag(2)
+                    .leg();
+            leg.remove(0);
+
+            CapFloor cap = new CapFloor(CapFloor.Type.Cap, leg,
+                    List.of(strikes[i]));
+            cap.setPricingEngine(engine);
+            double error = Math.abs(cap.NPV() - targetPrices[i]);
+            maxError = Math.max(maxError, error);
+            if (error > vars.tolerance)
+                fail("\noption tenor: " + vars.optionTenors.get(i)
+                        + "\nATM strike:   " + strikes[i]
+                        + "\ntarget price: " + targetPrices[i]
+                        + "\nstripper price: " + cap.NPV()
+                        + "\nerror:        " + error
+                        + "\ntolerance:    " + vars.tolerance);
+        }
+        System.out.println(
+                "testTermVolatilityStripping2IborPaymentLag max error: "
+                        + maxError + ", max spread: " + maxSpread);
+    }
+
+    @Test
+    public void testTermVolatilityStripping2IborFrontStub() {
+        CommonVars vars = new CommonVars();
+        Settings.instance.evaluationDate().equal(new Date(28, Month.OCTOBER, 2013));
+        vars.setFlatTermVolSurface();
+
+        IborIndex iborIndex = new Euribor6M(vars.yieldTermStructure);
+        OptionletStripper1 stripper1 = new OptionletStripper1(
+                vars.flatTermVolSurface, iborIndex, null, vars.accuracy);
+
+        List<Period> tenors = List.of(
+                new Period(9, TimeUnit.MONTHS),
+                new Period(1, TimeUnit.YEARS));
+        List<Handle<Quote>> atmVols = List.of(
+                new Handle<>(new SimpleQuote(0.19), true),
+                new Handle<>(new SimpleQuote(0.19), true));
+        CapFloorTermVolCurve atmCurve = new CapFloorTermVolCurve(0,
+                vars.calendar, BusinessDayConvention.FOLLOWING, tenors,
+                atmVols, vars.dayCounter);
+        OptionletStripper2 stripper2 = new OptionletStripper2(
+                stripper1, atmCurve);
+        // Front-stub caps are not on the optionlet grid, but the historical
+        // behaviour is to strip them anyway rather than throw.
+        double[] targetPrices = stripper2.atmCapFloorPrices();
+        for (double spread : stripper2.spreadsVol())
+            if (!Double.isFinite(spread))
+                fail("\nnon-finite spread: " + spread);
+
+        StrippedOptionletAdapter strippedOptionletAdapter =
+                new StrippedOptionletAdapter(stripper2);
+        Handle<OptionletVolatilityStructure> vol =
+                new Handle<>(strippedOptionletAdapter, true);
+        vol.currentLink().enableExtrapolation();
+        BlackCapFloorEngine engine = BlackCapFloorEngine.withVolatility(
+                vars.yieldTermStructure, vol, null);
+
+        double[] strikes = stripper2.atmCapFloorStrikes();
+        CapFloor cap = new MakeCapFloor(CapFloor.Type.Cap, tenors.get(0),
+                iborIndex)
+                .withStrike(strikes[0])
+                .withPricingEngine(engine)
+                .makeCapFloor();
+        double error = Math.abs(cap.NPV() - targetPrices[0]);
+        if (error > vars.tolerance)
+            fail("\nfront-stub cap price mismatch"
+                    + "\noption tenor:   " + tenors.get(0)
+                    + "\nATM strike:     " + strikes[0]
+                    + "\ntarget price:   " + targetPrices[0]
+                    + "\nstripper price: " + cap.NPV()
+                    + "\nerror:          " + error
+                    + "\ntolerance:      " + vars.tolerance);
+        System.out.println(
+                "testTermVolatilityStripping2IborFrontStub max error: "
+                        + error);
+    }
+
+    @Test
+    public void testOptionletStripper2RejectsEmptyIborCap() {
+        CommonVars vars = new CommonVars();
+        Settings.instance.evaluationDate().equal(new Date(28, Month.OCTOBER, 2013));
+        vars.setFlatTermVolSurface();
+
+        IborIndex iborIndex = new Euribor6M(vars.yieldTermStructure);
+        OptionletStripper1 stripper1 = new OptionletStripper1(
+                vars.flatTermVolSurface, iborIndex, null, vars.accuracy);
+
+        List<Period> tenors = List.of(
+                new Period(6, TimeUnit.MONTHS),
+                new Period(1, TimeUnit.YEARS));
+        List<Handle<Quote>> atmVols = List.of(
+                new Handle<>(new SimpleQuote(0.18), true),
+                new Handle<>(new SimpleQuote(0.18), true));
+        CapFloorTermVolCurve atmCurve = new CapFloorTermVolCurve(0,
+                vars.calendar, BusinessDayConvention.FOLLOWING, tenors,
+                atmVols, vars.dayCounter);
+        OptionletStripper2 stripper2 = new OptionletStripper2(
+                stripper1, atmCurve);
+        try {
+            stripper2.atmCapFloorPrices();
+            fail("expected the empty 6M Ibor cap to be rejected");
+        } catch (NullPointerException e) {
+            fail("empty cap raised NullPointerException instead of the "
+                    + "official QL_REQUIRE error: " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            String message = e.getMessage();
+            // QuantLib rejects the 6M leg in makeCapFloorLeg before reaching
+            // OptionletStripper2's own "empty cap/floor leg for option expiry"
+            // check; both are official QL_REQUIRE errors.
+            if (message == null
+                    || !(message.contains(
+                            "empty cap/floor leg for option expiry")
+                    || message.contains("does not contain any optionlets")))
+                fail("unexpected empty-cap error message: " + message);
+        }
+    }
+
+    @Test
+    public void testOptionletStripper2ToleratesMismatchedReferenceDate() {
+        CommonVars vars = new CommonVars();
+        Settings.instance.evaluationDate().equal(new Date(28, Month.OCTOBER, 2013));
+        vars.setFlatTermVolSurface();
+
+        IborIndex iborIndex = new Euribor6M(vars.yieldTermStructure);
+        OptionletStripper1 stripper1 = new OptionletStripper1(
+                vars.flatTermVolSurface, iborIndex, null, vars.accuracy);
+
+        List<Handle<Quote>> atmVols = new ArrayList<>();
+        for (int i = 0; i < vars.optionTenors.size(); ++i)
+            atmVols.add(new Handle<>(new SimpleQuote(0.18), true));
+        // different settlement days than the source surface
+        CapFloorTermVolCurve atmCurve = new CapFloorTermVolCurve(2,
+                vars.calendar, BusinessDayConvention.FOLLOWING,
+                vars.optionTenors, atmVols, vars.dayCounter);
+        OptionletStripper2 stripper2 = new OptionletStripper2(
+                stripper1, atmCurve);
+        try {
+            double[] prices = stripper2.atmCapFloorPrices();
+            if (prices.length != vars.optionTenors.size())
+                fail("unexpected ATM price count: " + prices.length);
+        } catch (RuntimeException e) {
+            fail("mismatched reference date raised " + e.getClass().getName()
+                    + ": " + e.getMessage());
+        }
     }
 }
