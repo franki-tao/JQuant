@@ -147,9 +147,15 @@ public abstract class BlackStyleSwaptionEngine extends Swaption.engine {
         // Drop (not defer) notifications while swapping the engine, as the
         // official ObservableSettings::disableUpdates() default does; deferring
         // them would invalidate the swaption we are currently calculating.
+        // The official code has no try/finally; because ObservableSettings is
+        // a process singleton, an exception between disable and enable would
+        // otherwise leave updates disabled for the rest of the JVM.
         ObservableSettings.getInstance().disableUpdates(false);
-        swap.setPricingEngine(engine);
-        ObservableSettings.getInstance().enableUpdates();
+        try {
+            swap.setPricingEngine(engine);
+        } finally {
+            ObservableSettings.getInstance().enableUpdates();
+        }
         Date valuationDate = results_.valuationDate = swap.valuationDate();
         double atmForward = swap.fairRate();
 
