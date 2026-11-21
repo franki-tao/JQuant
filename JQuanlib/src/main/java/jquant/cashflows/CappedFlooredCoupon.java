@@ -4,7 +4,6 @@ package jquant.cashflows;
 import jquant.patterns.AcyclicVisitor;
 import jquant.patterns.Visitor;
 
-import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
 //! Capped and/or floored floating-rate coupon
@@ -50,7 +49,8 @@ public abstract class CappedFlooredCoupon extends FloatingRateCoupon {
                 underlying.referencePeriodEnd(),
                 underlying.dayCounter(),
                 underlying.isInArrears(),
-                underlying.exCouponDate());
+                underlying.exCouponDate(),
+                underlying.fixingConvention());
         underlying_ = underlying;
         if (gearing_ > 0) {
             if (!Double.isNaN(cap)) {
@@ -80,9 +80,10 @@ public abstract class CappedFlooredCoupon extends FloatingRateCoupon {
         registerWith(underlying_);
     }
 
+    @Override
     public void deepUpdate() {
         update();
-        underlying_.update();
+        underlying_.deepUpdate();
     }
 
     @Override
@@ -151,7 +152,7 @@ public abstract class CappedFlooredCoupon extends FloatingRateCoupon {
                 vv.visit(this);
             } catch (ClassCastException e) {
                 // 如果类型不匹配，说明该访问者不关心这个特定的子类
-                QL_FAIL("not a Black-volatility term structure visitor");
+                super.accept(v);
             }
         }
     }
