@@ -12,6 +12,8 @@ import jquant.time.DayCounter;
 import jquant.time.calendars.NullCalendar;
 
 import static jquant.math.CommonUtil.QL_FAIL;
+import static jquant.math.MathUtils.QL_MAX_REAL;
+import static jquant.math.MathUtils.QL_MIN_REAL;
 
 //! Constant local volatility, no time-strike dependence
 /*! This class implements the LocalVolatilityTermStructure
@@ -74,11 +76,11 @@ public class LocalConstantVol extends LocalVolTermStructure {
     //@{
     @Override
     public double minStrike() {
-        return Double.MIN_VALUE;
+        return QL_MIN_REAL;
     }
     @Override
     public double maxStrike() {
-        return Double.MAX_VALUE;
+        return QL_MAX_REAL;
     }
     //@}
     //! \name Visitability

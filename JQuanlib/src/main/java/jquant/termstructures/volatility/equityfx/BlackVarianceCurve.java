@@ -15,6 +15,8 @@ import java.util.List;
 
 import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
+import static jquant.math.MathUtils.QL_MAX_REAL;
+import static jquant.math.MathUtils.QL_MIN_REAL;
 
 //! Black volatility curve modelled as variance curve
 /*! This class calculates time-dependent Black volatilities using
@@ -89,11 +91,11 @@ public class BlackVarianceCurve extends BlackVarianceTermStructure {
     //@{
     @Override
     public double minStrike() {
-        return Double.MIN_VALUE;
+        return QL_MIN_REAL;
     }
     @Override
     public double maxStrike() {
-        return Double.MAX_VALUE;
+        return QL_MAX_REAL;
     }
 
     //@}

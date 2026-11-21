@@ -8,6 +8,8 @@ import jquant.time.Date;
 import jquant.time.DayCounter;
 
 import static jquant.math.CommonUtil.QL_FAIL;
+import static jquant.math.MathUtils.QL_MAX_REAL;
+import static jquant.math.MathUtils.QL_MIN_REAL;
 
 //! Local volatility curve derived from a Black curve
 public class LocalVolCurve extends LocalVolTermStructure {
@@ -35,10 +37,10 @@ public class LocalVolCurve extends LocalVolTermStructure {
     //! \name VolatilityTermStructure interface
     //@{
     public double minStrike() {
-        return Double.MIN_VALUE;
+        return QL_MIN_REAL;
     }
     public double maxStrike() {
-        return Double.MAX_VALUE;
+        return QL_MAX_REAL;
     }
     //@}
     //! \name Visitability

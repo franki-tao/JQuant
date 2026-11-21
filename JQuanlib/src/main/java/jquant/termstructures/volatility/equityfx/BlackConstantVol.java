@@ -11,6 +11,8 @@ import jquant.time.Date;
 import jquant.time.DayCounter;
 
 import static jquant.math.CommonUtil.QL_FAIL;
+import static jquant.math.MathUtils.QL_MAX_REAL;
+import static jquant.math.MathUtils.QL_MIN_REAL;
 
 //! Constant Black volatility, no time-strike dependence
 /*! This class implements the BlackVolatilityTermStructure
@@ -64,11 +66,11 @@ public class BlackConstantVol extends BlackVolatilityTermStructure {
     //! \name VolatilityTermStructure interface
     //@{
     public double minStrike() {
-        return Double.MIN_VALUE;
+        return QL_MIN_REAL;
     }
 
     public double maxStrike() {
-        return Double.MAX_VALUE;
+        return QL_MAX_REAL;
     }
 
     //@}
