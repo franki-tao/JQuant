@@ -51,8 +51,30 @@ import static org.junit.jupiter.api.Assertions.fail;
  * Cap/floor pricing from QuantLib {@code test-suite/capfloor.cpp}.
  *
  * <p>All 11 official cases are ported.
+ *
+ * <p><b>Date adaptation.</b> Official {@code capfloor.cpp} leaves the
+ * non-cached cases on {@code Settings::evaluationDate() =
+ * Date::todaysDate()} with no business-day adjustment. On weekends the
+ * first T+2 fixing is the previous Friday, so official QuantLib throws
+ * "Missing Euribor6M Actual/360 fixing". The seven unpinned cases are
+ * therefore pinned here to TARGET business day 20 November 2026, which
+ * makes the suite repeatable across weekends. This is a user-approved
+ * date adaptation, not a verbatim date port. No historic fixings are
+ * injected. The four officially pinned cached/delta cases keep their
+ * verbatim 14/18 March 2002 dates.
  */
 public class CapFloorTest {
+
+    /**
+     * TARGET business day used to pin the seven officially unpinned cases
+     * (official uses the run-day {@code todaysDate} without adjustment).
+     */
+    private static final Date UNPINNED_TEST_DATE =
+            new Date(20, Month.NOVEMBER, 2026);
+
+    private static void pinUnpinnedTestDate() {
+        Settings.instance.evaluationDate().equal(UNPINNED_TEST_DATE);
+    }
 
     private SavedSettings savedSettings_;
 
@@ -169,6 +191,7 @@ public class CapFloorTest {
 
     @Test
     public void testVega() {
+        pinUnpinnedTestDate();
         CommonVars vars = new CommonVars();
 
         int[] lengths = {1, 2, 3, 4, 5, 6, 7, 10, 15, 20, 30};
@@ -216,6 +239,7 @@ public class CapFloorTest {
 
     @Test
     public void testStrikeDependency() {
+        pinUnpinnedTestDate();
         CommonVars vars = new CommonVars();
 
         int[] lengths = {1, 2, 3, 5, 7, 10, 15, 20};
@@ -268,6 +292,7 @@ public class CapFloorTest {
 
     @Test
     public void testConsistency() {
+        pinUnpinnedTestDate();
         CommonVars vars = new CommonVars();
 
         int[] lengths = {1, 2, 3, 5, 7, 10, 15, 20};
@@ -370,6 +395,7 @@ public class CapFloorTest {
 
     @Test
     public void testParity() {
+        pinUnpinnedTestDate();
         CommonVars vars = new CommonVars();
 
         int[] lengths = {1, 2, 3, 5, 7, 10, 15, 20};
@@ -415,6 +441,7 @@ public class CapFloorTest {
 
     @Test
     public void testATMRate() {
+        pinUnpinnedTestDate();
         CommonVars vars = new CommonVars();
 
         int[] lengths = {1, 2, 3, 5, 7, 10, 15, 20};
@@ -470,6 +497,7 @@ public class CapFloorTest {
 
     @Test
     public void testImpliedVolatility() {
+        pinUnpinnedTestDate();
         CommonVars vars = new CommonVars();
 
         int maxEvaluations = 100;
@@ -882,6 +910,7 @@ public class CapFloorTest {
 
     @Test
     public void testOptionLetsDeltaAtZeroVolatility() {
+        pinUnpinnedTestDate();
         CommonVars vars = new CommonVars();
 
         Date today = Settings.instance.evaluationDate().Date();
