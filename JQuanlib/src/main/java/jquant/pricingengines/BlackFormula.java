@@ -57,6 +57,40 @@ public class BlackFormula {
         return result;
     }
 
+    /**
+     * Black 1976 formula derivative with respect to the forward.
+     *
+     * <p>Ported from QuantLib {@code blackFormulaForwardDerivative}
+     * (ql/pricingengines/blackformula.cpp).
+     */
+    public static double blackFormulaForwardDerivative(Option.Type optionType,
+                                                       double strike,
+                                                       double forward,
+                                                       double stdDev,
+                                                       double discount,
+                                                       double displacement) {
+        checkParameters(strike, forward, displacement);
+        QL_REQUIRE(stdDev >= 0.0,
+                "stdDev (" + stdDev + ") must be non-negative");
+        QL_REQUIRE(discount > 0.0,
+                "discount (" + discount + ") must be positive");
+
+        int sign = optionType == Option.Type.Call ? 1 : -1;
+
+        if (stdDev == 0.0)
+            return sign * Math.max(Math.signum((forward - strike) * sign), 0.0) * discount;
+
+        forward = forward + displacement;
+        strike = strike + displacement;
+
+        if (strike == 0.0)
+            return optionType == Option.Type.Call ? discount : 0.0;
+
+        double d1 = Math.log(forward / strike) / stdDev + 0.5 * stdDev;
+        CumulativeNormalDistribution phi = new CumulativeNormalDistribution();
+        return sign * phi.value(sign * d1) * discount;
+    }
+
     public static double bachelierBlackFormula(Option.Type optionType,
                                                double strike,
                                                double forward,
@@ -78,6 +112,30 @@ public class BlackFormula {
                         strike + " strike , " +
                         forward + " forward");
         return result;
+    }
+
+    /**
+     * Bachelier formula derivative with respect to the forward.
+     *
+     * <p>Ported from QuantLib {@code bachelierBlackFormulaForwardDerivative}
+     * (ql/pricingengines/blackformula.cpp).
+     */
+    public static double bachelierBlackFormulaForwardDerivative(Option.Type optionType,
+                                                                double strike,
+                                                                double forward,
+                                                                double stdDev,
+                                                                double discount) {
+        QL_REQUIRE(stdDev >= 0.0,
+                "stdDev (" + stdDev + ") must be non-negative");
+        QL_REQUIRE(discount > 0.0,
+                "discount (" + discount + ") must be positive");
+        int sign = optionType == Option.Type.Call ? 1 : -1;
+        if (stdDev == 0.0)
+            return sign * Math.max(Math.signum((forward - strike) * sign), 0.0) * discount;
+        double d = (forward - strike) * sign;
+        double h = d / stdDev;
+        CumulativeNormalDistribution phi = new CumulativeNormalDistribution();
+        return sign * phi.value(h) * discount;
     }
 
     /**

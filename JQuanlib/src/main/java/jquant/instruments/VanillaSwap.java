@@ -5,6 +5,7 @@ import jquant.Instrument;
 import jquant.PricingEngine;
 import jquant.Settings;
 import jquant.cashflows.Coupon;
+import jquant.cashflows.FixedRateLeg;
 import jquant.cashflows.IborCoupon;
 import jquant.cashflows.IborLeg;
 import jquant.indexes.IborIndex;
@@ -32,7 +33,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/instruments/vanillaswap.cpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/test-suite/swap.cpp
  */
-public class VanillaSwap extends Instrument {
+public class VanillaSwap extends Instrument implements FixedVsFloatingSwap {
     public enum Type { Payer, Receiver }
 
     private final Type type_;
@@ -45,6 +46,7 @@ public class VanillaSwap extends Instrument {
     private final double spread_;
     private final DayCounter floatingDayCount_;
     private final BusinessDayConvention paymentConvention_;
+    private final List<CashFlow> fixedLeg_;
     private final List<CashFlow> floatingLeg_;
     private double fairRate_ = Double.NaN;
     private double fixedLegNpv_ = Double.NaN;
@@ -97,6 +99,15 @@ public class VanillaSwap extends Instrument {
         paymentConvention_ = paymentConvention != null && paymentConvention.isPresent()
                 ? paymentConvention.get()
                 : floatSchedule.businessDayConvention();
+        // As in FixedVsFloatingSwap, the fixed leg pays on the fixed calendar
+        // using the swap payment convention (the floating schedule's
+        // convention when none was passed).
+        fixedLeg_ = new FixedRateLeg(fixedSchedule_)
+                .withNotionals(nominal_)
+                .withCouponRates(fixedRate_, fixedDayCount_)
+                .withPaymentAdjustment(paymentConvention_)
+                .withPaymentCalendar(fixedSchedule_.calendar())
+                .leg();
         // As in ql/instruments/vanillaswap.cpp, the floating leg is built by
         // IborLeg so that each coupon carries a pricer and so that the
         // useIndexedCoupons override can reach the coupon estimation.
@@ -110,6 +121,8 @@ public class VanillaSwap extends Instrument {
                         ? useIndexedCoupons : Optional.empty())
                 .leg();
         registerWith(iborIndex_);
+        for (CashFlow cashflow : fixedLeg_)
+            registerWith(cashflow);
         for (CashFlow cashflow : floatingLeg_)
             registerWith(cashflow);
     }
@@ -118,8 +131,30 @@ public class VanillaSwap extends Instrument {
         return type_;
     }
 
+    /** Official {@code FixedVsFloatingSwap::type()} view of this swap. */
+    @Override
+    public Swap.Type swapType() {
+        return type_ == Type.Payer ? Swap.Type.Payer : Swap.Type.Receiver;
+    }
+
     public double fixedRate() {
         return fixedRate_;
+    }
+
+    @Override
+    public double spread() {
+        return spread_;
+    }
+
+    @Override
+    public DayCounter fixedDayCount() {
+        return fixedDayCount_;
+    }
+
+    /** Fixed leg coupons, as {@code FixedVsFloatingSwap::fixedLeg()} in QuantLib. */
+    @Override
+    public List<CashFlow> fixedLeg() {
+        return List.copyOf(fixedLeg_);
     }
 
     public double nominal() {
