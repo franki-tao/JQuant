@@ -152,6 +152,12 @@ public class OptionletStripper1 extends OptionletStripper {
                                         optionletPrices_[i][j], optionletAnnuity,
                                         displacement(), optionletStDevs_[i][j],
                                         accuracy_, maxIter_);
+                    } else if (volatilityType() == Sarb.VolatilityType.Normal) {
+                        optionletStDevs_[i][j] = Math.sqrt(optionletTimes_[i])
+                                * BlackFormula.bachelierBlackFormulaImpliedVol(
+                                        optionletType, strikes[j],
+                                        atmOptionletRate_[i], optionletTimes_[i],
+                                        optionletPrices_[i][j], optionletAnnuity);
                     } else {
                         QL_FAIL("Unknown volatility type: " + volatilityType());
                     }
