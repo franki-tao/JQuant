@@ -146,7 +146,8 @@ public class CashflowUtil {
                             CommonUtil.get(floors, i, Double.NaN),
                             refStart, refEnd,
                             paymentDayCounter,
-                            isInArrears, exCouponDate)));
+                            isInArrears, exCouponDate,
+                            fixingConvention)));
                 }
             }
         }

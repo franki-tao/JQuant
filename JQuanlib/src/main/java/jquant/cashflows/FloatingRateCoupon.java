@@ -148,6 +148,15 @@ public class FloatingRateCoupon extends Coupon {
         this(paymentDate, nominal, startDate, endDate, fixingDays, index, 1.0);
     }
 
+    //! \name Observer interface
+    //@{
+    /** Mirrors QuantLib {@code Observer::deepUpdate()}, which defaults to
+     *  {@code update()} unless a subclass deep-updates its own observers. */
+    public void deepUpdate() {
+        update();
+    }
+    //@}
+
     //! \name LazyObject interface
     @Override
     public void performCalculations() {

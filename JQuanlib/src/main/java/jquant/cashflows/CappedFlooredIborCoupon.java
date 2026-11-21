@@ -3,12 +3,9 @@ package jquant.cashflows;
 import jquant.indexes.IborIndex;
 import jquant.patterns.AcyclicVisitor;
 import jquant.patterns.Visitor;
+import jquant.time.BusinessDayConvention;
 import jquant.time.Date;
 import jquant.time.DayCounter;
-
-import java.util.Optional;
-
-import static jquant.math.CommonUtil.QL_FAIL;
 
 public class CappedFlooredIborCoupon extends CappedFlooredCoupon {
     public CappedFlooredIborCoupon(
@@ -28,9 +25,33 @@ public class CappedFlooredIborCoupon extends CappedFlooredCoupon {
             boolean isInArrears, // = false,
             final Date exCouponDate // = Date()
     ) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays,
+                index, gearing, spread, cap, floor, refPeriodStart, refPeriodEnd,
+                dayCounter, isInArrears, exCouponDate,
+                BusinessDayConvention.PRECEDING);
+    }
+
+    public CappedFlooredIborCoupon(
+            final Date paymentDate,
+            double nominal,
+            final Date startDate,
+            final Date endDate,
+            int fixingDays,
+            final IborIndex index,
+            double gearing,
+            double spread,
+            double cap,
+            double floor,
+            final Date refPeriodStart,
+            final Date refPeriodEnd,
+            final DayCounter dayCounter,
+            boolean isInArrears,
+            final Date exCouponDate,
+            BusinessDayConvention fixingConvention
+    ) {
         super(new IborCoupon(paymentDate, nominal, startDate, endDate, fixingDays,
                 index, gearing, spread, refPeriodStart, refPeriodEnd,
-                dayCounter, isInArrears, exCouponDate), cap, floor);
+                dayCounter, isInArrears, exCouponDate, fixingConvention), cap, floor);
     }
 
     @Override
@@ -43,18 +64,8 @@ public class CappedFlooredIborCoupon extends CappedFlooredCoupon {
                 vv.visit(this);
             } catch (ClassCastException e) {
                 // 如果类型不匹配，说明该访问者不关心这个特定的子类
-                QL_FAIL("not a Black-volatility term structure visitor");
+                super.accept(v);
             }
         }
-    }
-
-    @Override
-    public boolean hasOccurred(Date refDate, Optional<Boolean> includeRefDate) {
-        return false;
-    }
-
-    @Override
-    public boolean tradingExCoupon(Date refDate) {
-        return false;
     }
 }
