@@ -8,6 +8,7 @@ import jquant.Settings;
 import jquant.cashflows.IborLeg;
 import jquant.indexes.IborIndex;
 import jquant.indexes.OvernightIndex;
+import jquant.pricingengines.capfloor.BachelierCapFloorEngine;
 import jquant.pricingengines.capfloor.BlackCapFloorEngine;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.Sarb;
@@ -59,6 +60,7 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
     private final Sarb.VolatilityType volatilityType_;
     private final double displacement_;
     private final int paymentLag_;
+    private final Period optionletFrequency_;
     private final boolean isOvernightIndex_;
 
     protected OptionletStripper(CapFloorTermVolSurface termVolSurface,
@@ -67,6 +69,17 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
                                 Sarb.VolatilityType type,
                                 double displacement,
                                 int paymentLag) {
+        this(termVolSurface, iborIndex, discount, type, displacement, null,
+                paymentLag);
+    }
+
+    protected OptionletStripper(CapFloorTermVolSurface termVolSurface,
+                                IborIndex iborIndex,
+                                Handle<YieldTermStructure> discount,
+                                Sarb.VolatilityType type,
+                                double displacement,
+                                Period optionletFrequency,
+                                int paymentLag) {
         termVolSurface_ = termVolSurface;
         iborIndex_ = iborIndex;
         discount_ = discount;
@@ -74,6 +87,7 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
         volatilityType_ = type;
         displacement_ = displacement;
         paymentLag_ = paymentLag;
+        optionletFrequency_ = optionletFrequency;
         isOvernightIndex_ = iborIndex instanceof OvernightIndex;
 
         if (volatilityType_ == Normal)
@@ -88,7 +102,8 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
             registerWith(discount_.get());
         registerWith(Settings.instance.evaluationDate());
 
-        Period indexTenor = iborIndex_.tenor();
+        Period indexTenor = optionletFrequency_ != null
+                ? optionletFrequency_ : iborIndex_.tenor();
         Period maxCapFloorTenor = termVolSurface_.optionTenors()
                 .get(termVolSurface_.optionTenors().size() - 1);
 
@@ -221,6 +236,15 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
         return volatilityType_;
     }
 
+    /** Optional official {@code optionletFrequency}; {@code null} when unset. */
+    public Period optionletFrequency() {
+        return optionletFrequency_;
+    }
+
+    public int paymentLag() {
+        return paymentLag_;
+    }
+
     protected boolean isOvernightIndex() {
         return isOvernightIndex_;
     }
@@ -267,7 +291,8 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
                 return new BlackCapFloorEngine(discountCurve, volatility,
                         termVolSurface_.dayCounter(), displacement_);
             case Normal:
-                QL_FAIL("Normal volatility stripping is not ported");
+                return new BachelierCapFloorEngine(discountCurve, volatility,
+                        termVolSurface_.dayCounter());
             default:
                 QL_FAIL("unknown volatility type: " + volatilityType_);
         }
@@ -287,7 +312,8 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
                 return BlackCapFloorEngine.withVolatility(discountCurve, volatility,
                         displacement_);
             case Normal:
-                QL_FAIL("Normal volatility stripping is not ported");
+                return BachelierCapFloorEngine.withVolatility(discountCurve,
+                        volatility);
             default:
                 QL_FAIL("unknown volatility type: " + volatilityType_);
         }
