@@ -5,7 +5,10 @@ import jquant.Handle;
 import jquant.PricingEngine;
 import jquant.Quote;
 import jquant.Settings;
+import jquant.cashflows.CashflowUtil;
+import jquant.cashflows.CompoundingOvernightIndexedCouponPricer;
 import jquant.cashflows.IborLeg;
+import jquant.cashflows.OvernightLeg;
 import jquant.indexes.IborIndex;
 import jquant.indexes.OvernightIndex;
 import jquant.pricingengines.capfloor.BachelierCapFloorEngine;
@@ -94,7 +97,8 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
             QL_REQUIRE(displacement_ == 0.0,
                     "non-null displacement is not allowed with Normal model");
         if (isOvernightIndex_)
-            QL_FAIL("overnight-index optionlet stripping is not ported");
+            QL_REQUIRE(optionletFrequency_ != null,
+                    "an optionlet frequency is required when using an overnight index");
 
         registerWith(termVolSurface_);
         registerWith(iborIndex_);
@@ -110,17 +114,32 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
         // optionlet tenors and capFloor lengths
         optionletTenors_ = new ArrayList<>();
         capFloorLengths_ = new ArrayList<>();
-        optionletTenors_.add(indexTenor);
-        capFloorLengths_.add(TimeUtils.add(optionletTenors_.get(0), indexTenor));
-        QL_REQUIRE(TimeUtils.geq(maxCapFloorTenor,
-                        capFloorLengths_.get(capFloorLengths_.size() - 1)),
-                "too short (" + maxCapFloorTenor + ") capfloor term vol termVolSurface");
-        Period nextCapFloorLength = TimeUtils.add(
-                capFloorLengths_.get(capFloorLengths_.size() - 1), indexTenor);
-        while (TimeUtils.leq(nextCapFloorLength, maxCapFloorTenor)) {
-            optionletTenors_.add(capFloorLengths_.get(capFloorLengths_.size() - 1));
-            capFloorLengths_.add(nextCapFloorLength);
-            nextCapFloorLength = TimeUtils.add(nextCapFloorLength, indexTenor);
+        if (isOvernightIndex_) {
+            // Overnight caps have no already-fixed first caplet, so the
+            // optionlet tenors and the cap/floor lengths coincide and start
+            // at one optionlet frequency.
+            Period nextCapFloorLength = indexTenor;
+            QL_REQUIRE(TimeUtils.geq(maxCapFloorTenor, nextCapFloorLength),
+                    "too short (" + maxCapFloorTenor
+                            + ") capfloor term vol termVolSurface");
+            while (TimeUtils.leq(nextCapFloorLength, maxCapFloorTenor)) {
+                optionletTenors_.add(nextCapFloorLength);
+                capFloorLengths_.add(nextCapFloorLength);
+                nextCapFloorLength = TimeUtils.add(nextCapFloorLength, indexTenor);
+            }
+        } else {
+            optionletTenors_.add(indexTenor);
+            capFloorLengths_.add(TimeUtils.add(optionletTenors_.get(0), indexTenor));
+            QL_REQUIRE(TimeUtils.geq(maxCapFloorTenor,
+                            capFloorLengths_.get(capFloorLengths_.size() - 1)),
+                    "too short (" + maxCapFloorTenor + ") capfloor term vol termVolSurface");
+            Period nextCapFloorLength = TimeUtils.add(
+                    capFloorLengths_.get(capFloorLengths_.size() - 1), indexTenor);
+            while (TimeUtils.leq(nextCapFloorLength, maxCapFloorTenor)) {
+                optionletTenors_.add(capFloorLengths_.get(capFloorLengths_.size() - 1));
+                capFloorLengths_.add(nextCapFloorLength);
+                nextCapFloorLength = TimeUtils.add(nextCapFloorLength, indexTenor);
+            }
         }
         nOptionletTenors_ = optionletTenors_.size();
 
@@ -250,6 +269,32 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
     }
 
     protected List<CashFlow> makeCapFloorLeg(Period capFloorLength) {
+        if (isOvernightIndex_) {
+            OvernightIndex overnightIndex = (OvernightIndex) iborIndex_;
+            Date startDate = termVolSurface_.referenceDate();
+            Date endDate = termVolSurface_.calendar().advance(startDate,
+                    capFloorLength, termVolSurface_.businessDayConvention());
+            Schedule schedule = new Schedule(startDate, endDate,
+                    optionletFrequency_, termVolSurface_.calendar(),
+                    termVolSurface_.businessDayConvention(),
+                    termVolSurface_.businessDayConvention(),
+                    DateGenerationRule.FORWARD, false,
+                    new Date(), new Date());
+            List<CashFlow> leg = new OvernightLeg(schedule, overnightIndex)
+                    .withNotionals(1.0)
+                    .withPaymentCalendar(termVolSurface_.calendar())
+                    .withPaymentAdjustment(
+                            termVolSurface_.businessDayConvention())
+                    .withPaymentLag(paymentLag_)
+                    .build();
+            CashflowUtil.setCouponPricer(leg,
+                    new CompoundingOvernightIndexedCouponPricer());
+            // Overnight caps do not exclude an already-fixed first coupon.
+            QL_REQUIRE(!leg.isEmpty(), "cap/floor length " + capFloorLength
+                    + " does not contain any optionlets");
+            return leg;
+        }
+
         Date startDate = iborIndex_.valueDate(
                 iborIndex_.fixingCalendar().adjust(
                         Settings.instance.evaluationDate().Date(),
@@ -285,6 +330,10 @@ public abstract class OptionletStripper extends StrippedOptionletBase {
     protected PricingEngine makeCapFloorPricingEngine(
             Handle<YieldTermStructure> discountCurve,
             Handle<Quote> volatility) {
+        // Overnight caps are calibrated on the surface reference date.
+        if (isOvernightIndex_)
+            return makeCapFloorPricingEngineWithOptionletVolatility(
+                    discountCurve, constantOptionletVolatility(volatility));
         // Preserve the quote-based engines' zero-settlement reference date for Ibor.
         switch (volatilityType_) {
             case ShiftedLognormal:

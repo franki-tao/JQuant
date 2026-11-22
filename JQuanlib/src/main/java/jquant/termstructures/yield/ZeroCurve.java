@@ -1,6 +1,7 @@
 package jquant.termstructures.yield;
 
 import jquant.math.interpolations.LinearInterpolation;
+import jquant.time.Calendar;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.TimeUtils;
@@ -35,7 +36,16 @@ public class ZeroCurve extends ZeroYieldStructure {
     public ZeroCurve(List<Date> dates,
                      double[] yields,
                      DayCounter dayCounter) {
-        super(dates.get(0), new NullCalendar(), dayCounter,
+        this(dates, yields, dayCounter, new NullCalendar());
+    }
+
+    /** Fixed reference date with an explicit calendar, as in the official
+     *  {@code ZeroCurve(dates, rates, dayCounter, calendar)} overload. */
+    public ZeroCurve(List<Date> dates,
+                     double[] yields,
+                     DayCounter dayCounter,
+                     Calendar calendar) {
+        super(dates.get(0), calendar, dayCounter,
                 new ArrayList<>(), new ArrayList<>());
 
         // initialize(): compounding defaults to Continuous, so the input

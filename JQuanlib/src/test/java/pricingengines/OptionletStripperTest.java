@@ -5,11 +5,16 @@ import jquant.Quote;
 import jquant.RelinkableHandle;
 import jquant.SavedSettings;
 import jquant.Settings;
+import jquant.cashflows.CashflowUtil;
+import jquant.cashflows.CompoundingOvernightIndexedCouponPricer;
 import jquant.cashflows.IborCoupon;
 import jquant.cashflows.IborLeg;
+import jquant.cashflows.OvernightLeg;
 import jquant.indexes.Euribor6M;
 import jquant.indexes.IborIndex;
 import jquant.indexes.IndexManager;
+import jquant.indexes.OvernightIndex;
+import jquant.indexes.Sofr;
 import jquant.instruments.CapFloor;
 import jquant.instruments.MakeCapFloor;
 import jquant.math.Matrix;
@@ -20,6 +25,7 @@ import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.Sarb;
 import jquant.termstructures.volatility.capfloor.CapFloorTermVolCurve;
 import jquant.termstructures.volatility.capfloor.CapFloorTermVolSurface;
+import jquant.termstructures.volatility.optionlet.ConstantOptionletVolatility;
 import jquant.termstructures.volatility.optionlet.OptionletStripper1;
 import jquant.termstructures.volatility.optionlet.OptionletStripper2;
 import jquant.termstructures.volatility.optionlet.StrippedOptionletAdapter;
@@ -37,6 +43,8 @@ import jquant.time.Schedule;
 import jquant.time.TimeUnit;
 import jquant.time.TimeUtils;
 import jquant.time.calendars.Target;
+import jquant.time.calendars.UnitedStates;
+import jquant.time.daycounters.Actual360;
 import jquant.time.daycounters.Actual365Fixed;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -349,6 +357,98 @@ public class OptionletStripperTest {
             capFloorVolRealSurface = new CapFloorTermVolSurface(0, calendar,
                     BusinessDayConvention.FOLLOWING, optionTenors, strikes,
                     new Matrix(termV), dayCounter);
+        }
+    }
+
+    /** Official {@code CommonVarsON} from test-suite/optionletstripper.cpp. */
+    private static class CommonVarsON {
+        Date today;
+        Date startDate, endDate;
+        Period tenor;
+        Calendar calendar;
+        BusinessDayConvention convention;
+        DayCounter dc;
+        final RelinkableHandle<YieldTermStructure> sofrCurveHandle =
+                new RelinkableHandle<>();
+        double[] strikes;
+        List<Period> expiries = new ArrayList<>();
+        double[][] vols;
+        CapFloorTermVolSurface capfloorVol;
+
+        CommonVarsON() {
+            today = new Date(15, Month.APRIL, 2025);
+            startDate = new Date(17, Month.APRIL, 2025);
+            endDate = new Date(17, Month.APRIL, 2030);
+            tenor = new Period(3, TimeUnit.MONTHS);
+            calendar = new UnitedStates(UnitedStates.Market.FederalReserve);
+            convention = BusinessDayConvention.MODIFIED_FOLLOWING;
+            dc = new Actual360();
+        }
+
+        void setSofrHandle() {
+            List<Date> dates = List.of(
+                    new Date(15, Month.APRIL, 2025),
+                    new Date(16, Month.APRIL, 2025),
+                    new Date(28, Month.APRIL, 2025),
+                    new Date(21, Month.MAY, 2025),
+                    new Date(21, Month.JULY, 2025),
+                    new Date(21, Month.OCTOBER, 2025),
+                    new Date(21, Month.APRIL, 2026),
+                    new Date(21, Month.APRIL, 2027),
+                    new Date(19, Month.APRIL, 2028),
+                    new Date(22, Month.APRIL, 2030),
+                    new Date(21, Month.APRIL, 2032),
+                    new Date(19, Month.APRIL, 2035),
+                    new Date(21, Month.APRIL, 2037),
+                    new Date(19, Month.APRIL, 2040),
+                    new Date(19, Month.APRIL, 2045),
+                    new Date(20, Month.APRIL, 2050),
+                    new Date(21, Month.APRIL, 2055));
+
+            double[] zeroRates = {
+                    3.039872 / 100.0, 3.082092 / 100.0, 3.67902 / 100.0,
+                    3.791077 / 100.0, 4.147655 / 100.0, 4.498917 / 100.0,
+                    4.688082 / 100.0, 4.486636 / 100.0, 4.228873 / 100.0,
+                    3.949601 / 100.0, 3.814579 / 100.0, 3.731412 / 100.0,
+                    3.718794 / 100.0, 3.704788 / 100.0, 3.599069 / 100.0,
+                    3.401666 / 100.0, 3.221372 / 100.0};
+
+            sofrCurveHandle.linkTo(
+                    new ZeroCurve(dates, zeroRates, new Actual365Fixed(),
+                            calendar), true);
+        }
+
+        void setFlatSofrCapFloorVolSurface() {
+            strikes = new double[]{0.03, 0.035, 0.04};
+
+            expiries = new ArrayList<>();
+            for (int i = 1; i <= 10; ++i)
+                expiries.add(new Period(i, TimeUnit.YEARS));
+
+            vols = new double[expiries.size()][strikes.length];
+            for (int i = 0; i < vols.length; ++i)
+                for (int j = 0; j < vols[i].length; ++j)
+                    vols[i][j] = 30.0 / 10000.0;
+
+            capfloorVol = new CapFloorTermVolSurface(2, calendar, convention,
+                    expiries, strikes, new Matrix(vols), dc);
+        }
+
+        void setNonFlatSofrCapFloorVolSurface() {
+            strikes = new double[]{0.03, 0.035, 0.04};
+
+            expiries = new ArrayList<>();
+            for (int i = 1; i <= 10; ++i)
+                expiries.add(new Period(i, TimeUnit.YEARS));
+
+            double[] skewBps = {4.0, 2.0, 0.0};
+            vols = new double[expiries.size()][strikes.length];
+            for (int i = 0; i < vols.length; ++i)
+                for (int j = 0; j < vols[i].length; ++j)
+                    vols[i][j] = (25.0 + 1.5 * (i + 1) + skewBps[j]) / 10000.0;
+
+            capfloorVol = new CapFloorTermVolSurface(2, calendar, convention,
+                    expiries, strikes, new Matrix(vols), dc);
         }
     }
 
@@ -1115,5 +1215,248 @@ public class OptionletStripperTest {
             fail("mismatched reference date raised " + e.getClass().getName()
                     + ": " + e.getMessage());
         }
+    }
+
+    private static double checkSofrOptionletStripping(boolean flatVol,
+                                                      int paymentLag) {
+        CommonVarsON vars = new CommonVarsON();
+        Settings.instance.evaluationDate().equal(vars.today);
+        vars.setSofrHandle();
+        if (flatVol)
+            vars.setFlatSofrCapFloorVolSurface();
+        else
+            vars.setNonFlatSofrCapFloorVolSurface();
+
+        OvernightIndex sofrIndex = new Sofr(vars.sofrCurveHandle);
+        sofrIndex.addFixing(new Date(15, Month.APRIL, 2025), 3.04 / 100.0,
+                false);
+
+        double notional = 1.0;
+
+        OptionletStripper1 optionletSurf = new OptionletStripper1(
+                vars.capfloorVol, sofrIndex, null, 1e-6, 100,
+                vars.sofrCurveHandle, Sarb.VolatilityType.Normal, 0.0, false,
+                vars.tenor, paymentLag);
+
+        Handle<OptionletVolatilityStructure> ovsHandle = new Handle<>(
+                new StrippedOptionletAdapter(optionletSurf), true);
+
+        BachelierCapFloorEngine strippedVolEngine =
+                BachelierCapFloorEngine.withVolatility(
+                        vars.sofrCurveHandle, ovsHandle);
+
+        double tolerance = 2.5e-8;
+        double maxError = 0.0;
+
+        for (int tenorIndex = 0; tenorIndex < vars.expiries.size();
+             ++tenorIndex) {
+            Date endDate = vars.calendar.advance(vars.startDate,
+                    vars.expiries.get(tenorIndex), vars.convention);
+            Schedule schedule = new Schedule(vars.startDate, endDate,
+                    vars.tenor, vars.calendar, vars.convention,
+                    vars.convention, DateGenerationRule.FORWARD, false,
+                    new Date(), new Date());
+            List<jquant.CashFlow> leg = new OvernightLeg(schedule, sofrIndex)
+                    .withNotionals(notional)
+                    .withPaymentAdjustment(
+                            BusinessDayConvention.MODIFIED_FOLLOWING)
+                    .withPaymentLag(paymentLag)
+                    .build();
+            CashflowUtil.setCouponPricer(leg,
+                    new CompoundingOvernightIndexedCouponPricer());
+
+            for (int strikeIndex = 0; strikeIndex < vars.strikes.length;
+                 ++strikeIndex) {
+                List<Double> strikes = List.of(vars.strikes[strikeIndex]);
+
+                CapFloor strippedCap = new CapFloor(CapFloor.Type.Cap, leg,
+                        strikes);
+                strippedCap.setPricingEngine(strippedVolEngine);
+                double strippedCapPrice = strippedCap.NPV();
+
+                SimpleQuote quotedVol = new SimpleQuote(
+                        vars.vols[tenorIndex][strikeIndex]);
+                Handle<Quote> quotedVolQuote = new Handle<>(quotedVol, true);
+                Handle<OptionletVolatilityStructure> quotedVolHandle =
+                        new Handle<>(new ConstantOptionletVolatility(
+                                vars.capfloorVol.referenceDate(),
+                                vars.calendar, vars.convention, quotedVolQuote,
+                                vars.dc, Sarb.VolatilityType.Normal, 0.0),
+                                true);
+                BachelierCapFloorEngine quotedVolEngine =
+                        BachelierCapFloorEngine.withVolatility(
+                                vars.sofrCurveHandle, quotedVolHandle);
+                CapFloor cap = new CapFloor(CapFloor.Type.Cap, leg, strikes);
+                cap.setPricingEngine(quotedVolEngine);
+                double capPrice = cap.NPV();
+
+                double error = Math.abs(capPrice - strippedCapPrice);
+                maxError = Math.max(maxError, error);
+                if (error > tolerance)
+                    fail("\noption tenor:       "
+                            + vars.expiries.get(tenorIndex)
+                            + "\nstrike:             " + vars.strikes[strikeIndex]
+                            + "\nquoted vol price:   " + capPrice
+                            + "\nstripped vol price: " + strippedCapPrice
+                            + "\nerror:              " + error
+                            + "\ntolerance:          " + tolerance);
+            }
+        }
+        return maxError;
+    }
+
+    private static double checkSofrOptionletStripping2(boolean flatVol,
+                                                       int paymentLag) {
+        CommonVarsON vars = new CommonVarsON();
+        Settings.instance.evaluationDate().equal(vars.today);
+        vars.setSofrHandle();
+        if (flatVol)
+            vars.setFlatSofrCapFloorVolSurface();
+        else
+            vars.setNonFlatSofrCapFloorVolSurface();
+
+        OvernightIndex sofrIndex = new Sofr(vars.sofrCurveHandle);
+        sofrIndex.addFixing(new Date(15, Month.APRIL, 2025), 3.04 / 100.0,
+                false);
+
+        List<Handle<Quote>> atmVols = new ArrayList<>();
+        for (int i = 0; i < vars.expiries.size(); ++i) {
+            double atmVol = vars.vols[i][1];
+            if (!flatVol)
+                atmVol += 0.0001;
+            atmVols.add(new Handle<>(new SimpleQuote(atmVol), true));
+        }
+        CapFloorTermVolCurve atmCurve = new CapFloorTermVolCurve(2,
+                vars.calendar, vars.convention, vars.expiries, atmVols,
+                vars.dc);
+
+        OptionletStripper1 stripper1 = new OptionletStripper1(
+                vars.capfloorVol, sofrIndex, null, 1e-6, 100,
+                vars.sofrCurveHandle, Sarb.VolatilityType.Normal, 0.0, false,
+                vars.tenor, paymentLag);
+        OptionletStripper2 stripper2 = new OptionletStripper2(stripper1,
+                atmCurve);
+
+        Handle<OptionletVolatilityStructure> vol = new Handle<>(
+                new StrippedOptionletAdapter(stripper2), true);
+        vol.currentLink().enableExtrapolation();
+        BachelierCapFloorEngine engine = BachelierCapFloorEngine.withVolatility(
+                vars.sofrCurveHandle, vol);
+
+        double[] strikes = stripper2.atmCapFloorStrikes();
+        double[] targetPrices = stripper2.atmCapFloorPrices();
+        double tolerance = 1.0e-6;
+
+        if (flatVol) {
+            List<Double> firstUncoveredSmile = stripper2.optionletStrikes(4);
+            for (double strike : firstUncoveredSmile)
+                if (Math.abs(strike - strikes[0]) < 1.0e-12)
+                    fail("the 1Y SOFR ATM adjustment was applied beyond its "
+                            + "final optionlet");
+        }
+
+        double maxError = 0.0;
+        for (int i = 0; i < vars.expiries.size(); ++i) {
+            Date endDate = vars.calendar.advance(vars.startDate,
+                    vars.expiries.get(i), vars.convention);
+            Schedule schedule = new Schedule(vars.startDate, endDate,
+                    vars.tenor, vars.calendar, vars.convention,
+                    vars.convention, DateGenerationRule.FORWARD, false,
+                    new Date(), new Date());
+            List<jquant.CashFlow> leg = new OvernightLeg(schedule, sofrIndex)
+                    .withNotionals(1.0)
+                    .withPaymentCalendar(vars.calendar)
+                    .withPaymentAdjustment(vars.convention)
+                    .withPaymentLag(paymentLag)
+                    .build();
+            CashflowUtil.setCouponPricer(leg,
+                    new CompoundingOvernightIndexedCouponPricer());
+
+            CapFloor cap = new CapFloor(CapFloor.Type.Cap, leg,
+                    List.of(strikes[i]));
+            cap.setPricingEngine(engine);
+            double error = Math.abs(cap.NPV() - targetPrices[i]);
+            maxError = Math.max(maxError, error);
+            if (error > tolerance)
+                fail("\noption tenor: " + vars.expiries.get(i)
+                        + "\nATM strike:   " + strikes[i]
+                        + "\ntarget price: " + targetPrices[i]
+                        + "\nstripper price: " + cap.NPV()
+                        + "\nerror:        " + error
+                        + "\ntolerance:    " + tolerance);
+        }
+        return maxError;
+    }
+
+    @Test
+    public void testFlatTermVolatilityStripping1SofrPaymentLag() {
+        double maxError = checkSofrOptionletStripping(true, 2);
+        System.out.println(
+                "testFlatTermVolatilityStripping1SofrPaymentLag max error: "
+                        + maxError);
+    }
+
+    @Test
+    public void testTermVolatilityStripping1SofrPaymentLag() {
+        double maxError = checkSofrOptionletStripping(false, 2);
+        System.out.println(
+                "testTermVolatilityStripping1SofrPaymentLag max error: "
+                        + maxError);
+    }
+
+    @Test
+    public void testFlatTermVolatilityStripping2SofrPaymentLag() {
+        double maxError = checkSofrOptionletStripping2(true, 2);
+        System.out.println(
+                "testFlatTermVolatilityStripping2SofrPaymentLag max error: "
+                        + maxError);
+    }
+
+    @Test
+    public void testTermVolatilityStripping2SofrPaymentLag() {
+        double maxError = checkSofrOptionletStripping2(false, 2);
+        System.out.println(
+                "testTermVolatilityStripping2SofrPaymentLag max error: "
+                        + maxError);
+    }
+
+    @Test
+    public void testOptionletStripper2AdjustsZeroBaseVolatility() {
+        CommonVarsON vars = new CommonVarsON();
+        Settings.instance.evaluationDate().equal(vars.today);
+        vars.setSofrHandle();
+        vars.setFlatSofrCapFloorVolSurface();
+        vars.vols = new double[vars.expiries.size()][vars.strikes.length];
+        vars.capfloorVol = new CapFloorTermVolSurface(2, vars.calendar,
+                vars.convention, vars.expiries, vars.strikes,
+                new Matrix(vars.vols), vars.dc);
+
+        OvernightIndex sofrIndex = new Sofr(vars.sofrCurveHandle);
+        sofrIndex.addFixing(new Date(15, Month.APRIL, 2025), 3.04 / 100.0,
+                false);
+        OptionletStripper1 stripper1 = new OptionletStripper1(
+                vars.capfloorVol, sofrIndex, null, 1e-6, 100,
+                vars.sofrCurveHandle, Sarb.VolatilityType.Normal, 0.0, true,
+                vars.tenor, 2);
+
+        List<Handle<Quote>> atmVols = new ArrayList<>();
+        for (int i = 0; i < vars.expiries.size(); ++i)
+            atmVols.add(new Handle<>(new SimpleQuote(0.05), true));
+        CapFloorTermVolCurve atmCurve = new CapFloorTermVolCurve(2,
+                vars.calendar, vars.convention, vars.expiries, atmVols,
+                vars.dc);
+        OptionletStripper2 stripper2 = new OptionletStripper2(stripper1,
+                atmCurve);
+
+        double[] spreads = stripper2.spreadsVol();
+        double minSpread = Double.POSITIVE_INFINITY;
+        for (double spread : spreads) {
+            minSpread = Math.min(minSpread, spread);
+            if (!(spread > 0.0))
+                fail("expected a positive volatility spread, got " + spread);
+        }
+        System.out.println(
+                "testOptionletStripper2AdjustsZeroBaseVolatility min spread: "
+                        + minSpread);
     }
 }

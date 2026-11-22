@@ -19,10 +19,12 @@ import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.Period;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_FAIL;
+import static jquant.math.CommonUtil.QL_REQUIRE;
 
 /**
  * Helper class to strip optionlet (i.e. caplet/floorlet) volatilities
@@ -52,7 +54,7 @@ public class OptionletStripper1 extends OptionletStripper {
                               Double switchStrike,
                               double accuracy) {
         this(termVolSurface, index, switchStrike, accuracy, 100, null,
-                Sarb.VolatilityType.ShiftedLognormal, 0.0, false, 0);
+                Sarb.VolatilityType.ShiftedLognormal, 0.0, false, null, 0);
     }
 
     public OptionletStripper1(CapFloorTermVolSurface termVolSurface,
@@ -65,7 +67,23 @@ public class OptionletStripper1 extends OptionletStripper {
                               double displacement,
                               boolean dontThrow,
                               int paymentLag) {
-        super(termVolSurface, index, discount, type, displacement, paymentLag);
+        this(termVolSurface, index, switchStrike, accuracy, maxIter, discount,
+                type, displacement, dontThrow, null, paymentLag);
+    }
+
+    public OptionletStripper1(CapFloorTermVolSurface termVolSurface,
+                              IborIndex index,
+                              Double switchStrike,
+                              double accuracy,
+                              int maxIter,
+                              Handle<YieldTermStructure> discount,
+                              Sarb.VolatilityType type,
+                              double displacement,
+                              boolean dontThrow,
+                              Period optionletFrequency,
+                              int paymentLag) {
+        super(termVolSurface, index, discount, type, displacement,
+                optionletFrequency, paymentLag);
         floatingSwitchStrike_ = (switchStrike == null);
         switchStrike_ = floatingSwitchStrike_ ? 0.0 : switchStrike;
         accuracy_ = accuracy;
@@ -91,17 +109,26 @@ public class OptionletStripper1 extends OptionletStripper {
         Date referenceDate = termVolSurface_.referenceDate();
         DayCounter dc = termVolSurface_.dayCounter();
 
+        // For an overnight index a single full leg is built once and each
+        // optionlet uses its prefix; overnight caps have no excluded
+        // already-fixed first coupon.
+        List<CashFlow> fullOvernightLeg = isOvernightIndex()
+                ? makeCapFloorLeg(capFloorLengths_.get(capFloorLengths_.size() - 1))
+                : null;
+
         PricingEngine dummy = new BlackCapFloorEngine(
                 iborIndex_.forwardingTermStructure(), 0.20, dc);
         for (int i = 0; i < nOptionletTenors_; ++i) {
-            CapFloor temp = makeCapFloor(CapFloor.Type.Cap, i, 0.04, dummy);
+            CapFloor temp = makeCapFloor(CapFloor.Type.Cap, i, 0.04, dummy,
+                    fullOvernightLeg);
             FloatingRateCoupon lFRC = temp.lastFloatingRateCoupon();
             optionletDates_.set(i, lFRC.fixingDate());
             optionletPaymentDates_.set(i, lFRC.date());
             optionletAccrualPeriods_[i] = lFRC.accrualPeriod();
             optionletTimes_[i] = dc.yearFraction(referenceDate,
                     optionletDates_.get(i), new Date(), new Date());
-            atmOptionletRate_[i] = lFRC.indexFixing();
+            atmOptionletRate_[i] = isOvernightIndex()
+                    ? lFRC.adjustedFixing() : lFRC.indexFixing();
         }
 
         if (floatingSwitchStrike_) {
@@ -136,7 +163,7 @@ public class OptionletStripper1 extends OptionletStripper {
                         capFloorLengths_.get(i), strikes[j], true);
                 volQuote.setValue(capFloorVols_[i][j]);
                 CapFloor capFloor = makeCapFloor(capFloorType, i, strikes[j],
-                        capFloorEngine);
+                        capFloorEngine, fullOvernightLeg);
                 capFloorPrices_[i][j] = capFloor.NPV();
                 optionletPrices_[i][j] = capFloorPrices_[i][j]
                         - previousCapFloorPrice;
@@ -183,8 +210,17 @@ public class OptionletStripper1 extends OptionletStripper {
     private CapFloor makeCapFloor(CapFloor.Type capFloorType,
                                   int optionletIndex,
                                   double strike,
-                                  PricingEngine engine) {
-        List<CashFlow> leg = makeCapFloorLeg(capFloorLengths_.get(optionletIndex));
+                                  PricingEngine engine,
+                                  List<CashFlow> fullOvernightLeg) {
+        List<CashFlow> leg;
+        if (isOvernightIndex()) {
+            QL_REQUIRE(optionletIndex < fullOvernightLeg.size(),
+                    "optionlet index out of range");
+            leg = new ArrayList<>(
+                    fullOvernightLeg.subList(0, optionletIndex + 1));
+        } else {
+            leg = makeCapFloorLeg(capFloorLengths_.get(optionletIndex));
+        }
         CapFloor capFloor = new CapFloor(capFloorType, leg,
                 Collections.singletonList(strike));
         capFloor.setPricingEngine(engine);
