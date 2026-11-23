@@ -4,6 +4,7 @@ import jquant.Handle;
 import jquant.Settings;
 import jquant.indexes.OvernightIndex;
 import jquant.termstructures.YieldTermStructure;
+import jquant.termstructures.volatility.optionlet.OptionletVolatilityStructure;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.TimeUtils;
@@ -22,9 +23,38 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/cashflows/overnightindexedcouponpricer.cpp
  */
 public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCouponPricer {
-    private record ComputeResult(double rate,
-                                 double effectiveSpread,
-                                 double effectiveIndexFixing) {
+    protected record ComputeResult(double rate,
+                                   double effectiveSpread,
+                                   double effectiveIndexFixing) {
+    }
+
+    public CompoundingOvernightIndexedCouponPricer() {
+        this(null, false);
+    }
+
+    public CompoundingOvernightIndexedCouponPricer(
+            final Handle<OptionletVolatilityStructure> v) {
+        this(v, false);
+    }
+
+    public CompoundingOvernightIndexedCouponPricer(
+            final Handle<OptionletVolatilityStructure> v,
+            final boolean effectiveVolatilityInput) {
+        super(v, effectiveVolatilityInput);
+    }
+
+    private record GrowthFactor(double gf, double gfSpread) {
+    }
+
+    private static GrowthFactor growthFactor(double fixing, int idx,
+                                             double[] span,
+                                             double couponSpread,
+                                             boolean compoundSpreadDaily) {
+        final double gf = 1.0 + fixing * span[idx];
+        final double gfSpread = compoundSpreadDaily
+                ? gf + couponSpread * span[idx]
+                : gf;
+        return new GrowthFactor(gf, gfSpread);
     }
 
     @Override
@@ -45,7 +75,7 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
         return compute(coupon_.accrualEndDate()).effectiveIndexFixing;
     }
 
-    private ComputeResult compute(final Date date) {
+    protected ComputeResult compute(final Date date) {
         final Date today = Settings.instance.evaluationDate().Date();
 
         final OvernightIndex index = (OvernightIndex) coupon_.index();
@@ -58,6 +88,7 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
         final double couponSpread = coupon_.spread();
         final boolean applyObservationShift =
                 coupon_.applyObservationShift() && coupon_.fixingDays() > 0;
+        final boolean compoundSpreadDaily = coupon_.compoundSpreadDaily();
 
         int i = 0;
         final int n = determineNumberOfFixings(interestDates, date);
@@ -65,11 +96,14 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
         // Official growthFactor: when averaging to a date inside the last
         // included period and observation shift is off, accrue only the
         // fraction up to that date.
-        final java.util.function.IntToDoubleFunction span = idx ->
-                (applyObservationShift || TimeUtils.geq(date, interestDates.get(idx + 1)))
-                        ? dt[idx]
-                        : dc.yearFraction(interestDates.get(idx), date,
-                                new Date(), new Date());
+        final double[] span = new double[n];
+        for (int j = 0; j < n; ++j) {
+            span[j] = (applyObservationShift
+                    || TimeUtils.geq(date, interestDates.get(j + 1)))
+                    ? dt[j]
+                    : dc.yearFraction(interestDates.get(j), date,
+                            new Date(), new Date());
+        }
 
         double compoundFactor = 1.0, compoundFactorWithoutSpread = 1.0;
 
@@ -79,9 +113,10 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
             double fixing = index.pastFixing(fixingDates.get(i));
             QL_REQUIRE(!Double.isNaN(fixing),
                     "Missing " + index.name() + " fixing for " + fixingDates.get(i));
-            double gf = 1.0 + fixing * span.applyAsDouble(i);
-            compoundFactorWithoutSpread *= gf;
-            compoundFactor *= gf;
+            GrowthFactor gf = growthFactor(fixing, i, span, couponSpread,
+                    compoundSpreadDaily);
+            compoundFactorWithoutSpread *= gf.gf();
+            compoundFactor *= gf.gfSpread();
             ++i;
         }
 
@@ -91,9 +126,10 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
             try {
                 double fixing = index.pastFixing(fixingDates.get(i));
                 if (!Double.isNaN(fixing)) {
-                    double gf = 1.0 + fixing * span.applyAsDouble(i);
-                    compoundFactorWithoutSpread *= gf;
-                    compoundFactor *= gf;
+                    GrowthFactor gf = growthFactor(fixing, i, span,
+                            couponSpread, compoundSpreadDaily);
+                    compoundFactorWithoutSpread *= gf.gf();
+                    compoundFactor *= gf.gfSpread();
                     ++i;
                 }
             } catch (Exception e) {
@@ -136,9 +172,10 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
                     while (i < telescopicStartIdx) {
                         // compound up any periods ahead of the telescopic range
                         double fixing = index.fixing(fixingDates.get(i), false);
-                        double gf = 1.0 + fixing * span.applyAsDouble(i);
-                        compoundFactorWithoutSpread *= gf;
-                        compoundFactor *= gf;
+                        GrowthFactor gf = growthFactor(fixing, i, span,
+                                couponSpread, compoundSpreadDaily);
+                        compoundFactorWithoutSpread *= gf.gf();
+                        compoundFactor *= gf.gfSpread();
                         ++i;
                     }
                     final double startDiscount = ts.discount(valueDates.get(telescopicStartIdx), false);
@@ -151,9 +188,10 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
             // compound up any remaining periods
             while (i < n) {
                 double fixing = index.fixing(fixingDates.get(i), false);
-                double gf = 1.0 + fixing * span.applyAsDouble(i);
-                compoundFactorWithoutSpread *= gf;
-                compoundFactor *= gf;
+                GrowthFactor gf = growthFactor(fixing, i, span,
+                        couponSpread, compoundSpreadDaily);
+                compoundFactorWithoutSpread *= gf.gf();
+                compoundFactor *= gf.gfSpread();
                 ++i;
             }
         }
@@ -165,9 +203,17 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
         final double tau = dc.yearFraction(rateAccrualStartDate, rateAccrualEndDate,
                 new Date(), new Date());
         final double rate = (compoundFactor - 1.0) / tau;
-        double swapletRate = coupon_.gearing() * rate + couponSpread;
-        final double effectiveSpread = couponSpread;
-        final double effectiveIndexFixing = rate;
+        double swapletRate = coupon_.gearing() * rate;
+        final double effectiveSpread;
+        final double effectiveIndexFixing;
+        if (!compoundSpreadDaily) {
+            swapletRate += couponSpread;
+            effectiveSpread = couponSpread;
+            effectiveIndexFixing = rate;
+        } else {
+            effectiveSpread = rate - (compoundFactorWithoutSpread - 1.0) / tau;
+            effectiveIndexFixing = rate - effectiveSpread;
+        }
 
         return new ComputeResult(swapletRate, effectiveSpread, effectiveIndexFixing);
     }

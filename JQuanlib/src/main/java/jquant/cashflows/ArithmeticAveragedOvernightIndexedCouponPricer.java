@@ -4,6 +4,7 @@ import jquant.Handle;
 import jquant.Settings;
 import jquant.indexes.OvernightIndex;
 import jquant.termstructures.YieldTermStructure;
+import jquant.termstructures.volatility.optionlet.OptionletVolatilityStructure;
 import jquant.time.Date;
 import jquant.time.DayCounter;
 import jquant.time.TimeUtils;
@@ -31,6 +32,20 @@ public class ArithmeticAveragedOvernightIndexedCouponPricer extends OvernightInd
     public ArithmeticAveragedOvernightIndexedCouponPricer(double meanReversion,
                                                           double volatility,
                                                           boolean byApprox) {
+        this(meanReversion, volatility, byApprox, null, false);
+    }
+
+    /**
+     * Official constructor carrying the optionlet-volatility machinery used
+     * by the Black averaging pricer.
+     */
+    public ArithmeticAveragedOvernightIndexedCouponPricer(
+            double meanReversion,
+            double volatility,
+            boolean byApprox,
+            final Handle<OptionletVolatilityStructure> v,
+            final boolean effectiveVolatilityInput) {
+        super(v, effectiveVolatilityInput);
         byApprox_ = byApprox;
         mrs_ = meanReversion;
         vol_ = volatility;

@@ -2,6 +2,7 @@ package jquant.cashflows;
 
 import jquant.Settings;
 import jquant.indexes.OvernightIndex;
+import jquant.math.ClosestRounding;
 import jquant.time.BusinessDayConvention;
 import jquant.time.Date;
 import jquant.time.DayCounter;
@@ -20,8 +21,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * daily overnight fixings.
  *
  * <p>Port of QuantLib's {@code OvernightIndexedCoupon} in
- * {@code ql/cashflows/overnightindexedcoupon.cpp}. The daily-compounded-spread,
- * rate-computation-date and rounding options are not ported.
+ * {@code ql/cashflows/overnightindexedcoupon.cpp}.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/cashflows/overnightindexedcoupon.cpp
  */
@@ -35,6 +35,10 @@ public class OvernightIndexedCoupon extends FloatingRateCoupon {
     private final boolean telescopicValueDates_;
     private final int lockoutDays_;
     private final boolean applyObservationShift_;
+    private final boolean compoundSpreadDaily_;
+    private final Date rateComputationStartDate_;
+    private final Date rateComputationEndDate_;
+    private final Integer roundingPrecision_;
 
     /** Convenience constructor using the official defaults. */
     public OvernightIndexedCoupon(final Date paymentDate,
@@ -79,21 +83,56 @@ public class OvernightIndexedCoupon extends FloatingRateCoupon {
                                   Integer lookbackDays,
                                   int lockoutDays,
                                   boolean applyObservationShift) {
+        this(paymentDate, nominal, startDate, endDate, overnightIndex,
+                gearing, spread, refPeriodStart, refPeriodEnd, dayCounter,
+                telescopicValueDates, averagingMethod, lookbackDays,
+                lockoutDays, applyObservationShift,
+                false, new Date(), new Date(), new Date(), null);
+    }
+
+    public OvernightIndexedCoupon(final Date paymentDate,
+                                  double nominal,
+                                  final Date startDate,
+                                  final Date endDate,
+                                  final OvernightIndex overnightIndex,
+                                  double gearing,
+                                  double spread,
+                                  final Date refPeriodStart,
+                                  final Date refPeriodEnd,
+                                  final DayCounter dayCounter,
+                                  boolean telescopicValueDates,
+                                  RateAveraging averagingMethod,
+                                  Integer lookbackDays,
+                                  int lockoutDays,
+                                  boolean applyObservationShift,
+                                  boolean compoundSpreadDaily,
+                                  final Date rateComputationStartDate,
+                                  final Date rateComputationEndDate,
+                                  final Date exCouponDate,
+                                  Integer roundingPrecision) {
         super(paymentDate, nominal, startDate, endDate,
                 lookbackDays, overnightIndex,
                 gearing, spread, refPeriodStart, refPeriodEnd,
-                dayCounter, false, new Date(), BusinessDayConvention.PRECEDING);
+                dayCounter, false, exCouponDate, BusinessDayConvention.PRECEDING);
         telescopicValueDates_ = telescopicValueDates;
         averagingMethod_ = averagingMethod;
         lockoutDays_ = lockoutDays;
         applyObservationShift_ = applyObservationShift;
+        compoundSpreadDaily_ = compoundSpreadDaily;
+        rateComputationStartDate_ = rateComputationStartDate;
+        rateComputationEndDate_ = rateComputationEndDate;
+        roundingPrecision_ = roundingPrecision;
 
         QL_REQUIRE(TimeUtils.less(startDate, endDate),
                 "startDate must be less than endDate");
         QL_REQUIRE(TimeUtils.geq(paymentDate, endDate),
                 "Payment date cannot be earlier than accrual end date");
 
-        Date tmpEndDate = endDate;
+        final Date rateCalcStartDate =
+                isEmpty(rateComputationStartDate_) ? startDate : rateComputationStartDate_;
+        final Date rateCalcEndDate =
+                isEmpty(rateComputationEndDate_) ? endDate : rateComputationEndDate_;
+        Date tmpEndDate = rateCalcEndDate;
 
         QL_REQUIRE(canApplyTelescopicFormula() || !telescopicValueDates,
                 "Telescopic formula cannot be applied for a coupon with lookback.");
@@ -104,19 +143,19 @@ public class OvernightIndexedCoupon extends FloatingRateCoupon {
         if (telescopicValueDates) {
             Date evalDate = Settings.instance.evaluationDate().Date();
             tmpEndDate = fixingCal.advance(
-                    TimeUtils.max(startDate, evalDate), 7, TimeUnit.DAYS,
+                    TimeUtils.max(rateCalcStartDate, evalDate), 7, TimeUnit.DAYS,
                     BusinessDayConvention.FOLLOWING, false);
-            tmpEndDate = TimeUtils.min(tmpEndDate, endDate);
+            tmpEndDate = TimeUtils.min(tmpEndDate, rateCalcEndDate);
         }
         valueDates_.addAll(fixingCal.businessDayList(
-                fixingCal.adjust(startDate, BusinessDayConvention.PRECEDING),
+                fixingCal.adjust(rateCalcStartDate, BusinessDayConvention.PRECEDING),
                 fixingCal.adjust(tmpEndDate, BusinessDayConvention.FOLLOWING)));
 
         if (telescopicValueDates) {
             // if lockout days are defined, we need to ensure that
             // the lockout period is covered by the value dates
-            tmpEndDate = fixingCal.adjust(endDate, BusinessDayConvention.FOLLOWING);
-            Date tmpLockoutDate = fixingCal.advance(endDate,
+            tmpEndDate = fixingCal.adjust(rateCalcEndDate, BusinessDayConvention.FOLLOWING);
+            Date tmpLockoutDate = fixingCal.advance(rateCalcEndDate,
                     -Math.max(lockoutDays_, 1), TimeUnit.DAYS,
                     BusinessDayConvention.FOLLOWING, false);
             Date nextValueDate = TimeUtils.greater(tmpLockoutDate,
@@ -136,8 +175,8 @@ public class OvernightIndexedCoupon extends FloatingRateCoupon {
         n_ = valueDates_.size() - 1;
 
         interestDates_.addAll(valueDates_);
-        interestDates_.set(0, startDate);
-        interestDates_.set(n_, endDate);
+        interestDates_.set(0, rateCalcStartDate);
+        interestDates_.set(n_, rateCalcEndDate);
 
         if (fixingDays_ == overnightIndex.fixingDays() && fixingDays_ == 0) {
             fixingDates_.addAll(valueDates_.subList(0, n_));
@@ -236,6 +275,55 @@ public class OvernightIndexedCoupon extends FloatingRateCoupon {
         return applyObservationShift_;
     }
 
+    //! whether the spread is compounded daily
+    public boolean compoundSpreadDaily() {
+        return compoundSpreadDaily_;
+    }
+
+    //! effective spread of the coupon
+    public double effectiveSpread() {
+        if (!compoundSpreadDaily_)
+            return spread();
+
+        if (averagingMethod_ == RateAveraging.Simple)
+            return spread();
+
+        final FloatingRateCouponPricer p = pricer();
+        if (!(p instanceof CompoundingOvernightIndexedCouponPricer))
+            QL_FAIL("OvernightIndexedCoupon::effectiveSpread(): expected "
+                    + "OvernightIndexedCouponPricer");
+        final CompoundingOvernightIndexedCouponPricer compoundPricer =
+                (CompoundingOvernightIndexedCouponPricer) p;
+        compoundPricer.initialize(this);
+        return compoundPricer.effectiveSpread();
+    }
+
+    //! effective index fixing of the coupon
+    public double effectiveIndexFixing() {
+        final FloatingRateCouponPricer p = pricer();
+        if (averagingMethod_ == RateAveraging.Simple)
+            QL_FAIL("effectiveIndexFixing() is not defined for an "
+                    + "OvernightIndexedCoupon when RateAveraging::Simple is used");
+
+        if (!(p instanceof CompoundingOvernightIndexedCouponPricer))
+            QL_FAIL("OvernightIndexedCoupon::effectiveIndexFixing(): expected "
+                    + "OvernightIndexedCouponPricer");
+        final CompoundingOvernightIndexedCouponPricer compoundPricer =
+                (CompoundingOvernightIndexedCouponPricer) p;
+        compoundPricer.initialize(this);
+        return compoundPricer.effectiveIndexFixing();
+    }
+
+    //! start of the rate-computation period (Date() if not overridden)
+    public Date rateComputationStartDate() {
+        return rateComputationStartDate_;
+    }
+
+    //! end of the rate-computation period (Date() if not overridden)
+    public Date rateComputationEndDate() {
+        return rateComputationEndDate_;
+    }
+
     public boolean telescopicValueDates() {
         return telescopicValueDates_;
     }
@@ -251,9 +339,20 @@ public class OvernightIndexedCoupon extends FloatingRateCoupon {
         if (TimeUtils.leq(d, accrualStartDate_) || TimeUtils.greater(d, paymentDate_)) {
             // out of coupon range
             return 0.0;
+        } else if (tradingExCoupon(d)) {
+            return nominal() * averageRate(d) * accruedPeriod(d);
         } else {
+            // usual case
             return nominal() * averageRate(TimeUtils.min(d, accrualEndDate_)) * accruedPeriod(d);
         }
+    }
+
+    @Override
+    public double amount() {
+        double r = rate();
+        if (roundingPrecision_ != null)
+            r = new ClosestRounding(roundingPrecision_, 5).value(r);
+        return r * accrualPeriod() * nominal();
     }
 
     public double averageRate(final Date d) {
@@ -281,9 +380,8 @@ public class OvernightIndexedCoupon extends FloatingRateCoupon {
         return jquant.CashFlow.hasOccurred(date(), refDate, includeRefDate);
     }
 
-    @Override
-    public boolean tradingExCoupon(Date refDate) {
-        return false;
+    private static boolean isEmpty(final Date date) {
+        return date == null || date.serialNumber() == 0;
     }
 
 }

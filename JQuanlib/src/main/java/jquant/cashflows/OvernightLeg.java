@@ -19,8 +19,8 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  *
  * <p>Port of QuantLib's {@code OvernightLeg} in
  * {@code ql/cashflows/overnightindexedcoupon.cpp}. Only the subset used by
- * the basis-swap helpers is provided: lookback, lockout, observation shift,
- * caps/floors, explicit payment dates and in-advance fixing are omitted.
+ * the basis-swap helpers is provided: lookback, lockout, observation shift
+ * and caps/floors. Explicit payment dates and in-advance fixing are omitted.
  * The default in-arrears behaviour is the only one supported.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/cashflows/overnightindexedcoupon.cpp
@@ -35,6 +35,9 @@ public class OvernightLeg {
     private int paymentLag_ = 0;
     private List<Double> gearings_ = new ArrayList<>();
     private List<Double> spreads_ = new ArrayList<>();
+    private List<Double> caps_ = new ArrayList<>();
+    private List<Double> floors_ = new ArrayList<>();
+    private OvernightIndexedCouponPricer couponPricer_ = null;
     private boolean telescopicValueDates_ = false;
     private RateAveraging averagingMethod_ = RateAveraging.Compound;
     private Integer lookbackDays_ = null;
@@ -104,6 +107,36 @@ public class OvernightLeg {
         return this;
     }
 
+    public OvernightLeg withCaps(double cap) {
+        caps_.clear();
+        caps_.add(cap);
+        return this;
+    }
+
+    public OvernightLeg withCaps(final List<Double> caps) {
+        caps_.clear();
+        caps_.addAll(caps);
+        return this;
+    }
+
+    public OvernightLeg withFloors(double floor) {
+        floors_.clear();
+        floors_.add(floor);
+        return this;
+    }
+
+    public OvernightLeg withFloors(final List<Double> floors) {
+        floors_.clear();
+        floors_.addAll(floors);
+        return this;
+    }
+
+    public OvernightLeg withCouponPricer(
+            final OvernightIndexedCouponPricer couponPricer) {
+        couponPricer_ = couponPricer;
+        return this;
+    }
+
     public OvernightLeg withTelescopicValueDates(boolean telescopicValueDates) {
         telescopicValueDates_ = telescopicValueDates;
         return this;
@@ -135,6 +168,19 @@ public class OvernightLeg {
 
     public List<CashFlow> build() {
         QL_REQUIRE(!notionals_.isEmpty(), "no notional given");
+
+        if (couponPricer_ != null) {
+            if (averagingMethod_ == RateAveraging.Compound)
+                QL_REQUIRE(couponPricer_
+                                instanceof CompoundingOvernightIndexedCouponPricer,
+                        "Wrong coupon pricer provided, provide a "
+                                + "CompoundingOvernightIndexedCouponPricer");
+            else
+                QL_REQUIRE(couponPricer_
+                                instanceof ArithmeticAveragedOvernightIndexedCouponPricer,
+                        "Wrong coupon pricer provided, provide a "
+                                + "ArithmeticAveragedOvernightIndexedCouponPricer");
+        }
 
         final List<CashFlow> cashflows = new ArrayList<>();
 
@@ -183,7 +229,22 @@ public class OvernightLeg {
                     lookbackDays_,
                     lockoutDays_,
                     applyObservationShift_);
-            cashflows.add(coupon);
+
+            if (couponPricer_ != null)
+                coupon.setPricer(couponPricer_);
+
+            final double cap = get(caps_, i, Double.NaN);
+            final double floor = get(floors_, i, Double.NaN);
+            if (Double.isNaN(cap) && Double.isNaN(floor)) {
+                cashflows.add(coupon);
+            } else {
+                CappedFlooredOvernightIndexedCoupon cfCoupon =
+                        new CappedFlooredOvernightIndexedCoupon(
+                                coupon, cap, floor);
+                if (couponPricer_ != null)
+                    cfCoupon.setPricer(couponPricer_);
+                cashflows.add(cfCoupon);
+            }
         }
         return cashflows;
     }
