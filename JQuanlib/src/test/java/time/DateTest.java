@@ -1,6 +1,5 @@
 package time;
 
-import jquant.Settings;
 import jquant.time.*;
 import jquant.utilities.DateParser;
 import org.junit.jupiter.api.Test;
@@ -69,12 +68,14 @@ public class DateTest {
         assertTrue(TimeUtils.equals(ECB.date("MAR07", ref2000), new Date(14, Month.MARCH, 2007)));
         assertTrue(TimeUtils.equals(ECB.date("APR08", ref2000), new Date(16, Month.APRIL, 2008)));
         assertTrue(TimeUtils.equals(ECB.date("JUN09", ref2000), new Date(10, Month.JUNE, 2009)));
-        assertTrue(TimeUtils.equals(ECB.date("JUL10", ref2000), new Date(14, Month.JULY, 2010)));
-        assertTrue(TimeUtils.equals(ECB.date("AUG11", ref2000), new Date(10, Month.AUGUST, 2011)));
-        assertTrue(TimeUtils.equals(ECB.date("SEP12", ref2000), new Date(12, Month.SEPTEMBER, 2012)));
-        assertTrue(TimeUtils.equals(ECB.date("OCT13", ref2000), new Date(9, Month.OCTOBER, 2013)));
-        Settings.instance.resetEvaluationDate();
-        Settings.instance.evaluationDate().equal(ref2000);
+        // Official dates.cpp leaves JUL10–DEC15 on the default reference
+        // Date() (Settings evaluation date / today). Do not pin the global
+        // evaluation date to 1 January 2000: official does not, and the
+        // Saturday is not a valid Euribor fixing date for later tests.
+        assertTrue(TimeUtils.equals(ECB.date("JUL10", new Date()), new Date(14, Month.JULY, 2010)));
+        assertTrue(TimeUtils.equals(ECB.date("AUG11", new Date()), new Date(10, Month.AUGUST, 2011)));
+        assertTrue(TimeUtils.equals(ECB.date("SEP12", new Date()), new Date(12, Month.SEPTEMBER, 2012)));
+        assertTrue(TimeUtils.equals(ECB.date("OCT13", new Date()), new Date(9, Month.OCTOBER, 2013)));
         assertTrue(TimeUtils.equals(ECB.date("NOV14", new Date()), new Date(12, Month.NOVEMBER, 2014)));
         assertTrue(TimeUtils.equals(ECB.date("DEC15", new Date()), new Date(9, Month.DECEMBER, 2015)));
     }

@@ -9,7 +9,12 @@ import jquant.indexes.Estr;
 import jquant.indexes.IndexManager;
 import jquant.indexes.OvernightIndex;
 import jquant.indexes.Sofr;
+import jquant.Quote;
+import jquant.math.ClosestRounding;
+import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
+import jquant.termstructures.volatility.optionlet.ConstantOptionletVolatility;
+import jquant.termstructures.volatility.optionlet.OptionletVolatilityStructure;
 import jquant.termstructures.yield.CubicZeroCurve;
 import jquant.termstructures.yield.DiscountCurve;
 import jquant.termstructures.yield.FlatForward;
@@ -25,6 +30,7 @@ import jquant.time.Schedule;
 import jquant.time.TimeUnit;
 import jquant.time.TimeUtils;
 import jquant.time.calendars.NullCalendar;
+import jquant.time.calendars.Target;
 import jquant.time.calendars.UnitedStates;
 import jquant.time.daycounters.Actual360;
 import jquant.time.daycounters.Actual365Fixed;
@@ -38,6 +44,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -268,13 +275,82 @@ public class OvernightIndexedCouponTest {
                                           Date paymentDate,
                                           double couponNotional,
                                           DayCounter dayCounter) {
+            // Official: paymentDate != Date() ? paymentDate : endDate.
+            final Date payment = TimeUtils.equals(paymentDate, new Date())
+                    ? endDate : paymentDate;
             return new OvernightIndexedCoupon(
-                    paymentDate, couponNotional, startDate, endDate, sofr,
+                    payment, couponNotional, startDate, endDate, sofr,
                     1.0, 0.0,
                     new Date(), new Date(),
                     dayCounter,
                     telescopicValueDates, averagingMethod,
                     lookbackDays, lockoutDays, applyObservationShift);
+        }
+
+        /** Official {@code makeCoupon} with the trailing rate-computation
+         *  and ex-coupon dates. */
+        OvernightIndexedCoupon makeCoupon(Date startDate, Date endDate,
+                                          Integer lookbackDays,
+                                          int lockoutDays,
+                                          boolean applyObservationShift,
+                                          boolean telescopicValueDates,
+                                          RateAveraging averagingMethod,
+                                          Date paymentDate,
+                                          double couponNotional,
+                                          DayCounter dayCounter,
+                                          Date rateComputationStartDate,
+                                          Date rateComputationEndDate,
+                                          Date exCouponDate) {
+            // Official: paymentDate != Date() ? paymentDate : endDate.
+            final Date payment = TimeUtils.equals(paymentDate, new Date())
+                    ? endDate : paymentDate;
+            return new OvernightIndexedCoupon(
+                    payment, couponNotional, startDate, endDate, sofr,
+                    1.0, 0.0,
+                    new Date(), new Date(),
+                    dayCounter,
+                    telescopicValueDates, averagingMethod,
+                    lookbackDays, lockoutDays, applyObservationShift,
+                    false, rateComputationStartDate, rateComputationEndDate,
+                    exCouponDate, null);
+        }
+
+        /** Official {@code makeSpreadedCoupon}, whose default is to compound
+         *  the spread daily (unlike the coupon constructor default). */
+        OvernightIndexedCoupon makeSpreadedCoupon(Date startDate, Date endDate) {
+            return makeSpreadedCoupon(startDate, endDate, 0.0001);
+        }
+
+        OvernightIndexedCoupon makeSpreadedCoupon(Date startDate, Date endDate,
+                                                  double spread) {
+            return makeSpreadedCoupon(startDate, endDate, spread, true);
+        }
+
+        OvernightIndexedCoupon makeSpreadedCoupon(Date startDate, Date endDate,
+                                                  double spread,
+                                                  boolean compoundSpreadDaily) {
+            return makeSpreadedCoupon(startDate, endDate, spread,
+                    compoundSpreadDaily, null, 0, false, false,
+                    RateAveraging.Compound);
+        }
+
+        OvernightIndexedCoupon makeSpreadedCoupon(Date startDate, Date endDate,
+                                                  double spread,
+                                                  boolean compoundSpreadDaily,
+                                                  Integer fixingDays,
+                                                  int lockoutDays,
+                                                  boolean applyObservationShift,
+                                                  boolean telescopicValueDates,
+                                                  RateAveraging averaging) {
+            return new OvernightIndexedCoupon(
+                    endDate, notional, startDate, endDate, sofr,
+                    1.0, spread,
+                    new Date(), new Date(),
+                    new DayCounter(),
+                    telescopicValueDates, averaging,
+                    fixingDays, lockoutDays, applyObservationShift,
+                    compoundSpreadDaily, new Date(), new Date(), new Date(),
+                    null);
         }
     }
 
@@ -324,6 +400,8 @@ public class OvernightIndexedCouponTest {
                 new RelinkableHandle<>();
         final Schedule legSchedule;
         final DayCounter dc = new Actual360();
+        final RelinkableHandle<OptionletVolatilityStructure> rateVolTS =
+                new RelinkableHandle<>();
 
         CommonVarsONLeg() {
             this(new Date(1, Month.JUNE, 2025));
@@ -405,6 +483,12 @@ public class OvernightIndexedCouponTest {
             sofr.addFixings(pastDates, toDoubleList(pastRates), false);
         }
 
+        OptionletVolatilityStructure returnRateVolTS() {
+            Handle<Quote> optionletVol = new Handle<>(new SimpleQuote(0.05), true);
+            return new ConstantOptionletVolatility(today, new Target(),
+                    BusinessDayConvention.FOLLOWING, optionletVol, dc);
+        }
+
         void setupForecastCurve() {
             List<Date> curveDates = List.of(
                     today,
@@ -460,6 +544,17 @@ public class OvernightIndexedCouponTest {
                                boolean telescopicValueDates,
                                RateAveraging averaging,
                                List<Double> gearings, List<Double> spreads) {
+            return makeLeg(fixingDays, lockoutDays, applyObservationShift,
+                    telescopicValueDates, averaging, gearings, spreads,
+                    List.of(), List.of());
+        }
+
+        List<CashFlow> makeLeg(Integer fixingDays, int lockoutDays,
+                               boolean applyObservationShift,
+                               boolean telescopicValueDates,
+                               RateAveraging averaging,
+                               List<Double> gearings, List<Double> spreads,
+                               List<Double> caps, List<Double> floors) {
             OvernightLeg leg = new OvernightLeg(legSchedule, sofr);
             // Official makeLeg always calls withLockoutDays and
             // withObservationShift, even at their defaults.
@@ -476,6 +571,22 @@ public class OvernightIndexedCouponTest {
                 leg.withGearings(gearings);
             if (!spreads.isEmpty())
                 leg.withSpreads(spreads);
+            if (!caps.isEmpty())
+                leg.withCaps(caps);
+            if (!floors.isEmpty())
+                leg.withFloors(floors);
+
+            if (!caps.isEmpty() || !floors.isEmpty()) {
+                rateVolTS.linkTo(returnRateVolTS(), true);
+                if (averaging == RateAveraging.Compound)
+                    leg.withCouponPricer(
+                            new BlackCompoundingOvernightIndexedCouponPricer(
+                                    rateVolTS));
+                else
+                    leg.withCouponPricer(
+                            new BlackAveragingOvernightIndexedCouponPricer(
+                                    rateVolTS));
+            }
 
             // OvernightLeg has no implicit conversion to a leg in Java.
             return leg.build();
@@ -1242,6 +1353,59 @@ public class OvernightIndexedCouponTest {
 
         System.out.println("OvernightLeg NPV: " + npv);
         checkOisCouponResult("OvernightLeg NPV", npv, expectedNpv, 1e-8);
+    }
+
+    @Test
+    public void testOvernightLegWithCapsAndFloors() {
+        CommonVarsONLeg vars = new CommonVarsONLeg();
+        vars.setupForecastCurve();
+        YieldTermStructure discountCurve = new FlatForward(0,
+                new NullCalendar(), 0.0015, new Actual360());
+
+        List<Double> caps = List.of(0.0435, 0.0435, 0.04, 0.04);
+        List<Double> floors = List.of(0.025, 0.025, 0.025, 0.025);
+
+        List<CashFlow> leg = vars.makeLeg(null, 0, false, false,
+                RateAveraging.Compound, List.of(), List.of(), caps, floors);
+
+        assertEquals(4, leg.size());
+
+        double expectedNpv = 34648.328606210489;
+        double npv = 0.0;
+
+        for (int i = 0; i < leg.size(); ++i) {
+            CashFlow cf = leg.get(i);
+            assertTrue(cf instanceof CappedFlooredOvernightIndexedCoupon);
+            CappedFlooredOvernightIndexedCoupon cappedFlooredCoupon =
+                    (CappedFlooredOvernightIndexedCoupon) cf;
+            checkClose("cap", cappedFlooredCoupon.cap(), caps.get(i), 1e-12);
+            checkClose("floor", cappedFlooredCoupon.floor(), floors.get(i),
+                    1e-12);
+            assertTrue(cappedFlooredCoupon.isCapped());
+            assertTrue(cappedFlooredCoupon.isFloored());
+            npv += cappedFlooredCoupon.amount()
+                    * discountCurve.discount(cappedFlooredCoupon.date());
+        }
+
+        System.out.println("Capped-Floored OvernightLeg NPV: " + npv);
+        checkOisCouponResult("Capped-Floored OvernightLeg NPV", npv,
+                expectedNpv, 1e-8);
+    }
+
+    @Test
+    public void testOvernightLegSimpleAveraging() {
+        CommonVarsONLeg vars = new CommonVarsONLeg();
+        vars.forecastCurve.linkTo(new FlatForward(0, new NullCalendar(),
+                0.0010, new Actual360()), true);
+
+        List<CashFlow> leg = vars.makeLeg(null, 0, false, false,
+                RateAveraging.Simple);
+
+        for (CashFlow cf : leg) {
+            assertTrue(cf instanceof OvernightIndexedCoupon);
+            OvernightIndexedCoupon oisCoupon = (OvernightIndexedCoupon) cf;
+            assertEquals(RateAveraging.Simple, oisCoupon.averagingMethod());
+        }
     }
 
     private record Accrual(Date date, double amount) {
@@ -2061,5 +2225,482 @@ public class OvernightIndexedCouponTest {
                         tc.telescopicLowerCut(), tc.telescopicUpperCut());
             }
         }
+    }
+
+    @Test
+    public void testPastSpreadedCouponRate() {
+        CommonVars vars = new CommonVars();
+
+        // coupon entirely in the past
+        OvernightIndexedCoupon pastCoupon = vars.makeSpreadedCoupon(
+                new Date(18, Month.OCTOBER, 2021),
+                new Date(18, Month.NOVEMBER, 2021), 0.0001);
+        OvernightIndexedCoupon pastCouponCompoundingSpread =
+                vars.makeSpreadedCoupon(
+                        new Date(18, Month.OCTOBER, 2021),
+                        new Date(18, Month.NOVEMBER, 2021), 0.0001, false);
+
+        // expected values here and below come from manual calculations based
+        // on past dates and rates
+        double expectedRate = 0.0010871445057780704;
+        double expectedAmount = vars.notional * expectedRate * 31.0 / 360;
+        checkOisCouponResult("coupon rate", pastCoupon.rate(),
+                expectedRate, 1e-12);
+        checkOisCouponResult("coupon amount", pastCoupon.amount(),
+                expectedAmount, 1e-8);
+
+        expectedRate = 0.0010871361040194164;
+        checkOisCouponResult("coupon rate",
+                pastCouponCompoundingSpread.rate(), expectedRate, 1e-12);
+    }
+
+    @Test
+    public void testOvernightCouponAmountRounding() {
+        CommonVars vars = new CommonVars();
+        vars.forecastCurve.linkTo(new FlatForward(0, new NullCalendar(),
+                0.0010, new Actual360()), true);
+
+        OvernightIndexedCoupon unrounded = vars.makeCoupon(
+                new Date(10, Month.DECEMBER, 2021),
+                new Date(10, Month.JANUARY, 2022));
+
+        OvernightIndexedCoupon rounded = new OvernightIndexedCoupon(
+                new Date(10, Month.JANUARY, 2022),
+                vars.notional,
+                new Date(10, Month.DECEMBER, 2021),
+                new Date(10, Month.JANUARY, 2022),
+                vars.sofr,
+                1.0,
+                0.0,
+                new Date(),
+                new Date(),
+                new DayCounter(),
+                false,
+                RateAveraging.Compound,
+                null,
+                0,
+                false,
+                false,
+                new Date(),
+                new Date(),
+                new Date(),
+                5); // rounding precision
+
+        double roundedRate = new ClosestRounding(5, 5).value(unrounded.rate());
+
+        double expectedAmount =
+                vars.notional * roundedRate * unrounded.accrualPeriod();
+
+        assertNotEquals(rounded.amount(), unrounded.amount());
+
+        // QL_CHECK_CLOSE: percentage-relative tolerance.
+        checkClose("coupon amount", rounded.amount(), expectedAmount, 1e-10);
+    }
+
+    @Test
+    public void testExCouponAccruedAmountAroundAccrualEndDate() {
+        CommonVars vars = new CommonVars(new Date(26, Month.MARCH, 2026));
+        vars.forecastCurve.linkTo(new FlatForward(0, new NullCalendar(),
+                0.04, new Actual360()), true);
+        Date exCpnDate = new Date(27, Month.MARCH, 2027);
+        OvernightIndexedCoupon coupon = vars.makeCoupon(
+                new Date(31, Month.MARCH, 2026),
+                new Date(31, Month.MARCH, 2027),
+                0, 0, false, true, RateAveraging.Compound,
+                new Date(2, Month.APRIL, 2027), 100.0, new DayCounter(),
+                new Date(), new Date(), exCpnDate);
+        assertTrue(coupon.tradingExCoupon(exCpnDate));
+        checkOisCouponResult("exCoupon accrued amount",
+                coupon.accruedAmount(new Date(27, Month.MARCH, 2027)),
+                -0.0445, 1e-5);
+        checkOisCouponResult("exCoupon accrued amount",
+                coupon.accruedAmount(new Date(30, Month.MARCH, 2027)),
+                -0.01134, 1e-5);
+        checkOisCouponResult("exCoupon accrued amount",
+                coupon.accruedAmount(new Date(31, Month.MARCH, 2027)),
+                0.0, 1e-12);
+        checkOisCouponResult("exCoupon accrued amount",
+                coupon.accruedAmount(new Date(1, Month.APRIL, 2027)),
+                0.0, 1e-12);
+    }
+
+    @Test
+    public void testAccruedAmountExCouponDateAfterAccrualEndDate() {
+        CommonVars vars = new CommonVars(new Date(26, Month.MARCH, 2026));
+        vars.forecastCurve.linkTo(new FlatForward(0, new NullCalendar(),
+                0.04, new Actual360()), true);
+        // set exCouponDate after accrualEndDate and before paymentDate
+        // to ensure averageRate handles dates after the last interest date
+        Date exCpnDate = new Date(1, Month.APRIL, 2027);
+        OvernightIndexedCoupon coupon = vars.makeCoupon(
+                new Date(31, Month.MARCH, 2026),
+                new Date(31, Month.MARCH, 2027),
+                0, 0, false, true, RateAveraging.Compound,
+                new Date(2, Month.APRIL, 2027), 100.0, new DayCounter(),
+                new Date(), new Date(), exCpnDate);
+        assertTrue(coupon.tradingExCoupon(exCpnDate));
+        checkOisCouponResult("exCoupon accrued amount",
+                coupon.accruedAmount(exCpnDate), 0.0, 1e-12);
+    }
+
+    @Test
+    public void testAccruedAmountInAdvance() {
+        CommonVars vars = new CommonVars(new Date(21, Month.APRIL, 2026));
+        vars.forecastCurve.linkTo(new FlatForward(0, new NullCalendar(),
+                0.04, new Actual360()), true);
+        OvernightIndexedCoupon couponAdvance = vars.makeCoupon(
+                new Date(23, Month.APRIL, 2027),
+                new Date(23, Month.APRIL, 2028),
+                0, 0, false, true, RateAveraging.Compound,
+                new Date(25, Month.APRIL, 2028), 10000000.0,
+                new DayCounter(),
+                new Date(23, Month.APRIL, 2026),
+                new Date(23, Month.APRIL, 2027), new Date());
+        OvernightIndexedCoupon couponArrears = vars.makeCoupon(
+                couponAdvance.rateComputationStartDate(),
+                couponAdvance.rateComputationEndDate(),
+                0, 0, false, true, RateAveraging.Compound,
+                new Date(), 10000000.0, new DayCounter(),
+                new Date(), new Date(), new Date());
+
+        assertEquals(
+                couponAdvance.interestDates().stream()
+                        .map(Date::serialNumber).toList(),
+                couponArrears.interestDates().stream()
+                        .map(Date::serialNumber).toList());
+        assertEquals(
+                couponAdvance.valueDates().stream()
+                        .map(Date::serialNumber).toList(),
+                couponArrears.valueDates().stream()
+                        .map(Date::serialNumber).toList());
+
+        checkOisCouponResult("in advance swapletRate",
+                couponAdvance.rate(), couponArrears.rate(), 1e-12);
+
+        final double oneDayInterest =
+                couponAdvance.rate() / 360.0 * couponAdvance.nominal();
+        checkOisCouponResult("in advance accruedAmount",
+                couponAdvance.accruedAmount(vars.today), 0.0, 1e-12);
+        for (int i = 0; i < 4; ++i) {
+            checkOisCouponResult(
+                    "in advance accruedAmount " + i
+                            + " days after accrualStartDate",
+                    couponAdvance.accruedAmount(
+                            couponAdvance.accrualStartDate().add(i)),
+                    i * oneDayInterest, 1e-12);
+        }
+
+        final double totalAmount = couponAdvance.amount();
+        checkOisCouponResult(
+                "in advance accruedAmount 1 day prior to accrualEndDate",
+                couponAdvance.accruedAmount(
+                        couponAdvance.accrualEndDate().substract(1)),
+                totalAmount - oneDayInterest, 1e-12);
+        for (int i = 0; i < 3; ++i) {
+            // Keep the official argument order.
+            checkOisCouponResult(
+                    "in advance accruedAmount " + i
+                            + " days after accrualEndDate",
+                    totalAmount,
+                    couponAdvance.accruedAmount(
+                            couponAdvance.accrualEndDate().add(i)),
+                    1e-12);
+        }
+
+        checkOisCouponResult(
+                "in advance accruedAmount day after paymentDate",
+                couponAdvance.accruedAmount(
+                        couponAdvance.date().add(1)), 0.0, 1e-12);
+    }
+
+    @Test
+    public void testRateComputationStartDateFixingHoliday() {
+        CommonVars vars = new CommonVars(new Date(16, Month.APRIL, 2025));
+        vars.forecastCurve.linkTo(new FlatForward(0, new NullCalendar(),
+                0.04, new Actual360()), true);
+        OvernightIndexedCoupon coupon = vars.makeCoupon(
+                new Date(21, Month.APRIL, 2025),
+                new Date(21, Month.APRIL, 2026),
+                0, 0, false, true, RateAveraging.Compound,
+                new Date(23, Month.APRIL, 2026), 10000000.0,
+                new DayCounter(),
+                new Date(18, Month.APRIL, 2025),
+                new Date(20, Month.APRIL, 2026), new Date());
+
+        assertTrue(vars.sofr.fixingCalendar()
+                .isHoliday(coupon.rateComputationStartDate()));
+        checkOisCouponResult("accruedAmount",
+                coupon.accruedAmount(vars.today), 0.0, 1e-12);
+        checkOisCouponResult("accruedAmount",
+                coupon.accruedAmount(coupon.accrualStartDate()), 0.0, 1e-12);
+
+        double accrued = (
+                (1.0 + vars.sofr.fixing(
+                        new Date(17, Month.APRIL, 2025), false) * 3.0 / 360.0)
+                        * (1.0 + vars.sofr.fixing(
+                                new Date(21, Month.APRIL, 2025), false)
+                                / 360.0) - 1.0
+        ) / 4.0 * coupon.nominal();
+        checkOisCouponResult("accruedAmount",
+                coupon.accruedAmount(coupon.accrualStartDate().add(1)),
+                accrued, 1e-8);
+    }
+
+    /**
+     * Official {@code BlackONPricerVars} from
+     * test-suite/overnightindexedcoupon.cpp.
+     */
+    private static class BlackONPricerVars {
+        final Date today;
+        final double notional = 1000000.0;
+        final RelinkableHandle<YieldTermStructure> forecastCurve =
+                new RelinkableHandle<>();
+        final RelinkableHandle<OptionletVolatilityStructure> vol =
+                new RelinkableHandle<>();
+        final OvernightIndex sofr;
+        final DayCounter dc;
+
+        BlackONPricerVars() {
+            this(new Date(1, Month.JULY, 2025));
+        }
+
+        BlackONPricerVars(Date evalDate) {
+            today = evalDate;
+            dc = new Actual360();
+            Settings.instance.evaluationDate().equal(today);
+
+            Handle<Quote> optionletVol = new Handle<>(new SimpleQuote(0.1), true);
+
+            // Flat forward curve
+            forecastCurve.linkTo(new FlatForward(today, 0.04, dc), true);
+            sofr = new Sofr(forecastCurve);
+
+            // Flat volatility
+            vol.linkTo(new ConstantOptionletVolatility(today, new Target(),
+                    BusinessDayConvention.FOLLOWING, optionletVol, dc), true);
+        }
+
+        OvernightIndexedCoupon makeBaseCoupon(Date start, Date end) {
+            return makeBaseCoupon(start, end, RateAveraging.Compound);
+        }
+
+        OvernightIndexedCoupon makeBaseCoupon(Date start, Date end,
+                                              RateAveraging avgMethod) {
+            OvernightIndexedCoupon onCoupon = new OvernightIndexedCoupon(
+                    end, notional, start, end, sofr, 1.0, 0.0,
+                    new Date(), new Date(), dc, false, avgMethod,
+                    (Integer) null, 0, false);
+
+            if (avgMethod == RateAveraging.Compound)
+                onCoupon.setPricer(
+                        new CompoundingOvernightIndexedCouponPricer());
+            else
+                onCoupon.setPricer(
+                        new ArithmeticAveragedOvernightIndexedCouponPricer(
+                                0.03, 0.0, false));
+
+            return onCoupon;
+        }
+
+        CappedFlooredOvernightIndexedCoupon makeCoupon(Date start, Date end,
+                                                       double cap,
+                                                       double floor) {
+            return makeCoupon(start, end, cap, floor, RateAveraging.Compound);
+        }
+
+        CappedFlooredOvernightIndexedCoupon makeCoupon(Date start, Date end,
+                                                       double cap,
+                                                       double floor,
+                                                       RateAveraging avgMethod) {
+            OvernightIndexedCoupon onCoupon =
+                    makeBaseCoupon(start, end, avgMethod);
+            return new CappedFlooredOvernightIndexedCoupon(onCoupon, cap, floor);
+        }
+    }
+
+    @Test
+    public void testBlackOvernightIndexedCouponPricerCapletFloorlet() {
+        BlackONPricerVars vars = new BlackONPricerVars();
+        Date start = new Date(1, Month.JULY, 2035);
+        Date end = new Date(1, Month.OCTOBER, 2035);
+
+        // Vanilla
+        OvernightIndexedCoupon vanillaCoupon = vars.makeBaseCoupon(start, end);
+        double expectedRate = vanillaCoupon.rate();
+
+        BlackCompoundingOvernightIndexedCouponPricer pricer =
+                new BlackCompoundingOvernightIndexedCouponPricer(vars.vol);
+        vanillaCoupon.setPricer(pricer);
+
+        double rate = vanillaCoupon.rate();
+        checkOisCouponResult("Base Rate", rate, expectedRate, 1e-8);
+
+        // Caplet
+        double cap = 0.045;
+        CappedFlooredOvernightIndexedCoupon cappedCoupon =
+                vars.makeCoupon(start, end, cap, Double.NaN);
+        cappedCoupon.setPricer(pricer);
+
+        rate = cappedCoupon.rate();
+        expectedRate = 0.036862168;
+        assertTrue(rate <= cap + 1e-8, "Should not exceed cap");
+        checkOisCouponResult("Capped Rate", rate, expectedRate, 1e-8);
+
+        // Floorlet
+        double floor = 0.035;
+        CappedFlooredOvernightIndexedCoupon flooredCoupon =
+                vars.makeCoupon(start, end, Double.NaN, floor);
+        flooredCoupon.setPricer(pricer);
+        assertFalse(flooredCoupon.isCalculated());
+
+        rate = flooredCoupon.rate();
+        expectedRate = 0.04281620;
+        assertTrue(rate >= floor - 1e-8, "Should not be below floor");
+        checkOisCouponResult("Floored Rate", rate, expectedRate, 1e-8);
+
+        // Capped and Floored
+        CappedFlooredOvernightIndexedCoupon cappedFlooredCoupon =
+                vars.makeCoupon(start, end, cap, floor);
+        cappedFlooredCoupon.setPricer(pricer);
+
+        rate = cappedFlooredCoupon.rate();
+        expectedRate = 0.039473179;
+        assertTrue(rate <= cap + 1e-8 && rate >= floor - 1e-8,
+                "Should lie between floor and cap");
+        checkOisCouponResult("Capped and Floored Rate", rate, expectedRate, 1e-8);
+
+        System.out.println("Black capped rate: " + cappedCoupon.rate());
+        System.out.println("Black floored rate: " + flooredCoupon.rate());
+        System.out.println("Black capped/floored rate: "
+                + cappedFlooredCoupon.rate());
+    }
+
+    @Test
+    public void testBlackONPricerConsistencyWithNoVol() {
+        BlackONPricerVars vars = new BlackONPricerVars();
+        Handle<Quote> optionletVol = new Handle<>(new SimpleQuote(0.0), true);
+        vars.vol.linkTo(new ConstantOptionletVolatility(vars.today,
+                new Target(), BusinessDayConvention.FOLLOWING, optionletVol,
+                vars.dc), true);
+
+        Date start = new Date(1, Month.JULY, 2035);
+        Date end = new Date(1, Month.OCTOBER, 2035);
+
+        CappedFlooredOvernightIndexedCoupon cappedFlooredCoupon =
+                vars.makeCoupon(start, end, 0.045, 0.035);
+        BlackCompoundingOvernightIndexedCouponPricer blackPricer =
+                new BlackCompoundingOvernightIndexedCouponPricer(vars.vol);
+        cappedFlooredCoupon.setPricer(blackPricer);
+        double blackRate = cappedFlooredCoupon.rate();
+
+        // Compare with standard compounding pricer
+        OvernightIndexedCoupon baseONCoupon = vars.makeBaseCoupon(start, end);
+        baseONCoupon.setPricer(new CompoundingOvernightIndexedCouponPricer());
+        double vanillaRate = baseONCoupon.rate();
+
+        checkOisCouponResult("Zero capped coupon rate",
+                blackRate, vanillaRate, 1e-10);
+
+        baseONCoupon.setPricer(blackPricer);
+        vanillaRate = baseONCoupon.rate();
+        checkOisCouponResult("Zero capped coupon rate (same pricer)",
+                blackRate, vanillaRate, 1e-10);
+    }
+
+    @Test
+    public void testBlackAverageONIndexedCouponPricerCapletFloorlet() {
+        BlackONPricerVars vars = new BlackONPricerVars();
+        Date start = new Date(1, Month.JULY, 2035);
+        Date end = new Date(1, Month.OCTOBER, 2035);
+
+        // Vanilla
+        OvernightIndexedCoupon vanillaCoupon =
+                vars.makeBaseCoupon(start, end, RateAveraging.Simple);
+        double expectedRate = vanillaCoupon.rate();
+
+        BlackAveragingOvernightIndexedCouponPricer pricer =
+                new BlackAveragingOvernightIndexedCouponPricer(vars.vol);
+        vanillaCoupon.setPricer(pricer);
+
+        double rate = vanillaCoupon.rate();
+        checkOisCouponResult("Base Rate", rate, expectedRate, 1e-8);
+
+        // Caplet
+        double cap = 0.045;
+        CappedFlooredOvernightIndexedCoupon cappedCoupon =
+                vars.makeCoupon(start, end, cap, Double.NaN,
+                        RateAveraging.Simple);
+        cappedCoupon.setPricer(pricer);
+
+        rate = cappedCoupon.rate();
+        expectedRate = 0.036745802;
+        assertTrue(rate <= cap + 1e-8, "Should not exceed cap");
+        checkOisCouponResult("Capped Rate", rate, expectedRate, 1e-8);
+
+        // Floorlet
+        double floor = 0.035;
+        CappedFlooredOvernightIndexedCoupon flooredCoupon =
+                vars.makeCoupon(start, end, Double.NaN, floor,
+                        RateAveraging.Simple);
+        flooredCoupon.setPricer(pricer);
+
+        rate = flooredCoupon.rate();
+        expectedRate = 0.042671405;
+        assertTrue(rate >= floor - 1e-8, "Should not be below floor");
+        // Official source uses the label "Capped Rate" for the floorlet too.
+        checkOisCouponResult("Capped Rate", rate, expectedRate, 1e-8);
+
+        // Capped and Floored
+        CappedFlooredOvernightIndexedCoupon cappedFlooredCoupon =
+                vars.makeCoupon(start, end, cap, floor, RateAveraging.Simple);
+        cappedFlooredCoupon.setPricer(pricer);
+
+        rate = cappedFlooredCoupon.rate();
+        expectedRate = 0.039412858;
+        assertTrue(rate <= cap + 1e-8 && rate >= floor - 1e-8,
+                "Should lie between floor and cap");
+        checkOisCouponResult("Capped and Floored Rate", rate, expectedRate, 1e-8);
+
+        System.out.println("Black averaging capped rate: " + cappedCoupon.rate());
+        System.out.println("Black averaging floored rate: "
+                + flooredCoupon.rate());
+        System.out.println("Black averaging capped/floored rate: "
+                + cappedFlooredCoupon.rate());
+    }
+
+    @Test
+    public void testBlackONAveragingPricerConsistencyWithNoVol() {
+        BlackONPricerVars vars = new BlackONPricerVars();
+        Handle<Quote> optionletVol = new Handle<>(new SimpleQuote(0.0), true);
+        vars.vol.linkTo(new ConstantOptionletVolatility(vars.today,
+                new Target(), BusinessDayConvention.FOLLOWING, optionletVol,
+                vars.dc), true);
+
+        Date start = new Date(1, Month.JULY, 2035);
+        Date end = new Date(1, Month.OCTOBER, 2035);
+
+        CappedFlooredOvernightIndexedCoupon cappedFlooredCoupon =
+                vars.makeCoupon(start, end, 0.045, 0.035,
+                        RateAveraging.Simple);
+        BlackAveragingOvernightIndexedCouponPricer blackPricer =
+                new BlackAveragingOvernightIndexedCouponPricer(vars.vol);
+        cappedFlooredCoupon.setPricer(blackPricer);
+        double blackRate = cappedFlooredCoupon.rate();
+
+        // Compare with standard averaging pricer
+        OvernightIndexedCoupon baseONCoupon =
+                vars.makeBaseCoupon(start, end, RateAveraging.Simple);
+        baseONCoupon.setPricer(
+                new ArithmeticAveragedOvernightIndexedCouponPricer(
+                        0.03, 0.0, false));
+        double vanillaRate = baseONCoupon.rate();
+
+        checkOisCouponResult("Zero capped coupon rate",
+                blackRate, vanillaRate, 1e-10);
+
+        baseONCoupon.setPricer(blackPricer);
+        vanillaRate = baseONCoupon.rate();
+        checkOisCouponResult("Zero capped coupon rate (same pricer)",
+                blackRate, vanillaRate, 1e-10);
     }
 }
