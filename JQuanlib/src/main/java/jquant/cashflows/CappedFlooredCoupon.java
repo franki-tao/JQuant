@@ -29,10 +29,17 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
     R = (a L + b) + |a| \min(\frac{C - b}{|a|} - \xi L, 0)
     \f]
 */
-public abstract class CappedFlooredCoupon extends FloatingRateCoupon {
+public class CappedFlooredCoupon extends FloatingRateCoupon {
     protected FloatingRateCoupon underlying_;
     protected boolean isCapped_ = false, isFloored_ = false;
     protected double cap_, floor_;
+
+    /*! Convenience overload matching the official default
+        {@code floor = Null<Rate>()}. */
+    public CappedFlooredCoupon(final FloatingRateCoupon underlying,
+                               double cap) {
+        this(underlying, cap, Double.NaN);
+    }
 
     public CappedFlooredCoupon(final FloatingRateCoupon underlying,
                                double cap,
