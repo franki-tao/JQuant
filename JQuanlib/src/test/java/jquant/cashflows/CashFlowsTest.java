@@ -77,6 +77,9 @@ public class CashFlowsTest {
 
     @AfterEach
     void restoreSettings() {
+        // Official TopLevelFixture clears index histories before SavedSettings
+        // restores the evaluation date and other settings.
+        jquant.indexes.IndexManager.Instance.clearHistories();
         savedSettings.restore();
     }
 
@@ -381,7 +384,7 @@ public class CashFlowsTest {
                 new FixedRateCoupon(payment, 200.0, 0.02, new Actual365Fixed(), start, end),
                 new FixedRateCoupon(payment, 100.0, 0.02, new Actual365Fixed(), start.add(1), end),
                 new FixedRateCoupon(payment, 100.0, 0.02,
-                        new ActualActual(ActualActual.Convention.ISMA), start, end));
+                        new ActualActual(ActualActual.Convention.ISDA), start, end));
         assertEquals(incompatible.get(2).accrualPeriod(), first.accrualPeriod());
         for (FixedRateCoupon coupon : incompatible) {
             List<CashFlow> invalid = leg(first, coupon);
@@ -828,8 +831,9 @@ public class CashFlowsTest {
         Coupon firstCoupon = (Coupon) leg.get(0);
         assertDateEquals(new Date(30, Month.SEPTEMBER, 2017),
                 firstCoupon.referencePeriodStart());
-        // Expect first cashflow to be 0.9375
-        assertEquals(0.9375, firstCoupon.amount(), 0.0001);
+        // Expect first cashflow to be 0.9375. Boost's tolerance is relative
+        // (fraction 0.0001), so the allowed absolute error is 0.0001 * 0.9375.
+        assertEquals(0.9375, firstCoupon.amount(), 0.0001 * 0.9375);
     }
 
     @Test
