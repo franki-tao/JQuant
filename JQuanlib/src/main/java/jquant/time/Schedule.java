@@ -45,6 +45,9 @@ public class Schedule {
         rule_ = rule;
         dates_ = dates;
         isRegular_ = isRegular;
+        // Official date-list ctor default-initializes these to Date().
+        firstDate_ = new Date();
+        nextToLastDate_ = new Date();
         if (tenor.isPresent() && !TimeUtils.allowsEndOfMonth(tenor.get()))
             endOfMonth_ = Optional.of(false);
         else
@@ -618,7 +621,14 @@ public class Schedule {
     }
 
     public Schedule copy() {
-        return new Schedule(this.dates_, this.calendar_, this.convention_,
-                this.terminationDateConvention_, this.tenor_, this.rule_, this.endOfMonth_, this.isRegular_);
+        // Official `Schedule result = *this` copies the date vectors and the
+        // first/next-to-last dates (default Date()). Sharing the lists would
+        // let after()/until() mutate the original schedule.
+        Schedule result = new Schedule(new ArrayList<>(this.dates_), this.calendar_, this.convention_,
+                this.terminationDateConvention_, this.tenor_, this.rule_, this.endOfMonth_,
+                new ArrayList<>(this.isRegular_));
+        result.firstDate_ = this.firstDate_ != null ? this.firstDate_ : new Date();
+        result.nextToLastDate_ = this.nextToLastDate_ != null ? this.nextToLastDate_ : new Date();
+        return result;
     }
 }
