@@ -37,6 +37,9 @@ public class OvernightLeg {
     private List<Double> spreads_ = new ArrayList<>();
     private boolean telescopicValueDates_ = false;
     private RateAveraging averagingMethod_ = RateAveraging.Compound;
+    private Integer lookbackDays_ = null;
+    private int lockoutDays_ = 0;
+    private boolean applyObservationShift_ = false;
 
     public OvernightLeg(final Schedule schedule, final OvernightIndex overnightIndex) {
         schedule_ = schedule;
@@ -111,6 +114,21 @@ public class OvernightLeg {
         return this;
     }
 
+    public OvernightLeg withLookbackDays(Integer lookbackDays) {
+        lookbackDays_ = lookbackDays;
+        return this;
+    }
+
+    public OvernightLeg withLockoutDays(int lockoutDays) {
+        lockoutDays_ = lockoutDays;
+        return this;
+    }
+
+    public OvernightLeg withObservationShift(boolean applyObservationShift) {
+        applyObservationShift_ = applyObservationShift;
+        return this;
+    }
+
     private static double get(final List<Double> v, int i, double defaultValue) {
         return v.isEmpty() ? defaultValue : v.get(Math.min(i, v.size() - 1));
     }
@@ -161,7 +179,10 @@ public class OvernightLeg {
                     refEnd,
                     paymentDayCounter_,
                     telescopicValueDates_,
-                    averagingMethod_);
+                    averagingMethod_,
+                    lookbackDays_,
+                    lockoutDays_,
+                    applyObservationShift_);
             cashflows.add(coupon);
         }
         return cashflows;

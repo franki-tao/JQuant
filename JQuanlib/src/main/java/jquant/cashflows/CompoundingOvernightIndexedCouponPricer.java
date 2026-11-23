@@ -16,9 +16,8 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * Pricer for compounded overnight-indexed floating coupons.
  *
  * <p>Port of QuantLib's {@code CompoundingOvernightIndexedCouponPricer} in
- * {@code ql/cashflows/overnightindexedcouponpricer.cpp}. The lookback,
- * lockout, observation-shift and daily-compounded-spread branches are not
- * ported, nor used by the basis-swap helpers.
+ * {@code ql/cashflows/overnightindexedcouponpricer.cpp}. The
+ * daily-compounded-spread branch is not ported.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/cashflows/overnightindexedcouponpricer.cpp
  */
@@ -57,14 +56,17 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
         final double[] dt = coupon_.dt();
         final DayCounter dc = index.dayCounter();
         final double couponSpread = coupon_.spread();
+        final boolean applyObservationShift =
+                coupon_.applyObservationShift() && coupon_.fixingDays() > 0;
 
         int i = 0;
         final int n = determineNumberOfFixings(interestDates, date);
 
         // Official growthFactor: when averaging to a date inside the last
-        // included period, accrue only the fraction up to that date.
+        // included period and observation shift is off, accrue only the
+        // fraction up to that date.
         final java.util.function.IntToDoubleFunction span = idx ->
-                TimeUtils.geq(date, interestDates.get(idx + 1))
+                (applyObservationShift || TimeUtils.geq(date, interestDates.get(idx + 1)))
                         ? dt[idx]
                         : dc.yearFraction(interestDates.get(idx), date,
                                 new Date(), new Date());
@@ -120,12 +122,16 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
                 // handle partial accrual of first fixing if the first interestDate
                 // lands on a fixing holiday
                 final int telescopicStartIdx =
-                        (i == 0 && TimeUtils.less(valueDates.get(0), interestDates.get(0))) ? 1 : i;
+                        (i == 0 && !applyObservationShift
+                                && TimeUtils.less(valueDates.get(0), interestDates.get(0)))
+                                ? 1 : i;
                 // telescopic formula up to potential lockout dates and partial
                 // accrual up to date.
-                final int endDateIdx = n;
+                final int endDateIdx = Math.min(n,
+                        valueDates.size() - 1 - coupon_.lockoutDays());
                 final int telescopicEndIdx =
-                        endDateIdx - (TimeUtils.leq(valueDates.get(endDateIdx), date) ? 0 : 1);
+                        endDateIdx - ((applyObservationShift
+                                || TimeUtils.leq(valueDates.get(endDateIdx), date)) ? 0 : 1);
                 if (telescopicStartIdx < telescopicEndIdx) {
                     while (i < telescopicStartIdx) {
                         // compound up any periods ahead of the telescopic range
@@ -152,8 +158,10 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
             }
         }
 
-        final Date rateAccrualStartDate = interestDates.get(0);
-        final Date rateAccrualEndDate = TimeUtils.min(date, interestDates.get(n));
+        final Date rateAccrualStartDate = applyObservationShift
+                ? valueDates.get(0) : interestDates.get(0);
+        final Date rateAccrualEndDate = applyObservationShift
+                ? valueDates.get(n) : TimeUtils.min(date, interestDates.get(n));
         final double tau = dc.yearFraction(rateAccrualStartDate, rateAccrualEndDate,
                 new Date(), new Date());
         final double rate = (compoundFactor - 1.0) / tau;
