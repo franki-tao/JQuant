@@ -35,6 +35,17 @@ public class OvernightIndexedCoupon extends FloatingRateCoupon {
     private final RateAveraging averagingMethod_;
     private final boolean telescopicValueDates_;
 
+    /** Convenience constructor using the official defaults. */
+    public OvernightIndexedCoupon(final Date paymentDate,
+                                  double nominal,
+                                  final Date startDate,
+                                  final Date endDate,
+                                  final OvernightIndex overnightIndex) {
+        this(paymentDate, nominal, startDate, endDate, overnightIndex,
+                1.0, 0.0, new Date(), new Date(), new DayCounter(),
+                false, RateAveraging.Compound);
+    }
+
     public OvernightIndexedCoupon(final Date paymentDate,
                                   double nominal,
                                   final Date startDate,
@@ -169,6 +180,16 @@ public class OvernightIndexedCoupon extends FloatingRateCoupon {
     //! averaging method
     public RateAveraging averagingMethod() {
         return averagingMethod_;
+    }
+
+    //! lockout days (not ported; always zero)
+    public int lockoutDays() {
+        return 0;
+    }
+
+    //! observation-shift flag (not ported; always false)
+    public boolean applyObservationShift() {
+        return false;
     }
 
     public boolean telescopicValueDates() {
