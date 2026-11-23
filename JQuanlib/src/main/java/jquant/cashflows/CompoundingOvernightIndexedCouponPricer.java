@@ -61,6 +61,14 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
         int i = 0;
         final int n = determineNumberOfFixings(interestDates, date);
 
+        // Official growthFactor: when averaging to a date inside the last
+        // included period, accrue only the fraction up to that date.
+        final java.util.function.IntToDoubleFunction span = idx ->
+                TimeUtils.geq(date, interestDates.get(idx + 1))
+                        ? dt[idx]
+                        : dc.yearFraction(interestDates.get(idx), date,
+                                new Date(), new Date());
+
         double compoundFactor = 1.0, compoundFactorWithoutSpread = 1.0;
 
         // already fixed part
@@ -69,7 +77,7 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
             double fixing = index.pastFixing(fixingDates.get(i));
             QL_REQUIRE(!Double.isNaN(fixing),
                     "Missing " + index.name() + " fixing for " + fixingDates.get(i));
-            double gf = 1.0 + fixing * dt[i];
+            double gf = 1.0 + fixing * span.applyAsDouble(i);
             compoundFactorWithoutSpread *= gf;
             compoundFactor *= gf;
             ++i;
@@ -81,7 +89,7 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
             try {
                 double fixing = index.pastFixing(fixingDates.get(i));
                 if (!Double.isNaN(fixing)) {
-                    double gf = 1.0 + fixing * dt[i];
+                    double gf = 1.0 + fixing * span.applyAsDouble(i);
                     compoundFactorWithoutSpread *= gf;
                     compoundFactor *= gf;
                     ++i;
@@ -122,7 +130,7 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
                     while (i < telescopicStartIdx) {
                         // compound up any periods ahead of the telescopic range
                         double fixing = index.fixing(fixingDates.get(i), false);
-                        double gf = 1.0 + fixing * dt[i];
+                        double gf = 1.0 + fixing * span.applyAsDouble(i);
                         compoundFactorWithoutSpread *= gf;
                         compoundFactor *= gf;
                         ++i;
@@ -137,7 +145,7 @@ public class CompoundingOvernightIndexedCouponPricer extends OvernightIndexedCou
             // compound up any remaining periods
             while (i < n) {
                 double fixing = index.fixing(fixingDates.get(i), false);
-                double gf = 1.0 + fixing * dt[i];
+                double gf = 1.0 + fixing * span.applyAsDouble(i);
                 compoundFactorWithoutSpread *= gf;
                 compoundFactor *= gf;
                 ++i;
