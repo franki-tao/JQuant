@@ -20,6 +20,12 @@ public final class Currencies {
     }
 
     // https://github.com/lballabio/QuantLib/blob/master/ql/currencies/oceania.cpp
+    public static Currency aud() {
+        return new Currency("Australian dollar", "AUD", 36, "A$", "", 100,
+                new Rounding(), new Currency(), Set.of());
+    }
+
+    // https://github.com/lballabio/QuantLib/blob/master/ql/currencies/oceania.cpp
     public static Currency nzd() {
         return new Currency("New Zealand dollar", "NZD", 554, "NZ$", "", 100,
                 new Rounding(), new Currency(), Set.of());
