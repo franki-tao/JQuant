@@ -50,6 +50,10 @@ public class Date {
     }
 
     public Date copy() {
+        // Official Date() is a valid empty date (serial 0). The serial
+        // constructor rejects 0, so copy must use the default constructor.
+        if (serialNumber_ == 0)
+            return new Date();
         return new Date(serialNumber_);
     }
 

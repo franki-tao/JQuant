@@ -1,8 +1,8 @@
 package jquant.pricingengines;
 
 import jquant.CashFlow;
-import jquant.Instrument;
 import jquant.PricingEngine;
+import jquant.instruments.Bond;
 import jquant.patterns.Observable;
 import jquant.patterns.ObservableSettings;
 import jquant.patterns.Observer;
@@ -11,7 +11,6 @@ import jquant.time.Date;
 
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -109,19 +108,9 @@ public class DiscountingBondEngine implements PricingEngine {
         }
     }
 
-    public static class arguments implements PricingEngine.arguments {
-        public Date settlementDate;
-        public List<CashFlow> cashflows;
-
-        @Override
-        public void validate() {
-            QL_REQUIRE(settlementDate != null && jquant.time.TimeUtils.neq(settlementDate, new Date()),
-                    "no settlement date provided");
-            QL_REQUIRE(cashflows != null && !cashflows.isEmpty(), "no cash flow provided");
-        }
+    public static class arguments extends Bond.arguments {
     }
 
-    public static class results extends Instrument.results {
-        public double settlementValue = Double.NaN;
+    public static class results extends Bond.results {
     }
 }
