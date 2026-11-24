@@ -167,7 +167,6 @@ public class MultipleResetsSwapRateHelper extends RelativeDateRateHelper {
 
     @Override
     public void setTermStructure(YieldTermStructure termStructure) {
-        ensureDates();
         boolean observer = false;
         termStructureHandle_.linkTo(termStructure, observer);
         if (discountHandle_.empty())
@@ -180,13 +179,11 @@ public class MultipleResetsSwapRateHelper extends RelativeDateRateHelper {
     @Override
     public double impliedQuote() {
         QL_REQUIRE(termStructure_ != null, "term structure not set");
-        ensureDates();
         swap_.deepUpdate();
         return swap_.fairRate();
     }
 
     public MultipleResetsSwap swap() {
-        ensureDates();
         return swap_;
     }
 }
