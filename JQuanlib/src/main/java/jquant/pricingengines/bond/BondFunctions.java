@@ -3,6 +3,7 @@ package jquant.pricingengines.bond;
 import jquant.Compounding;
 import jquant.InterestRate;
 import jquant.cashflows.CashFlows;
+import jquant.cashflows.Duration;
 import jquant.instruments.Bond;
 import jquant.termstructures.YieldTermStructure;
 import jquant.time.Date;
@@ -26,7 +27,10 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * <p>This is different from the raw {@link CashFlows} functions, which work in
  * cash amounts. In particular {@link #basisPointValue} and
  * {@link #yieldValueBasisPoint} are <em>not</em> rescaled by the official
- * adapters; they already return cash amounts (per unit notional).
+ * adapters; they already return cash amounts (per unit notional). Likewise
+ * {@link #duration} is a time in years and {@link #convexity} is the
+ * convexity of the whole cash-flow leg, not a per-100 quantity; neither is
+ * rescaled.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/pricingengines/bond/bondfunctions.hpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/pricingengines/bond/bondfunctions.cpp
@@ -287,6 +291,106 @@ public final class BondFunctions {
         return CashFlows.yield(bond.cashflows(), amount, dayCounter,
                 compounding, frequency, false, settlementDate,
                 settlementDate, accuracy, maxIterations, guess);
+    }
+
+    //! \name Duration and convexity
+    /**
+     * Duration of the whole bond cash-flow leg, in years. This is a thin
+     * adapter of {@link CashFlows#duration(java.util.List, InterestRate,
+     * Duration.Type, Boolean, Date, Date)}; unlike clean/dirty prices and
+     * accrued amounts it is <b>not</b> rescaled by 100/notional. The default
+     * type is {@link Duration.Type#Modified}.
+     */
+    public static double duration(Bond bond, InterestRate yield) {
+        return duration(bond, yield, Duration.Type.Modified, new Date());
+    }
+
+    public static double duration(Bond bond, InterestRate yield, Duration.Type type) {
+        return duration(bond, yield, type, new Date());
+    }
+
+    public static double duration(Bond bond,
+                                  InterestRate yield,
+                                  Duration.Type type,
+                                  Date settlementDate) {
+        settlementDate = settlement(bond, settlementDate);
+
+        requireTradable(bond, settlementDate);
+
+        return CashFlows.duration(bond.cashflows(), yield, type,
+                false, settlementDate, settlementDate);
+    }
+
+    public static double duration(Bond bond,
+                                  double yield,
+                                  DayCounter dayCounter,
+                                  Compounding compounding,
+                                  Frequency frequency) {
+        return duration(bond, yield, dayCounter, compounding, frequency,
+                Duration.Type.Modified, new Date());
+    }
+
+    public static double duration(Bond bond,
+                                  double yield,
+                                  DayCounter dayCounter,
+                                  Compounding compounding,
+                                  Frequency frequency,
+                                  Duration.Type type) {
+        return duration(bond, yield, dayCounter, compounding, frequency, type, new Date());
+    }
+
+    public static double duration(Bond bond,
+                                  double yield,
+                                  DayCounter dayCounter,
+                                  Compounding compounding,
+                                  Frequency frequency,
+                                  Duration.Type type,
+                                  Date settlementDate) {
+        return duration(bond,
+                new InterestRate(yield, dayCounter, compounding, frequency),
+                type, settlementDate);
+    }
+
+    /**
+     * Convexity of the whole bond cash-flow leg. This is the
+     * {@link CashFlows#convexity(java.util.List, InterestRate, Boolean, Date,
+     * Date)} value of the whole leg, not the convexity of a per-100 price:
+     * like duration it is not rescaled by 100/notional. The official
+     * Thirty/360 test divides this number by 100 itself before comparing with
+     * the Bloomberg value.
+     */
+    public static double convexity(Bond bond, InterestRate yield) {
+        return convexity(bond, yield, new Date());
+    }
+
+    public static double convexity(Bond bond,
+                                   InterestRate yield,
+                                   Date settlementDate) {
+        settlementDate = settlement(bond, settlementDate);
+
+        requireTradable(bond, settlementDate);
+
+        return CashFlows.convexity(bond.cashflows(), yield,
+                false, settlementDate, settlementDate);
+    }
+
+    public static double convexity(Bond bond,
+                                   double yield,
+                                   DayCounter dayCounter,
+                                   Compounding compounding,
+                                   Frequency frequency) {
+        return convexity(bond, yield, dayCounter, compounding, frequency, new Date());
+    }
+
+    public static double convexity(Bond bond,
+                                   double yield,
+                                   DayCounter dayCounter,
+                                   Compounding compounding,
+                                   Frequency frequency,
+                                   Date settlementDate) {
+        return convexity(bond,
+                new InterestRate(yield, dayCounter, compounding, frequency),
+                settlementDate);
     }
 
     //! \name Risk functions
