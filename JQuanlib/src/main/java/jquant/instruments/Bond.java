@@ -126,6 +126,104 @@ public class Bond extends Instrument {
         issueDate_ = issueDate == null ? new Date() : issueDate.copy();
     }
 
+    /**
+     * Constructor for amortizing or non-amortizing bonds. Redemptions and
+     * maturity are calculated from the coupon data, if available; therefore,
+     * redemptions must not be included in the passed cash flows.
+     *
+     * <p>Official {@code Bond(Natural, Calendar, Date, const Leg&)}. The cash
+     * flows are stored as references to the caller's objects (not clones), in
+     * a list owned by this bond. The maturity date is the date of the last
+     * element of the caller's list, <em>before</em> sorting, as official.
+     */
+    public Bond(int settlementDays,
+                Calendar calendar,
+                Date issueDate,
+                List<CashFlow> coupons) {
+        settlementDays_ = settlementDays;
+        calendar_ = calendar;
+        issueDate_ = issueDate == null ? new Date() : issueDate.copy();
+
+        if (coupons != null && !coupons.isEmpty()) {
+            cashflows_ = new ArrayList<>(coupons);
+            cashflows_.sort((a, b) -> Integer.compare(a.date().serialNumber(),
+                    b.date().serialNumber()));
+
+            if (TimeUtils.neq(issueDate_, new Date())) {
+                QL_REQUIRE(TimeUtils.less(issueDate_, cashflows_.get(0).date()),
+                        "issue date (" + issueDate_
+                                + ") must be earlier than first payment date ("
+                                + cashflows_.get(0).date() + ")");
+            }
+
+            // Official uses coupons.back(): the caller's last element, which
+            // need not be the last element after sorting.
+            maturityDate_ = coupons.get(coupons.size() - 1).date().copy();
+
+            addRedemptionsToCashflows();
+        }
+
+        // Instrument's constructor already registers with the evaluation
+        // date; registering it again here would double-subscribe.
+        for (CashFlow cashflow : cashflows_)
+            registerWith(cashflow);
+    }
+
+    /**
+     * Old constructor for non-amortizing bonds.
+     *
+     * <p>Official {@code Bond(Natural, Calendar, Real, Date, Date, const Leg&)}.
+     * The last passed cash flow must be the bond redemption, and no other cash
+     * flow can have a date later than the redemption date. Unlike the other
+     * cash-flow constructor, this one does not call
+     * {@link #addRedemptionsToCashflows()}: the redemption is already in the
+     * passed leg.
+     */
+    public Bond(int settlementDays,
+                Calendar calendar,
+                double faceAmount,
+                Date maturityDate,
+                Date issueDate,
+                List<CashFlow> cashflows) {
+        settlementDays_ = settlementDays;
+        calendar_ = calendar;
+        maturityDate_ = maturityDate == null ? new Date() : maturityDate.copy();
+        issueDate_ = issueDate == null ? new Date() : issueDate.copy();
+
+        if (cashflows != null && !cashflows.isEmpty()) {
+            cashflows_ = new ArrayList<>(cashflows);
+            // The last flow is the redemption and must stay at the end; sort
+            // only the flows before it, as official.
+            cashflows_.subList(0, cashflows_.size() - 1)
+                    .sort((a, b) -> Integer.compare(a.date().serialNumber(),
+                            b.date().serialNumber()));
+
+            if (TimeUtils.equals(maturityDate_, new Date()))
+                maturityDate_ = CashFlows.maturityDate(cashflows_).copy();
+
+            if (TimeUtils.neq(issueDate_, new Date())) {
+                QL_REQUIRE(TimeUtils.less(issueDate_, cashflows_.get(0).date()),
+                        "issue date (" + issueDate_
+                                + ") must be earlier than first payment date ("
+                                + cashflows_.get(0).date() + ")");
+            }
+
+            notionalSchedule_.clear();
+            notionals_.clear();
+            notionalSchedule_.add(new Date());
+            notionals_.add(faceAmount);
+            notionalSchedule_.add(maturityDate_.copy());
+            notionals_.add(0.0);
+
+            redemptions_.add(cashflows_.get(cashflows_.size() - 1));
+        }
+
+        // Instrument's constructor already registers with the evaluation
+        // date; registering it again here would double-subscribe.
+        for (CashFlow cashflow : cashflows_)
+            registerWith(cashflow);
+    }
+
     //! \name Inspectors
     public int settlementDays() {
         return settlementDays_;
