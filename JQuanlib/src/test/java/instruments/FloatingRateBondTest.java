@@ -42,6 +42,9 @@ import java.util.List;
 import static jquant.cashflows.CashflowUtil.setCouponPricer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -209,54 +212,175 @@ public class FloatingRateBondTest {
     }
 
     /**
-     * Engineering regression documenting a <b>limitation</b>, not an official
-     * BOOST port and with no official cached value: the bond and its index
-     * follow a relinked forecast handle, but the engine was constructed with
-     * the pre-relink bare curve and keeps discounting with it. The resulting
-     * price is therefore a hybrid; it differs from the fully consistent price
-     * obtained by also handing the engine the current curve. This test pins
-     * the documented behavior; it does not claim the engine should take a
-     * Handle.
+     * Engineering acceptance, <b>not</b> an official BOOST port and with no
+     * official cached value.
+     *
+     * <p>Part 1 (the new capability): when the <em>same</em>
+     * {@link RelinkableHandle} instance is shared by the Ibor index and the
+     * engine, a {@code linkTo} automatically reprices the bond to the fully
+     * consistent new-curve price, with no {@code setPricingEngine}. The result
+     * equals a reference bond whose engine is explicitly built on the new
+     * curve.
+     *
+     * <p>Part 2 (correct Java Handle semantics, not an engine defect): an
+     * engine built from {@code handle.currentLink()} wraps that curve in a
+     * <b>new</b> Link, so it does not follow a later {@code linkTo} of the
+     * caller's handle. Quotes on the same curve instance and notifications on
+     * the shared Link still reach the engine.
+     *
+     * <p>Links are restored in {@code finally}.
      */
     @Test
-    public void engineeringRelinkUpdatesIndexButNotBareEngineCurve() {
+    public void engineeringSharedHandleRelinkVersusNewLink() {
         Date today = new Date(1, Month.JANUARY, 2024);
         Settings.instance.evaluationDate().equal(today);
 
         FlatForward fivePercent = flatRate(today, 0.05, new Actual365Fixed());
         FlatForward eightPercent = flatRate(today, 0.08, new Actual365Fixed());
 
-        RelinkableHandle<YieldTermStructure> forecast =
+        // Part 1: one Handle shared by forecast index and discount engine.
+        RelinkableHandle<YieldTermStructure> shared =
                 new RelinkableHandle<>(fivePercent, true);
-        IborIndex index = new AUDLibor(new Period(3, TimeUnit.MONTHS), forecast);
+        IborIndex sharedIndex = new AUDLibor(new Period(3, TimeUnit.MONTHS), shared);
+
+        FloatingRateBond bond = new FloatingRateBond(
+                0, 100.0, fixingConventionSchedule(new Australia()), sharedIndex,
+                new Actual365Fixed(), BusinessDayConvention.FOLLOWING, 0);
+        bond.setPricingEngine(new DiscountingBondEngine(shared));
+        setCouponPricer(bond.cashflows(), new BlackIborCouponPricer());
+
+        FloatingRateBond reference = new FloatingRateBond(
+                0, 100.0, fixingConventionSchedule(new Australia()), sharedIndex,
+                new Actual365Fixed(), BusinessDayConvention.FOLLOWING, 0);
+        reference.setPricingEngine(new DiscountingBondEngine(eightPercent));
+        setCouponPricer(reference.cashflows(), new BlackIborCouponPricer());
+
+        try {
+            double atFive = bond.cleanPrice();
+
+            shared.linkTo(eightPercent, true);
+            // No setPricingEngine and no explicit recalculate.
+            double automaticAtEight = bond.cleanPrice();
+            double explicitAtEight = reference.cleanPrice();
+
+            assertTrue(Math.abs(automaticAtEight - atFive) > 1.0e-8,
+                    "the shared-handle relink must reprice the bond: 5%="
+                            + atFive + " 8%=" + automaticAtEight);
+            assertEquals(explicitAtEight, automaticAtEight, 1.0e-12,
+                    "the shared-handle relink must be fully consistent with "
+                            + "an engine built explicitly on the new curve");
+        } finally {
+            shared.linkTo(fivePercent, true);
+        }
+
+        // Part 2: a bare/new-link engine does not follow another handle.
+        RelinkableHandle<YieldTermStructure> discount =
+                new RelinkableHandle<>(fivePercent, true);
+        // Forecast on a separate link, so only `discount` is relinked below.
+        IborIndex forecastIndex = new AUDLibor(new Period(3, TimeUnit.MONTHS),
+                new Handle<>(fivePercent, true));
+
+        FloatingRateBond bareBond = new FloatingRateBond(
+                0, 100.0, fixingConventionSchedule(new Australia()), forecastIndex,
+                new Actual365Fixed(), BusinessDayConvention.FOLLOWING, 0);
+        DiscountingBondEngine bareEngine =
+                new DiscountingBondEngine(discount.currentLink());
+        bareBond.setPricingEngine(bareEngine);
+        setCouponPricer(bareBond.cashflows(), new BlackIborCouponPricer());
+
+        assertNotSame(discount.get(), bareEngine.discountCurve().get(),
+                "the bare constructor must wrap the curve in a new Link");
+
+        try {
+            double before = bareBond.cleanPrice();
+
+            discount.linkTo(eightPercent, true);
+            double after = bareBond.cleanPrice();
+
+            assertEquals(before, after, 0.0,
+                    "an engine built from handle.currentLink() must not follow "
+                            + "a relink of the caller's handle");
+        } finally {
+            discount.linkTo(fivePercent, true);
+        }
+    }
+
+    /**
+     * Engineering regression, <b>not</b> an official BOOST port and with no
+     * official cached value: an empty discount Handle is legal at construction
+     * and is diagnosed in {@code calculate()} with the official message.
+     */
+    @Test
+    public void engineeringEmptyDiscountHandleFailsOnCalculation() {
+        Date today = new Date(1, Month.JANUARY, 2024);
+        Settings.instance.evaluationDate().equal(today);
+
+        FlatForward curve = flatRate(today, 0.05, new Actual365Fixed());
+        IborIndex index = new AUDLibor(new Period(3, TimeUnit.MONTHS),
+                new Handle<>(curve, true));
 
         FloatingRateBond bond = new FloatingRateBond(
                 0, 100.0, fixingConventionSchedule(new Australia()), index,
                 new Actual365Fixed(), BusinessDayConvention.FOLLOWING, 0);
-        bond.setPricingEngine(new DiscountingBondEngine(forecast.currentLink()));
+
+        DiscountingBondEngine engine = new DiscountingBondEngine(
+                new Handle<YieldTermStructure>(null, false));
+        assertTrue(engine.discountCurve().empty(),
+                "the engine must accept an empty handle at construction");
+        bond.setPricingEngine(engine);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                bond::cleanPrice);
+        assertEquals("discounting term structure handle is empty", error.getMessage(),
+                "official empty-handle message");
+    }
+
+    /**
+     * Engineering regression, <b>not</b> an official BOOST port and with no
+     * official cached value. The engine is built with the <em>same</em>
+     * {@link RelinkableHandle} instance, so it observes the shared Link: a
+     * {@code linkTo} must reprice the bond automatically, without a
+     * {@code setPricingEngine} call. The forecast curve is on a separate link,
+     * so only the engine's discount handle can trigger the repricing. The
+     * link is restored in {@code finally}.
+     */
+    @Test
+    public void engineeringSameRelinkableHandleDiscountEngineFollowsRelink() {
+        Date today = new Date(1, Month.JANUARY, 2024);
+        Settings.instance.evaluationDate().equal(today);
+
+        FlatForward fivePercent = flatRate(today, 0.05, new Actual365Fixed());
+        FlatForward eightPercent = flatRate(today, 0.08, new Actual365Fixed());
+
+        RelinkableHandle<YieldTermStructure> discount =
+                new RelinkableHandle<>(fivePercent, true);
+        // Forecast on a separate link: nothing here observes `discount`.
+        IborIndex index = new AUDLibor(new Period(3, TimeUnit.MONTHS),
+                new Handle<>(fivePercent, true));
+
+        FloatingRateBond bond = new FloatingRateBond(
+                0, 100.0, fixingConventionSchedule(new Australia()), index,
+                new Actual365Fixed(), BusinessDayConvention.FOLLOWING, 0);
+        DiscountingBondEngine engine = new DiscountingBondEngine(discount);
+        bond.setPricingEngine(engine);
         setCouponPricer(bond.cashflows(), new BlackIborCouponPricer());
 
+        assertSame(discount.get(), engine.discountCurve().get(),
+                "the engine must share the caller's Handle Link");
+
         try {
-            double beforeRelink = bond.cleanPrice();
+            double atFive = bond.cleanPrice();
 
-            forecast.linkTo(eightPercent, true);
-            double hybrid = bond.cleanPrice();
+            discount.linkTo(eightPercent, true);
+            // No setPricingEngine and no explicit recalculate: the engine's
+            // observation of the shared Link invalidates the bond.
+            double atEight = bond.cleanPrice();
 
-            // The index now forecasts at 8% while the engine still discounts
-            // at 5%, so the price moves away from the pre-relink value.
-            assertTrue(Math.abs(hybrid - beforeRelink) > 1.0e-8,
-                    "relinking the shared forecast handle must reach the index: before="
-                            + beforeRelink + " hybrid=" + hybrid);
-
-            // Passing the current curve (8%) to a new engine is materially
-            // different, showing that the old engine did not follow the relink.
-            bond.setPricingEngine(new DiscountingBondEngine(forecast.currentLink()));
-            double consistent = bond.cleanPrice();
-            assertTrue(Math.abs(consistent - hybrid) > 1.0e-8,
-                    "the bare engine curve must not follow the relink: hybrid="
-                            + hybrid + " fully-consistent=" + consistent);
+            assertTrue(Math.abs(atEight - atFive) > 1.0e-8,
+                    "relinking the engine's own discount handle must reprice the bond: "
+                            + "5%=" + atFive + " 8%=" + atEight);
         } finally {
-            forecast.linkTo(fivePercent, true);
+            discount.linkTo(fivePercent, true);
         }
     }
 
