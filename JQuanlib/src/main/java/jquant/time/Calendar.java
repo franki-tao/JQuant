@@ -179,7 +179,12 @@ public abstract class Calendar {
 
     /*! Adjusts a non-business day to the appropriate near business day
         with respect to the given convention.
+        Official default convention is Following.
     */
+    public Date adjust(final Date d) {
+        return adjust(d, BusinessDayConvention.FOLLOWING);
+    }
+
     public Date adjust(final Date d, BusinessDayConvention c) {
         QL_REQUIRE(d != null, "null date");
 

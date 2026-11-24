@@ -43,8 +43,12 @@ public class Schedule {
         convention_ = convention;
         terminationDateConvention_ = terminationDateConvention;
         rule_ = rule;
-        dates_ = dates;
-        isRegular_ = isRegular;
+        // Official takes the date vector by value; Date is a value type there.
+        // Java Dates are mutable, so copy each element as well as the list.
+        dates_ = new ArrayList<>(dates.size());
+        for (Date date : dates)
+            dates_.add(date.copy());
+        isRegular_ = new ArrayList<>(isRegular);
         // Official date-list ctor default-initializes these to Date().
         firstDate_ = new Date();
         nextToLastDate_ = new Date();
@@ -52,10 +56,38 @@ public class Schedule {
             endOfMonth_ = Optional.of(false);
         else
             endOfMonth_ = endOfMonth;
-        QL_REQUIRE(isRegular_.isEmpty() || isRegular_.size() == dates.size() - 1,
+        QL_REQUIRE(isRegular_.isEmpty() || isRegular_.size() == dates_.size() - 1,
                 "isRegular size (" + isRegular_.size()
                         + ") must be zero or equal to the number of dates minus 1 ("
-                        + (dates.size() - 1) + ")");
+                        + (dates_.size() - 1) + ")");
+    }
+
+    /*! constructor that takes any list of dates, a calendar and a
+        convention, with no other meta information */
+    public Schedule(final List<Date> dates,
+                    Calendar calendar,
+                    BusinessDayConvention convention) {
+        this(dates, calendar, convention,
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                new ArrayList<>());
+    }
+
+    /*! readable overload of the date-list constructor for callers that
+        have all the official meta information available. */
+    public Schedule(final List<Date> dates,
+                    Calendar calendar,
+                    BusinessDayConvention convention,
+                    BusinessDayConvention terminationDateConvention,
+                    Period tenor,
+                    DateGenerationRule rule,
+                    boolean endOfMonth,
+                    List<Boolean> isRegular) {
+        this(dates, calendar, convention,
+                Optional.of(terminationDateConvention),
+                Optional.of(tenor),
+                Optional.of(rule),
+                Optional.of(endOfMonth),
+                isRegular);
     }
 
     /*! rule based constructor */
@@ -75,8 +107,8 @@ public class Schedule {
         terminationDateConvention_ = Optional.of(terminationDateConvention);
         rule_ = Optional.of(rule);
         endOfMonth_ = TimeUtils.allowsEndOfMonth(tenor) ? Optional.of(endOfMonth) : Optional.of(false);
-        firstDate_ = first.equals(effectiveDate) ? new Date() : first;
-        nextToLastDate_ = nextToLast.equals(terminationDate) ? new Date() : nextToLast;
+        firstDate_ = first.equals(effectiveDate) ? new Date() : first.copy();
+        nextToLastDate_ = nextToLast.equals(terminationDate) ? new Date() : nextToLast.copy();
         dates_ = new ArrayList<>();
         isRegular_ = new ArrayList<>();
         // sanity checks
@@ -432,8 +464,13 @@ public class Schedule {
         return dates_.get(i);
     }
 
+    /**
+     * The schedule's dates. The returned list is a copy so callers cannot
+     * structurally mutate the schedule; the Date elements are the schedule's
+     * own (as with {@link #date(int)}), not the constructor caller's objects.
+     */
     public List<Date> dates() {
-        return dates_;
+        return new ArrayList<>(dates_);
     }
 
     public boolean empty() {
