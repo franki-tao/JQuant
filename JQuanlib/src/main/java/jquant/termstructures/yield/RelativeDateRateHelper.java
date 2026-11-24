@@ -9,17 +9,24 @@ import jquant.time.Date;
 import jquant.time.TimeUtils;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
  * Base class for rate helpers whose dates depend on the evaluation date.
  *
  * <p>Port of QuantLib's {@code RelativeDateBootstrapHelper} in
- * {@code ql/termstructures/bootstraphelper.hpp}. The official class is an
- * observer of the evaluation date and, on a date change, rebuilds its dates
- * and notifies its own observers. In this port {@link RateHelper} is not an
- * {@code Observable}, so this class registers itself as an observer of the
- * evaluation date but has no helper observers to forward the notification to.
+ * {@code ql/termstructures/bootstraphelper.hpp}: an observer of the global
+ * evaluation date that rebuilds its dates synchronously when that date
+ * changes, and whose observers (the curve using the helper) are notified so
+ * that they re-bootstrap.
+ *
+ * <p>In this port {@link RateHelper} is not an {@code Observable}. Curves
+ * instead register directly with the observables the helper depends on:
+ * {@link RateHelper#notifications()} supplies the quote, and
+ * {@link #notificationObservables()} supplies the evaluation date. This is the
+ * equivalent of the official bootstrapper's
+ * {@code registerWithObservables(helper)} call.
  *
  * <p>The evaluation date is stored as a copy: Java {@code Date} is mutable and
  * must never alias the live {@code Settings} date.
@@ -28,7 +35,6 @@ import java.util.Set;
  */
 public abstract class RelativeDateRateHelper extends RateHelper implements Observer {
     private final Set<Observable> registeredObservables = new HashSet<>();
-    private boolean datesStale_ = false;
 
     protected Date evaluationDate_;
     protected boolean updateDates_;
@@ -48,54 +54,31 @@ public abstract class RelativeDateRateHelper extends RateHelper implements Obser
 
     @Override
     public void update() {
+        // Official RelativeDateBootstrapHelper::update(): rebuild the dates
+        // synchronously when the evaluation date changed. Observers created by
+        // initializeDates() register with the evaluation date and with the
+        // index while this notification is running; ObservableValue and Index
+        // notify over a snapshot so that is safe.
         Date currentEvaluationDate = Settings.instance.evaluationDate().Date();
         if (updateDates_ && TimeUtils.neq(evaluationDate_, currentEvaluationDate)) {
             evaluationDate_ = currentEvaluationDate.copy();
-            // initializeDates() builds instruments (and their coupons), which
-            // register themselves with the evaluation date. The port's
-            // DateProxy notifies observers by iterating its observer set
-            // directly, so rebuilding here would modify that set during the
-            // iteration and throw ConcurrentModificationException. Mark the
-            // dates stale instead and rebuild on the next accessor; the
-            // official helper's observers are notified before any of them
-            // can read dates anyway.
-            datesStale_ = true;
-        }
-        // Official BootstrapHelper::update() then notifies the helper's
-        // observers; RateHelper is not Observable in this port, so there is
-        // nothing to notify here.
-    }
-
-    /** Rebuild dates on first use after the evaluation date changed. */
-    protected void ensureDates() {
-        if (datesStale_) {
-            datesStale_ = false;
             initializeDates();
         }
+        // Official BootstrapHelper::update() then notifies the helper's
+        // observers. RateHelper is not Observable here; the curve observes the
+        // evaluation date directly through notificationObservables() instead.
     }
 
+    /**
+     * Observables a curve must register with to be told about changes that
+     * require a re-bootstrap. Mirrors the official bootstrapper registering
+     * the curve with all observables of the helper.
+     */
     @Override
-    public Date earliestDate() {
-        ensureDates();
-        return super.earliestDate();
-    }
-
-    @Override
-    public Date latestRelevantDate() {
-        ensureDates();
-        return super.latestRelevantDate();
-    }
-
-    @Override
-    public Date pillarDate() {
-        ensureDates();
-        return super.pillarDate();
-    }
-
-    @Override
-    public Date maturityDate() {
-        ensureDates();
-        return super.maturityDate();
+    public List<Observable> notificationObservables() {
+        if (!updateDates_)
+            return List.of();
+        return List.of(Settings.instance.evaluationDate());
     }
 
     /** Rebuild the helper dates after the evaluation date changed. */

@@ -7,6 +7,7 @@ import jquant.patterns.Observer;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -103,7 +104,11 @@ public class ObservableValue<T> implements Observable {
         if (!ObservableSettings.getInstance().isUpdatesEnabled()) {
             ObservableSettings.getInstance().registerDeferred(observers);
         } else {
-            for (Observer observer : observers) {
+            // Notify a snapshot: an observer may register new observers while
+            // being updated (e.g. a relative-date rate helper rebuilding its
+            // dates creates coupons that register with the evaluation date).
+            // Iterating the live set would throw ConcurrentModificationException.
+            for (Observer observer : new ArrayList<>(observers)) {
                 try {
                     observer.update();
                 } catch (Exception e) {
