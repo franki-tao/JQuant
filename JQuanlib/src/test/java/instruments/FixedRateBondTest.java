@@ -3,8 +3,10 @@ package instruments;
 import jquant.CashFlow;
 import jquant.Compounding;
 import jquant.Handle;
+import jquant.SavedSettings;
 import jquant.Settings;
 import jquant.cashflows.FixedRateCoupon;
+import jquant.indexes.IndexManager;
 import jquant.instruments.FixedRateBond;
 import jquant.pricingengines.DiscountingBondEngine;
 import jquant.quotes.SimpleQuote;
@@ -32,6 +34,8 @@ import jquant.time.daycounters.ActualActual;
 import jquant.time.daycounters.Thirty360;
 import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.yield.FlatForward;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -42,18 +46,37 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * QuantLib {@code testCachedFixed} and the bond leg of
+ * QuantLib {@code testCachedFixed} (complete, 3/3 cases: the plain bond, the
+ * varying-coupon bond and the stub-date bond) and the bond leg of
  * {@code testLogLinearDiscountConsistency}.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/test-suite/bonds.cpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/test-suite/piecewiseyieldcurve.cpp
  */
 public class FixedRateBondTest {
+
+    private SavedSettings savedSettings_;
+
+    @BeforeEach
+    public void setUp() {
+        savedSettings_ = new SavedSettings();
+    }
+
+    @AfterEach
+    public void tearDown() {
+        // Official TopLevelFixture: clear the index histories, then restore
+        // the saved settings.
+        IndexManager.Instance.clearHistories();
+        savedSettings_.restore();
+    }
+
     @Test
     public void testCachedUsGovernmentBond() {
-        // testCachedFixed: 22 Nov 2004, US GovernmentBond, semiannual,
-        // unadjusted, end-of-month false, Actual/Actual (ISMA),
-        // discount 3% continuous Actual/360. Clean price is cached.
+        // Official testCachedFixed complete (3/3): 22 Nov 2004, US GovernmentBond,
+        // semiannual, unadjusted, end-of-month false, Actual/Actual (ISMA),
+        // discount 3% continuous Actual/360. The first two cached clean prices
+        // were already asserted here; the stub (third official branch) is added
+        // below and is not a second copy of those two prices.
         Date today = new Date(22, Month.NOVEMBER, 2004);
         Settings.instance.evaluationDate().equal(today);
         Calendar us = new UnitedStates(UnitedStates.Market.GovernmentBond);
@@ -96,6 +119,30 @@ public class FixedRateBondTest {
                 new FlatForward(today, 0.03, new Actual360(false),
                         Compounding.Continuous, Frequency.ANNUAL)));
         assertEquals(100.334149, varying.cleanPrice(), 1.0e-6);
+
+        // stub date: official testCachedFixed, third case. The first coupon
+        // period is long (30 Nov 2004 to the stub date chosen by the backward
+        // generation from 30 Nov 2008) because the maturity is 30 Mar 2009.
+        Schedule stubSchedule = new Schedule(
+                new Date(30, Month.NOVEMBER, 2004),
+                new Date(30, Month.MARCH, 2009),
+                new Period(Frequency.SEMIANNUAL),
+                us,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD,
+                false,
+                new Date(),
+                new Date(30, Month.NOVEMBER, 2008));
+        FixedRateBond stub = new FixedRateBond(
+                1, face, stubSchedule, new double[] {0.02875, 0.03, 0.03125, 0.0325},
+                new ActualActual(ActualActual.Convention.ISMA),
+                BusinessDayConvention.MODIFIED_FOLLOWING,
+                100.0, new Date(30, Month.NOVEMBER, 2004));
+        stub.setPricingEngine(new DiscountingBondEngine(
+                new FlatForward(today, 0.03, new Actual360(false),
+                        Compounding.Continuous, Frequency.ANNUAL)));
+        assertEquals(100.382794, stub.cleanPrice(), 1.0e-6);
     }
 
     @Test
