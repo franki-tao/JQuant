@@ -1,0 +1,26 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: jquant-service
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+jquant:
+  execution:
+    timeout-seconds: 15
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+      - http://localhost:3000
