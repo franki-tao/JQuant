@@ -31,10 +31,15 @@ public abstract class IborCouponPricer extends FloatingRateCouponPricer {
 
     public IborCouponPricer(Handle<OptionletVolatilityStructure> v,
                             Optional<Boolean> useIndexedCoupon) {
-        capletVol_ = v;
+        // Official always registerWith(capletVol_), including an empty Handle,
+        // so a later linkTo on the same RelinkableHandle reaches this pricer.
+        // Java Handle.get() is the observable Link; currentLink() is only the
+        // current surface and misses relink. new Handle(surface) is a distinct
+        // Link and does not share relink with another Handle around the same
+        // surface.
+        capletVol_ = v == null ? new Handle<>(null, false) : v;
         useIndexedCoupon_ = useIndexedCoupon.orElseGet(() -> !IborCoupon.Settings.instance().usingAtParCoupons());
-        if (capletVol_ != null && !capletVol_.empty())
-            registerWith(capletVol_.currentLink());
+        registerWith(capletVol_.get());
     }
 
     //! indexed coupon, no optionlet volatility
@@ -52,9 +57,15 @@ public abstract class IborCouponPricer extends FloatingRateCouponPricer {
 
     public void setCapletVolatility(
             final Handle<OptionletVolatilityStructure> v) {
-        unregisterWith(capletVol_.currentLink());
-        capletVol_ = v;
-        registerWith(capletVol_.currentLink());
+        // Official: unregisterWith(old Handle), assign, registerWith(new
+        // Handle), update(). Unregister the Link, not the old surface, so a
+        // later quote change on the unbound surface does not leak through.
+        // A null handle becomes an empty Handle, matching official default
+        // construction; the no-volatility ctor may leave capletVol_ null.
+        if (capletVol_ != null)
+            unregisterWith(capletVol_.get());
+        capletVol_ = v == null ? new Handle<>(null, false) : v;
+        registerWith(capletVol_.get());
         update();
     }
 
