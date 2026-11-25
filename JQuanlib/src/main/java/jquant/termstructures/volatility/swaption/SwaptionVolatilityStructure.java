@@ -1,5 +1,6 @@
 package jquant.termstructures.volatility.swaption;
 
+import jquant.termstructures.SmileSection;
 import jquant.termstructures.VolatilityTermStructure;
 import jquant.termstructures.volatility.Sarb;
 import jquant.time.*;
@@ -11,12 +12,14 @@ import static jquant.termstructures.volatility.Sarb.VolatilityType.ShiftedLognor
 /**
  * Swaption-volatility structure.
  *
- * <p>Minimal port of QuantLib
- * {@code ql/termstructures/volatility/swaption/swaptionvolstructure.hpp}:
- * only the volatility, variance, shift, swap-length and tenor-limit methods
- * used by the swaption engines and by {@code Swaption::impliedVolatility}.
- * Smile sections are deliberately not ported (the official swaption suite
- * does not use them).
+ * <p>Port of QuantLib
+ * {@code ql/termstructures/volatility/swaption/swaptionvolstructure.hpp}.
+ * The date and swap-length overloads used by the swaption engines and by
+ * {@code Swaption::impliedVolatility} are kept as they were; the option
+ * date / swap tenor (and exercise time / swap length) volatility, variance,
+ * shift and smile-section paths used by the CMS pricers are added on top.
+ * The option-tenor conveniences and the option-date-to-date interpolation
+ * are not ported because nothing in this port uses them yet.
  */
 public abstract class SwaptionVolatilityStructure extends VolatilityTermStructure {
     /*! \warning term structures initialized by means of this
@@ -58,6 +61,36 @@ public abstract class SwaptionVolatilityStructure extends VolatilityTermStructur
         return volatility(optionDate, swapLength, strike, false);
     }
 
+    //! returns the volatility for a given option date and swap tenor
+    public double volatility(Date optionDate,
+                             Period swapTenor,
+                             double strike,
+                             boolean extrapolate) {
+        checkSwapTenor(swapTenor, extrapolate);
+        checkRange(optionDate, extrapolate);
+        checkStrike(strike, extrapolate);
+        return volatilityImpl(optionDate, swapTenor, strike);
+    }
+
+    public double volatility(Date optionDate, Period swapTenor, double strike) {
+        return volatility(optionDate, swapTenor, strike, false);
+    }
+
+    //! returns the volatility for a given option time and swap length
+    public double volatility(double optionTime,
+                             double swapLength,
+                             double strike,
+                             boolean extrapolate) {
+        checkSwapTenor(swapLength, extrapolate);
+        checkRange(optionTime, extrapolate);
+        checkStrike(strike, extrapolate);
+        return volatilityImpl(optionTime, swapLength, strike);
+    }
+
+    public double volatility(double optionTime, double swapLength, double strike) {
+        return volatility(optionTime, swapLength, strike, false);
+    }
+
     /** returns the Black variance for a given option date and swap length */
     public double blackVariance(Date optionDate,
                                 double swapLength,
@@ -72,6 +105,33 @@ public abstract class SwaptionVolatilityStructure extends VolatilityTermStructur
         return blackVariance(optionDate, swapLength, strike, false);
     }
 
+    /** returns the Black variance for a given option date and swap tenor */
+    public double blackVariance(Date optionDate,
+                                Period swapTenor,
+                                double strike,
+                                boolean extrapolate) {
+        double v = volatility(optionDate, swapTenor, strike, extrapolate);
+        double optionTime = timeFromReference(optionDate);
+        return v * v * optionTime;
+    }
+
+    public double blackVariance(Date optionDate, Period swapTenor, double strike) {
+        return blackVariance(optionDate, swapTenor, strike, false);
+    }
+
+    /** returns the Black variance for a given option time and swap length */
+    public double blackVariance(double optionTime,
+                                double swapLength,
+                                double strike,
+                                boolean extrapolate) {
+        double v = volatility(optionTime, swapLength, strike, extrapolate);
+        return v * v * optionTime;
+    }
+
+    public double blackVariance(double optionTime, double swapLength, double strike) {
+        return blackVariance(optionTime, swapLength, strike, false);
+    }
+
     /** returns the shift for a given option date and swap length */
     public double shift(Date optionDate, double swapLength, boolean extrapolate) {
         checkSwapTenor(swapLength, extrapolate);
@@ -82,6 +142,54 @@ public abstract class SwaptionVolatilityStructure extends VolatilityTermStructur
 
     public double shift(Date optionDate, double swapLength) {
         return shift(optionDate, swapLength, false);
+    }
+
+    /** returns the shift for a given option date and swap tenor */
+    public double shift(Date optionDate, Period swapTenor, boolean extrapolate) {
+        checkSwapTenor(swapTenor, extrapolate);
+        checkRange(optionDate, extrapolate);
+        return shiftImpl(optionDate, swapTenor);
+    }
+
+    public double shift(Date optionDate, Period swapTenor) {
+        return shift(optionDate, swapTenor, false);
+    }
+
+    /** returns the shift for a given option time and swap length */
+    public double shift(double optionTime, double swapLength, boolean extrapolate) {
+        checkSwapTenor(swapLength, extrapolate);
+        checkRange(optionTime, extrapolate);
+        return shiftImpl(optionTime, swapLength);
+    }
+
+    public double shift(double optionTime, double swapLength) {
+        return shift(optionTime, swapLength, false);
+    }
+
+    //! returns the smile for a given option date and swap tenor
+    public SmileSection smileSection(Date optionDate,
+                                     Period swapTenor,
+                                     boolean extrapolate) {
+        checkSwapTenor(swapTenor, extrapolate);
+        checkRange(optionDate, extrapolate);
+        return smileSectionImpl(optionDate, swapTenor);
+    }
+
+    public SmileSection smileSection(Date optionDate, Period swapTenor) {
+        return smileSection(optionDate, swapTenor, false);
+    }
+
+    //! returns the smile for a given option time and swap length
+    public SmileSection smileSection(double optionTime,
+                                     double swapLength,
+                                     boolean extrapolate) {
+        checkSwapTenor(swapLength, extrapolate);
+        checkRange(optionTime, extrapolate);
+        return smileSectionImpl(optionTime, swapLength);
+    }
+
+    public SmileSection smileSection(double optionTime, double swapLength) {
+        return smileSection(optionTime, swapLength, false);
     }
 
     /** the largest length for which the term structure can return vols */
@@ -145,6 +253,32 @@ public abstract class SwaptionVolatilityStructure extends VolatilityTermStructur
     //! implements the actual volatility calculation in derived classes
     protected double volatilityImpl(double optionTime, double swapLength, double strike) {
         return 0.0;
+    }
+
+    //! default implementation relies on the time-based method
+    protected double volatilityImpl(Date optionDate,
+                                    Period swapTenor,
+                                    double strike) {
+        return volatilityImpl(timeFromReference(optionDate),
+                swapLength(swapTenor), strike);
+    }
+
+    //! default implementation relies on the time-based method
+    protected SmileSection smileSectionImpl(Date optionDate, Period swapTenor) {
+        return smileSectionImpl(timeFromReference(optionDate),
+                swapLength(swapTenor));
+    }
+
+    //! implements the actual smile calculation in derived classes
+    protected SmileSection smileSectionImpl(double optionTime,
+                                            double swapLength) {
+        QL_FAIL("smileSectionImpl(Time, Time) not implemented");
+        return null;
+    }
+
+    //! default implementation relies on the time-based method
+    protected double shiftImpl(Date optionDate, Period swapTenor) {
+        return shiftImpl(timeFromReference(optionDate), swapLength(swapTenor));
     }
 
     protected double shiftImpl(double optionTime, double swapLength) {

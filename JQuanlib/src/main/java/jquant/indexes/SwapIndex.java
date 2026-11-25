@@ -120,7 +120,9 @@ public class SwapIndex extends InterestRateIndex {
                     iborIndex_.tenor(), iborIndex_.fixingCalendar(),
                     iborIndex_.businessDayConvention(), iborIndex_.businessDayConvention(),
                     DateGenerationRule.BACKWARD, false, new Date(), new Date());
-            lastSwap_ = new VanillaSwap(VanillaSwap.Type.Payer, 100.0, fixed, 0.0,
+            // Official MakeVanillaSwap default notional is 1.0; a 100 notional
+            // scales fixedLegBPS and therefore Hagan/LinearTsr annuity by 100.
+            lastSwap_ = new VanillaSwap(VanillaSwap.Type.Payer, 1.0, fixed, 0.0,
                     dayCounter(), floating, iborIndex_, 0.0, iborIndex_.dayCounter());
             Handle<YieldTermStructure> discount = exogenousDiscount_
                     ? discount_ : iborIndex_.forwardingTermStructure();
