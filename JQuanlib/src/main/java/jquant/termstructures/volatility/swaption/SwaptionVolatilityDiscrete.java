@@ -1,5 +1,6 @@
 package jquant.termstructures.volatility.swaption;
 
+import jquant.math.interpolations.LinearInterpolation;
 import jquant.time.BusinessDayConvention;
 import jquant.time.Calendar;
 import jquant.time.Date;
@@ -40,6 +41,10 @@ public abstract class SwaptionVolatilityDiscrete extends SwaptionVolatilityStruc
     protected final List<Period> optionTenors_;
     protected final List<Date> optionDates_;
     protected final double[] optionTimes_;
+    protected final double[] optionDatesAsReal_;
+    protected final double[] optionInterpolatorTimes_;
+    protected final double[] optionInterpolatorDatesAsReal_;
+    protected LinearInterpolation optionInterpolator_;
 
     protected final int nSwapTenors_;
     protected final List<Period> swapTenors_;
@@ -62,6 +67,9 @@ public abstract class SwaptionVolatilityDiscrete extends SwaptionVolatilityStruc
         optionDates_ = new ArrayList<>(
                 Collections.nCopies(nOptionTenors_, new Date()));
         optionTimes_ = new double[nOptionTenors_];
+        optionDatesAsReal_ = new double[nOptionTenors_];
+        optionInterpolatorTimes_ = new double[nOptionTenors_ + 1];
+        optionInterpolatorDatesAsReal_ = new double[nOptionTenors_ + 1];
 
         nSwapTenors_ = swapTenors.size();
         swapTenors_ = new ArrayList<>(swapTenors);
@@ -73,6 +81,10 @@ public abstract class SwaptionVolatilityDiscrete extends SwaptionVolatilityStruc
         checkSwapTenors();
         initializeSwapLengths();
 
+        optionInterpolator_ = new LinearInterpolation(
+                optionInterpolatorTimes_, optionInterpolatorDatesAsReal_);
+        optionInterpolator_.update();
+        optionInterpolator_.enableExtrapolation();
         cachedReferenceDate_ = referenceDate();
     }
 
@@ -90,6 +102,9 @@ public abstract class SwaptionVolatilityDiscrete extends SwaptionVolatilityStruc
         optionDates_ = new ArrayList<>(
                 Collections.nCopies(nOptionTenors_, new Date()));
         optionTimes_ = new double[nOptionTenors_];
+        optionDatesAsReal_ = new double[nOptionTenors_];
+        optionInterpolatorTimes_ = new double[nOptionTenors_ + 1];
+        optionInterpolatorDatesAsReal_ = new double[nOptionTenors_ + 1];
 
         nSwapTenors_ = swapTenors.size();
         swapTenors_ = new ArrayList<>(swapTenors);
@@ -100,6 +115,11 @@ public abstract class SwaptionVolatilityDiscrete extends SwaptionVolatilityStruc
 
         checkSwapTenors();
         initializeSwapLengths();
+
+        optionInterpolator_ = new LinearInterpolation(
+                optionInterpolatorTimes_, optionInterpolatorDatesAsReal_);
+        optionInterpolator_.update();
+        optionInterpolator_.enableExtrapolation();
     }
 
     /**
@@ -122,6 +142,9 @@ public abstract class SwaptionVolatilityDiscrete extends SwaptionVolatilityStruc
         for (Date d : optionDates)
             optionDates_.add(d.copy());
         optionTimes_ = new double[nOptionTenors_];
+        optionDatesAsReal_ = new double[nOptionTenors_];
+        optionInterpolatorTimes_ = new double[nOptionTenors_ + 1];
+        optionInterpolatorDatesAsReal_ = new double[nOptionTenors_ + 1];
 
         nSwapTenors_ = swapTenors.size();
         swapTenors_ = new ArrayList<>(swapTenors);
@@ -132,6 +155,14 @@ public abstract class SwaptionVolatilityDiscrete extends SwaptionVolatilityStruc
 
         checkSwapTenors();
         initializeSwapLengths();
+
+        // Official swaptionvoldiscrete.cpp only initializes the option times
+        // in this constructor; the date nodes of the interpolator keep their
+        // default (zero) values. Reproduced as official.
+        optionInterpolator_ = new LinearInterpolation(
+                optionInterpolatorTimes_, optionInterpolatorDatesAsReal_);
+        optionInterpolator_.update();
+        optionInterpolator_.enableExtrapolation();
     }
 
     public List<Period> optionTenors() {
@@ -155,6 +186,17 @@ public abstract class SwaptionVolatilityDiscrete extends SwaptionVolatilityStruc
     public double[] swapLengths() {
         calculate();
         return swapLengths_.clone();
+    }
+
+    /**
+     * Option date corresponding to an option time, by linear interpolation of
+     * the option-date serial numbers over the option times. As official, the
+     * interpolator carries an extra node at time zero mapped to the reference
+     * date and extrapolates linearly.
+     */
+    public Date optionDateFromTime(double optionTime) {
+        calculate();
+        return new Date((int) optionInterpolator_.value(optionTime, true));
     }
 
     /**
@@ -188,6 +230,7 @@ public abstract class SwaptionVolatilityDiscrete extends SwaptionVolatilityStruc
                 cachedReferenceDate_ = reference;
                 initializeOptionDatesAndTimes();
                 initializeSwapLengths();
+                optionInterpolator_.update();
             }
         }
     }
@@ -237,14 +280,21 @@ public abstract class SwaptionVolatilityDiscrete extends SwaptionVolatilityStruc
     }
 
     private void initializeOptionDatesAndTimes() {
-        for (int i = 0; i < nOptionTenors_; ++i)
+        optionInterpolatorDatesAsReal_[0] = referenceDate().serialNumber();
+        for (int i = 0; i < nOptionTenors_; ++i) {
             optionDates_.set(i, optionDateFromTenor(optionTenors_.get(i)));
+            optionDatesAsReal_[i] = optionInterpolatorDatesAsReal_[i + 1] =
+                    optionDates_.get(i).serialNumber();
+        }
         initializeOptionTimes();
     }
 
     private void initializeOptionTimes() {
-        for (int i = 0; i < nOptionTenors_; ++i)
+        optionInterpolatorTimes_[0] = 0.0;
+        for (int i = 0; i < nOptionTenors_; ++i) {
             optionTimes_[i] = timeFromReference(optionDates_.get(i));
+            optionInterpolatorTimes_[i + 1] = optionTimes_[i];
+        }
     }
 
     private void initializeSwapLengths() {
