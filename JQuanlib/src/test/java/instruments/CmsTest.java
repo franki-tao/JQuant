@@ -21,6 +21,8 @@ import jquant.instruments.Swap;
 import jquant.math.Matrix;
 import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
+import jquant.termstructures.volatility.swaption.InterpolatedSwaptionVolatilityCube;
+import jquant.termstructures.volatility.swaption.SabrSwaptionVolatilityCube;
 import jquant.termstructures.volatility.swaption.SwaptionVolatilityMatrix;
 import jquant.termstructures.volatility.swaption.SwaptionVolatilityStructure;
 import jquant.termstructures.yield.FlatForward;
@@ -49,10 +51,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Official QuantLib {@code test-suite/cms.cpp} port (ATM lognormal slice).
  *
- * <p>Ported from QuantLib at SHA {@code cf74c9f}: {@code testFairRate} and
- * {@code testCmsSwap} in full, and only the ATM branch of {@code testParity}.
- * The SABR cubes, CMS market calibration and the other tests of the official
- * file are deliberately not ported.
+ * <p>Ported from QuantLib at SHA {@code cf74c9f}: {@code testFairRate},
+ * {@code testCmsSwap} and {@code testParity} in full (ATM surface plus the
+ * official interpolated and SABR cubes). CMS market calibration and the other
+ * tests of the official file are deliberately not ported.
  *
  * <p>Dates, fixings, parameter branches, comparisons and tolerances are those
  * of the official test; no cached expected prices are used. The evaluation
@@ -82,6 +84,8 @@ public class CmsTest {
         IborIndex iborIndex;
 
         Handle<SwaptionVolatilityStructure> atmVol;
+        Handle<SwaptionVolatilityStructure> SabrVolCube1;
+        Handle<SwaptionVolatilityStructure> SabrVolCube2;
 
         List<GFunctionFactory.YieldCurveModel> yieldCurveModels;
         List<CmsCouponPricer> numericalPricers;
@@ -128,6 +132,74 @@ public class CmsTest {
                     new Actual365Fixed()), true);
 
             iborIndex = new Euribor6M(termStructure);
+
+            // Swaption volatility cubes, as official cms.cpp CommonVars.
+            List<Period> optionTenors = List.of(
+                    new Period(1, TimeUnit.YEARS),
+                    new Period(10, TimeUnit.YEARS),
+                    new Period(30, TimeUnit.YEARS));
+            List<Period> swapTenors = List.of(
+                    new Period(2, TimeUnit.YEARS),
+                    new Period(10, TimeUnit.YEARS),
+                    new Period(30, TimeUnit.YEARS));
+            double[] strikeSpreads = {-0.020, -0.005, 0.000, 0.005, 0.020};
+
+            int nRows = optionTenors.size() * swapTenors.size();
+            int nCols = strikeSpreads.length;
+            double[][] volSpreadsMatrix = {
+                    {0.0599, 0.0049, 0.0000, -0.0001, 0.0127},
+                    {0.0729, 0.0086, 0.0000, -0.0024, 0.0098},
+                    {0.0738, 0.0102, 0.0000, -0.0039, 0.0065},
+                    {0.0465, 0.0063, 0.0000, -0.0032, -0.0010},
+                    {0.0558, 0.0084, 0.0000, -0.0050, -0.0057},
+                    {0.0576, 0.0083, 0.0000, -0.0043, -0.0014},
+                    {0.0437, 0.0059, 0.0000, -0.0030, -0.0006},
+                    {0.0533, 0.0078, 0.0000, -0.0045, -0.0046},
+                    {0.0545, 0.0079, 0.0000, -0.0042, -0.0020}
+            };
+
+            List<List<Handle<Quote>>> volSpreads = new ArrayList<>(nRows);
+            for (int i = 0; i < nRows; ++i) {
+                List<Handle<Quote>> row = new ArrayList<>(nCols);
+                for (int j = 0; j < nCols; ++j)
+                    row.add(new Handle<>(
+                            new SimpleQuote(volSpreadsMatrix[i][j]), true));
+                volSpreads.add(row);
+            }
+
+            SwapIndex swapIndexBase = new EuriborSwapIsdaFixA(
+                    new Period(10, TimeUnit.YEARS), termStructure);
+            SwapIndex shortSwapIndexBase = new EuriborSwapIsdaFixA(
+                    new Period(2, TimeUnit.YEARS), termStructure);
+
+            boolean vegaWeightedSmileFit = false;
+
+            SabrVolCube2 = new Handle<>(
+                    new InterpolatedSwaptionVolatilityCube(atmVol,
+                            optionTenors, swapTenors, strikeSpreads, volSpreads,
+                            swapIndexBase, shortSwapIndexBase,
+                            vegaWeightedSmileFit), true);
+            SabrVolCube2.currentLink().enableExtrapolation();
+
+            List<List<Handle<Quote>>> guess = new ArrayList<>(nRows);
+            for (int i = 0; i < nRows; ++i) {
+                List<Handle<Quote>> row = new ArrayList<>(4);
+                row.add(new Handle<>(new SimpleQuote(0.2), true));
+                row.add(new Handle<>(new SimpleQuote(0.5), true));
+                row.add(new Handle<>(new SimpleQuote(0.4), true));
+                row.add(new Handle<>(new SimpleQuote(0.0), true));
+                guess.add(row);
+            }
+            boolean[] isParameterFixed = {false, true, false, false};
+            boolean isAtmCalibrated = false;
+
+            SabrVolCube1 = new Handle<>(
+                    new SabrSwaptionVolatilityCube(atmVol,
+                            optionTenors, swapTenors, strikeSpreads, volSpreads,
+                            swapIndexBase, shortSwapIndexBase,
+                            vegaWeightedSmileFit, guess, isParameterFixed,
+                            isAtmCalibrated), true);
+            SabrVolCube1.currentLink().enableExtrapolation();
 
             yieldCurveModels = Arrays.asList(
                     Standard,
@@ -288,7 +360,7 @@ public class CmsTest {
 
     /**
      * Official {@code testParity}: put-call parity for capped-floored CMS
-     * coupons (lognormal case), ATM volatility branch only.
+     * coupons (lognormal case) over the ATM surface and both official cubes.
      */
     @Test
     public void testParity() {
@@ -339,9 +411,12 @@ public class CmsTest {
                     startDate, endDate,
                     vars.iborIndex.dayCounter());
 
+            for (Handle<SwaptionVolatilityStructure> swaptionVol
+                    : List.of(vars.atmVol, vars.SabrVolCube1,
+                            vars.SabrVolCube2)) {
             for (int j = 0; j < vars.yieldCurveModels.size(); ++j) {
-                vars.numericalPricers.get(j).setSwaptionVolatility(vars.atmVol);
-                vars.analyticPricers.get(j).setSwaptionVolatility(vars.atmVol);
+                vars.numericalPricers.get(j).setSwaptionVolatility(swaptionVol);
+                vars.analyticPricers.get(j).setSwaptionVolatility(swaptionVol);
                 List<CmsCouponPricer> pricers = new ArrayList<>(2);
                 pricers.add(vars.numericalPricers.get(j));
                 pricers.add(vars.analyticPricers.get(j));
@@ -383,6 +458,7 @@ public class CmsTest {
 
                     assertTrue(difference <= tol, message);
                 }
+            }
             }
         }
     }
