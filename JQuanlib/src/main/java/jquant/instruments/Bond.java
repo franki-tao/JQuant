@@ -5,9 +5,10 @@ import jquant.Compounding;
 import jquant.Instrument;
 import jquant.PricingEngine;
 import jquant.Settings;
+import jquant.cashflows.AmortizingPayment;
 import jquant.cashflows.CashFlows;
 import jquant.cashflows.Coupon;
-import jquant.cashflows.SimpleCashFlow;
+import jquant.cashflows.Redemption;
 import jquant.pricingengines.bond.BondFunctions;
 import jquant.time.Calendar;
 import jquant.time.Date;
@@ -241,8 +242,18 @@ public class Bond extends Instrument {
      * Current notional at the given date. An empty date means the bond
      * settlement date; a date after the last notional schedule point means the
      * bond has already been redeemed and has zero notional.
+     *
+     * @throws IllegalArgumentException if the notional schedule is empty (for
+     *         example an uninitialized {@code Bond} with no cash flows); the
+     *         official C++ code would read {@code back()} of an empty vector
      */
     public double notional(Date d) {
+        // Official Bond::notional reads notionalSchedule_.back() without a
+        // guard, which is undefined for an empty schedule. Fail the Java
+        // precondition clearly instead of indexing an empty list.
+        QL_REQUIRE(notionalSchedule_ != null && !notionalSchedule_.isEmpty(),
+                "empty notional schedule");
+
         if (d == null || TimeUtils.equals(d, new Date()))
             d = settlementDate();
 
@@ -492,10 +503,12 @@ public class Bond extends Instrument {
                     : 100.0;
             double amount = (r / 100.0)
                     * (notionals_.get(i - 1) - notionals_.get(i));
-            // QuantLib uses Redemption/AmortizingPayment here; both are plain
-            // SimpleCashFlow subclasses with no extra behaviour.
-            CashFlow payment = new SimpleCashFlow(amount,
-                    notionalSchedule_.get(i).copy());
+            // Official: intermediate payments are AmortizingPayment, the last
+            // is Redemption. Both are always created, even for a zero amount.
+            CashFlow payment = i < notionalSchedule_.size() - 1
+                    ? new AmortizingPayment(amount,
+                            notionalSchedule_.get(i).copy())
+                    : new Redemption(amount, notionalSchedule_.get(i).copy());
             cashflows_.add(payment);
             redemptions_.add(payment);
         }
@@ -507,7 +520,7 @@ public class Bond extends Instrument {
 
     protected void setSingleRedemption(double notional, double redemption, Date date) {
         setSingleRedemption(notional,
-                new SimpleCashFlow(notional * redemption / 100.0, date.copy()));
+                new Redemption(notional * redemption / 100.0, date));
     }
 
     protected void setSingleRedemption(double notional, CashFlow redemption) {

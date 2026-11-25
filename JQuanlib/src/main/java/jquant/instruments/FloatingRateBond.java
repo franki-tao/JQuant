@@ -1,5 +1,6 @@
 package jquant.instruments;
 
+import jquant.CashFlow;
 import jquant.cashflows.IborLeg;
 import jquant.indexes.IborIndex;
 import jquant.time.BusinessDayConvention;
@@ -30,6 +31,12 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  *
  * <p>The bond registers with the Ibor index, as official does, so that fixing
  * notifications and forecast-curve relinks reach the bond (and its observers).
+ * After the cash flows are built it also registers with each cash flow. Official
+ * {@code FloatingRateBond} does not do this (it only {@code registerWith(iborIndex)}),
+ * so a caplet-vol quote can update the coupon while a cached bond NPV stays
+ * stale. The extra registration is a Java correctness enhancement, not an
+ * official BOOST behaviour, and it is not a second copy of the index
+ * subscription.
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/instruments/bonds/floatingratebond.cpp
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/instruments/bonds/floatingratebond.hpp
@@ -186,5 +193,11 @@ public class FloatingRateBond extends Bond {
         QL_REQUIRE(redemptions_.size() == 1, "multiple redemptions created");
 
         registerWith(iborIndex);
+        // Official stops at the index. Registering the cash flows lets a
+        // coupon that has already observed a caplet-vol / pricer update
+        // invalidate this bond's cached NPV and settlement value. Do not
+        // also port Bond::deepUpdate; the coupon is already up to date.
+        for (CashFlow cashflow : cashflows_)
+            registerWith(cashflow);
     }
 }
