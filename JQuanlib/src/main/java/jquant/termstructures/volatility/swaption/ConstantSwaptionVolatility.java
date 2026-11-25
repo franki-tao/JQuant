@@ -3,6 +3,8 @@ package jquant.termstructures.volatility.swaption;
 import jquant.Handle;
 import jquant.Quote;
 import jquant.quotes.SimpleQuote;
+import jquant.termstructures.SmileSection;
+import jquant.termstructures.volatility.FlatSmileSection;
 import jquant.termstructures.volatility.Sarb;
 import jquant.termstructures.volatility.Sarb.VolatilityType;
 import jquant.time.*;
@@ -16,7 +18,8 @@ import static jquant.termstructures.volatility.Sarb.VolatilityType.ShiftedLognor
  *
  * <p>Ported from QuantLib
  * {@code ql/termstructures/volatility/swaption/swaptionconstantvol.{hpp,cpp}}.
- * Smile sections are omitted; only the flat volatility and shift are exposed.
+ * The smile section is flat: its volatility is the current quote value,
+ * independent of the strike, with the structure's volatility type and shift.
  */
 public class ConstantSwaptionVolatility extends SwaptionVolatilityStructure {
     private final Handle<Quote> volatility_;
@@ -115,5 +118,19 @@ public class ConstantSwaptionVolatility extends SwaptionVolatilityStructure {
     @Override
     protected double volatilityImpl(double optionTime, double swapLength, double strike) {
         return volatility_.currentLink().value();
+    }
+
+    @Override
+    protected SmileSection smileSectionImpl(Date d, Period swapTenor) {
+        double atmVol = volatility_.currentLink().value();
+        return new FlatSmileSection(d, atmVol, dayCounter(), referenceDate(),
+                Double.NaN, volatilityType_, shift_);
+    }
+
+    @Override
+    protected SmileSection smileSectionImpl(double optionTime, double swapLength) {
+        double atmVol = volatility_.currentLink().value();
+        return new FlatSmileSection(optionTime, atmVol, dayCounter(),
+                Double.NaN, volatilityType_, shift_);
     }
 }

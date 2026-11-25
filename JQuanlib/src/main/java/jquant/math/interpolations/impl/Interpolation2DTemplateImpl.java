@@ -51,13 +51,15 @@ public abstract class Interpolation2DTemplateImpl extends Interpolation2DImpl {
         } else if (x > xValues[xValues.length - 1]) {
             return xValues.length - 2;
         } else {
+            // Same as the official upper_bound()-1: the first node equal to
+            // the first abscissa must locate in the first cell, not fail.
             for (int i = 0; i < xValues.length - 1; i++) {
-                if (x > xValues[i] && x <= xValues[i + 1]) {
+                if (x < xValues[i + 1]) {
                     return i;
                 }
             }
         }
-        return -1;
+        return xValues.length - 2;
     }
 
     @Override
@@ -86,13 +88,15 @@ public abstract class Interpolation2DTemplateImpl extends Interpolation2DImpl {
         } else if (y > yValues[yValues.length - 1]) {
             return yValues.length - 2;
         } else {
+            // Same as the official upper_bound()-1: the first node equal to
+            // the first ordinate must locate in the first cell, not fail.
             for (int i = 0; i < yValues.length - 1; i++) {
-                if (y > yValues[i] && y <= yValues[i + 1]) {
+                if (y < yValues[i + 1]) {
                     return i;
                 }
             }
         }
-        return -1;
+        return yValues.length - 2;
     }
 
     @Override
