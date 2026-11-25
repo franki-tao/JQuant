@@ -17,12 +17,15 @@ public class SimpleCashFlow extends CashFlow {
 
     public SimpleCashFlow(double amount, Date date) {
         amount_ = amount;
-        date_ = date;
+        // Official Date is a value type; Java Dates are mutable, so store an
+        // owned copy and never alias the caller's object.
+        date_ = date == null ? new Date() : date.copy();
     }
 
     @Override
     public Date date() {
-        return date_;
+        // Snapshot: the caller must not be able to mutate the stored date.
+        return date_.copy();
     }
 
     @Override

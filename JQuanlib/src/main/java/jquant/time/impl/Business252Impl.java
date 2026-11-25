@@ -2,6 +2,7 @@ package jquant.time.impl;
 
 import jquant.time.*;
 
+import java.util.HashMap;
 import java.util.Map;
 
 import static jquant.time.TimeUtils.sameMonth;
@@ -28,7 +29,9 @@ public class Business252Impl extends DayCounterImpl {
             // changed going the other way.)
             return calendar_.businessDaysBetween(d1, d2, true, false);
         } else if (sameYear(d1, d2)) {
-            Map<Integer, Map<Month, Integer>> cache = TimeUtils.monthlyFigures_.get(calendar_.name());
+            // Official monthlyFigures_[name] default-inserts an empty cache.
+            Map<Integer, Map<Month, Integer>> cache = TimeUtils.monthlyFigures_.computeIfAbsent(
+                    calendar_.name(), k -> new HashMap<>());
             int total = 0;
             Date d;
             // first, we get to the beginning of next month.
@@ -45,8 +48,10 @@ public class Business252Impl extends DayCounterImpl {
             total += calendar_.businessDaysBetween(d, d2);
             return total;
         } else {
-            Map<Integer, Map<Month, Integer>> cache = TimeUtils.monthlyFigures_.get(calendar_.name());
-            Map<Integer, Integer> outerCache = TimeUtils.yearlyFigures_.get(calendar_.name());
+            Map<Integer, Map<Month, Integer>> cache = TimeUtils.monthlyFigures_.computeIfAbsent(
+                    calendar_.name(), k -> new HashMap<>());
+            Map<Integer, Integer> outerCache = TimeUtils.yearlyFigures_.computeIfAbsent(
+                    calendar_.name(), k -> new HashMap<>());
             int total = 0;
             Date d;
             // first, we get to the beginning of next year.
@@ -84,27 +89,33 @@ public class Business252Impl extends DayCounterImpl {
     }
 
     private int businessDays(Map<Integer, Map<Month, Integer>> cache, final Calendar calendar, Month month, int year) {
-        if (cache.get(year).get(month) == 0) {
+        // Official cache[year][month] default-inserts 0, then computes if 0.
+        Map<Month, Integer> yearCache = cache.computeIfAbsent(year, k -> new HashMap<>());
+        Integer stored = yearCache.get(month);
+        if (stored == null || stored == 0) {
             // calculate and store.
             Date d1 = new Date(1, month, year);
             Date d2 = d1.add(TimeUtils.multiply(1, TimeUnit.MONTHS));
-            cache.get(year).put(month, calendar.businessDaysBetween(d1, d2));
+            stored = calendar.businessDaysBetween(d1, d2);
+            yearCache.put(month, stored);
         }
-        return cache.get(year).get(month);
+        return stored;
     }
 
     private int businessDays(Map<Integer, Integer> outerCache,
                              Map<Integer, Map<Month, Integer>> cache,
                              final Calendar calendar, int year) {
-        if (outerCache.get(year) == 0) {
+        Integer stored = outerCache.get(year);
+        if (stored == null || stored == 0) {
             // calculate and store.
             int total = 0;
             for (int i = 1; i <= 12; ++i) {
                 total += businessDays(cache, calendar,
                         Month.fromValue(i), year);
             }
-            outerCache.put(year, total);
+            stored = total;
+            outerCache.put(year, stored);
         }
-        return outerCache.get(year);
+        return stored;
     }
 }

@@ -30,6 +30,7 @@ import jquant.time.Period;
 import jquant.time.Schedule;
 import jquant.time.TimeUnit;
 import jquant.time.calendars.Australia;
+import jquant.time.calendars.Brazil;
 import jquant.time.calendars.NullCalendar;
 import jquant.time.calendars.Target;
 import jquant.time.calendars.UnitedKingdom;
@@ -37,6 +38,7 @@ import jquant.time.calendars.UnitedStates;
 import jquant.time.daycounters.Actual360;
 import jquant.time.daycounters.Actual365Fixed;
 import jquant.time.daycounters.ActualActual;
+import jquant.time.daycounters.Business252;
 import jquant.time.daycounters.Thirty360;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,7 +55,8 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Official QuantLib {@code bonds.cpp} cases for fixed-coupon and zero-coupon
- * bonds: {@code testCachedZero}, {@code testYield}, {@code testAtmRate},
+ * bonds: {@code testCached}, {@code testCachedZero},
+ * {@code testBrazilianCached}, {@code testYield}, {@code testAtmRate},
  * {@code testZspread}, {@code testTheoretical}, {@code testBasisPointValue},
  * {@code testYieldInFinalCouponPeriod},
  * {@code testYieldInFinalCouponPeriodWithLateRedemption},
@@ -124,6 +127,274 @@ public class BondsTest {
     }
 
     @Test
+    public void testCached() {
+        // Official testCached: price/yield calculation against cached values,
+        // 22 Nov 2004, NullCalendar, settlementDays 1, flat 3% Actual/360
+        // discount curve, semiannual frequency, tolerance 1.0e-6. CommonVars
+        // sets the evaluation date first; official then overwrites it with
+        // 22 Nov 2004.
+        CommonVars vars = new CommonVars();
+
+        // with implicit settlement calculation:
+
+        Date today = new Date(22, Month.NOVEMBER, 2004);
+        Settings.instance.evaluationDate().equal(today);
+
+        Calendar bondCalendar = new NullCalendar();
+
+        int settlementDays = 1;
+
+        YieldTermStructure discountCurve = new FlatForward(today, 0.03, new Actual360());
+
+        // actual market values from the evaluation date
+
+        Frequency freq = Frequency.SEMIANNUAL;
+        // This means that this bond has a short first coupon, as the
+        // first coupon payment is april 30th and therefore the notional
+        // first coupon is on October 30th 2004. Changing the EOM
+        // convention to true will correct this so that the coupon starts
+        // on October 31st and the first coupon is complete. This is
+        // effectively assumed by the no-schedule daycounter.
+        Schedule sch1 = new Schedule(
+                new Date(31, Month.OCTOBER, 2004),
+                new Date(31, Month.OCTOBER, 2006), new Period(freq), bondCalendar,
+                BusinessDayConvention.UNADJUSTED, BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, true, new Date(), new Date());
+        DayCounter bondDayCount1 = new ActualActual(ActualActual.Convention.ISMA, sch1);
+        DayCounter bondDayCount1NoSchedule = new ActualActual(ActualActual.Convention.ISMA);
+
+        FixedRateBond bond1 = new FixedRateBond(
+                settlementDays, vars.faceAmount, sch1,
+                new double[] {0.025},
+                bondDayCount1, BusinessDayConvention.MODIFIED_FOLLOWING,
+                100.0, new Date(1, Month.NOVEMBER, 2004));
+        FixedRateBond bond1NoSchedule = new FixedRateBond(
+                settlementDays, vars.faceAmount, sch1,
+                new double[] {0.025},
+                bondDayCount1NoSchedule, BusinessDayConvention.MODIFIED_FOLLOWING,
+                100.0, new Date(1, Month.NOVEMBER, 2004));
+
+        DiscountingBondEngine bondEngine = new DiscountingBondEngine(discountCurve);
+        bond1.setPricingEngine(bondEngine);
+        bond1NoSchedule.setPricingEngine(bondEngine);
+
+        double marketPrice1 = 99.203125;
+        double marketYield1 = 0.02925;
+
+        Schedule sch2 = new Schedule(
+                new Date(15, Month.NOVEMBER, 2004),
+                new Date(15, Month.NOVEMBER, 2009), new Period(freq), bondCalendar,
+                BusinessDayConvention.UNADJUSTED, BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false, new Date(), new Date());
+        DayCounter bondDayCount2 = new ActualActual(ActualActual.Convention.ISMA, sch2);
+        DayCounter bondDayCount2NoSchedule = new ActualActual(ActualActual.Convention.ISMA);
+
+        FixedRateBond bond2 = new FixedRateBond(
+                settlementDays, vars.faceAmount, sch2,
+                new double[] {0.035},
+                bondDayCount2, BusinessDayConvention.MODIFIED_FOLLOWING,
+                100.0, new Date(15, Month.NOVEMBER, 2004));
+        FixedRateBond bond2NoSchedule = new FixedRateBond(
+                settlementDays, vars.faceAmount, sch2,
+                new double[] {0.035},
+                bondDayCount2NoSchedule, BusinessDayConvention.MODIFIED_FOLLOWING,
+                100.0, new Date(15, Month.NOVEMBER, 2004));
+
+        bond2.setPricingEngine(bondEngine);
+        bond2NoSchedule.setPricingEngine(bondEngine);
+
+        double marketPrice2 = 99.6875;
+        double marketYield2 = 0.03569;
+
+        // calculated values
+
+        double cachedPrice1a = 99.204505, cachedPrice2a = 99.687192;
+        double cachedPrice1b = 98.943393, cachedPrice2b = 101.986794;
+        double cachedYield1a = 0.029257, cachedYield2a = 0.035689;
+        double cachedYield1b = 0.029045, cachedYield2b = 0.035375;
+        double cachedYield1c = 0.030423, cachedYield2c = 0.030432;
+
+        // check
+        double tolerance = 1.0e-6;
+
+        assertEquals(cachedPrice1a,
+                BondFunctions.cleanPrice(bond1, marketYield1, bondDayCount1,
+                        Compounding.Compounded, freq),
+                tolerance,
+                "failed to reproduce cached price with schedule for bond 1:");
+        assertEquals(cachedPrice1a,
+                BondFunctions.cleanPrice(bond1NoSchedule, marketYield1,
+                        bondDayCount1NoSchedule, Compounding.Compounded, freq),
+                tolerance,
+                "failed to reproduce cached price with no schedule for bond 1:");
+        assertEquals(cachedPrice1b,
+                bond1.cleanPrice(),
+                tolerance,
+                "failed to reproduce cached clean price with schedule for bond 1:");
+        assertEquals(cachedPrice1b,
+                bond1NoSchedule.cleanPrice(),
+                tolerance,
+                "failed to reproduce cached clean price with no schdule for bond 1:");
+        assertEquals(cachedYield1a,
+                BondFunctions.yield(bond1,
+                        new Bond.Price(marketPrice1, Bond.Price.Type.CLEAN),
+                        bondDayCount1, Compounding.Compounded, freq),
+                tolerance,
+                "failed to reproduce cached compounded yield with schedule for bond 1:");
+        assertEquals(cachedYield1a,
+                BondFunctions.yield(bond1NoSchedule,
+                        new Bond.Price(marketPrice1, Bond.Price.Type.CLEAN),
+                        bondDayCount1NoSchedule, Compounding.Compounded, freq),
+                tolerance,
+                "failed to reproduce cached compounded yield with no schedule for bond 1:");
+        assertEquals(cachedYield1b,
+                BondFunctions.yield(bond1,
+                        new Bond.Price(marketPrice1, Bond.Price.Type.CLEAN),
+                        bondDayCount1, Compounding.Continuous, freq),
+                tolerance,
+                "failed to reproduce cached continuous yield with schedule for bond 1:");
+        assertEquals(cachedYield1b,
+                BondFunctions.yield(bond1NoSchedule,
+                        new Bond.Price(marketPrice1, Bond.Price.Type.CLEAN),
+                        bondDayCount1NoSchedule, Compounding.Continuous, freq),
+                tolerance,
+                "failed to reproduce cached continuous yield with no schedule for bond 1:");
+        assertEquals(cachedYield1c,
+                BondFunctions.yield(bond1,
+                        new Bond.Price(bond1.cleanPrice(), Bond.Price.Type.CLEAN),
+                        bondDayCount1, Compounding.Continuous, freq,
+                        bond1.settlementDate()),
+                tolerance,
+                "failed to reproduce cached continuous yield with schedule for bond 1:");
+        assertEquals(cachedYield1c,
+                BondFunctions.yield(bond1NoSchedule,
+                        new Bond.Price(bond1NoSchedule.cleanPrice(), Bond.Price.Type.CLEAN),
+                        bondDayCount1NoSchedule, Compounding.Continuous, freq,
+                        bond1.settlementDate()),
+                tolerance,
+                "failed to reproduce cached continuous yield with no schedule for bond 1:");
+
+        // Now bond 2
+        assertEquals(cachedPrice2a,
+                BondFunctions.cleanPrice(bond2, marketYield2, bondDayCount2,
+                        Compounding.Compounded, freq),
+                tolerance,
+                "failed to reproduce cached price with schedule for bond 2");
+        assertEquals(cachedPrice2a,
+                BondFunctions.cleanPrice(bond2NoSchedule, marketYield2,
+                        bondDayCount2NoSchedule, Compounding.Compounded, freq),
+                tolerance,
+                "failed to reproduce cached price with no schedule for bond 2:");
+        assertEquals(cachedPrice2b,
+                bond2.cleanPrice(),
+                tolerance,
+                "failed to reproduce cached clean price with schedule for bond 2:");
+        assertEquals(cachedPrice2b,
+                bond2NoSchedule.cleanPrice(),
+                tolerance,
+                "failed to reproduce cached clean price with no schedule for bond 2:");
+        assertEquals(cachedYield2a,
+                BondFunctions.yield(bond2,
+                        new Bond.Price(marketPrice2, Bond.Price.Type.CLEAN),
+                        bondDayCount2, Compounding.Compounded, freq),
+                tolerance,
+                "failed to reproduce cached compounded yield with schedule for bond 2:");
+        assertEquals(cachedYield2a,
+                BondFunctions.yield(bond2NoSchedule,
+                        new Bond.Price(marketPrice2, Bond.Price.Type.CLEAN),
+                        bondDayCount2NoSchedule, Compounding.Compounded, freq),
+                tolerance,
+                "failed to reproduce cached compounded yield with no schedule for bond 2:");
+        assertEquals(cachedYield2b,
+                BondFunctions.yield(bond2,
+                        new Bond.Price(marketPrice2, Bond.Price.Type.CLEAN),
+                        bondDayCount2, Compounding.Continuous, freq),
+                tolerance,
+                "failed to reproduce chached continuous yield with schedule for bond 2:");
+        assertEquals(cachedYield2b,
+                BondFunctions.yield(bond2NoSchedule,
+                        new Bond.Price(marketPrice2, Bond.Price.Type.CLEAN),
+                        bondDayCount2NoSchedule, Compounding.Continuous, freq),
+                tolerance,
+                "failed to reproduce cached continuous yield with schedule for bond 2:");
+        assertEquals(cachedYield2c,
+                BondFunctions.yield(bond2,
+                        new Bond.Price(bond2.cleanPrice(), Bond.Price.Type.CLEAN),
+                        bondDayCount2, Compounding.Continuous, freq,
+                        bond2.settlementDate()),
+                tolerance,
+                "failed to reproduce cached continuous yield for bond 2 with schedule:");
+        assertEquals(cachedYield2c,
+                BondFunctions.yield(bond2NoSchedule,
+                        new Bond.Price(bond2NoSchedule.cleanPrice(), Bond.Price.Type.CLEAN),
+                        bondDayCount2NoSchedule, Compounding.Continuous, freq,
+                        bond2NoSchedule.settlementDate()),
+                tolerance,
+                "failed to reproduce cached continuous yield for bond 2 with no schedule:");
+
+        // with explicit settlement date:
+
+        Schedule sch3 = new Schedule(
+                new Date(30, Month.NOVEMBER, 2004),
+                new Date(30, Month.NOVEMBER, 2006), new Period(freq),
+                new UnitedStates(UnitedStates.Market.GovernmentBond),
+                BusinessDayConvention.UNADJUSTED, BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false, new Date(), new Date());
+        DayCounter bondDayCount3 = new ActualActual(ActualActual.Convention.ISMA, sch3);
+        DayCounter bondDayCount3NoSchedule = new ActualActual(ActualActual.Convention.ISMA);
+
+        FixedRateBond bond3 = new FixedRateBond(
+                settlementDays, vars.faceAmount, sch3,
+                new double[] {0.02875},
+                bondDayCount3,
+                BusinessDayConvention.MODIFIED_FOLLOWING,
+                100.0, new Date(30, Month.NOVEMBER, 2004));
+        FixedRateBond bond3NoSchedule = new FixedRateBond(
+                settlementDays, vars.faceAmount, sch3,
+                new double[] {0.02875},
+                bondDayCount3NoSchedule,
+                BusinessDayConvention.MODIFIED_FOLLOWING,
+                100.0, new Date(30, Month.NOVEMBER, 2004));
+
+        bond3.setPricingEngine(bondEngine);
+        bond3NoSchedule.setPricingEngine(bondEngine);
+
+        double marketYield3 = 0.02997;
+
+        Date settlementDate = new Date(30, Month.NOVEMBER, 2004);
+        double cachedPrice3 = 99.764759;
+
+        assertEquals(cachedPrice3,
+                BondFunctions.cleanPrice(bond3, marketYield3, bondDayCount3,
+                        Compounding.Compounded, freq, settlementDate),
+                tolerance,
+                "Failed to reproduce cached price for bond 3 with schedule");
+        assertEquals(cachedPrice3,
+                BondFunctions.cleanPrice(bond3NoSchedule, marketYield3,
+                        bondDayCount3NoSchedule, Compounding.Compounded, freq,
+                        settlementDate),
+                tolerance,
+                "Failed to reproduce cached price for bond 3 with no schedule");
+
+        // this should give the same result since the issue date is the
+        // earliest possible settlement date
+
+        Settings.instance.evaluationDate().equal(new Date(22, Month.NOVEMBER, 2004));
+        assertEquals(cachedPrice3,
+                BondFunctions.cleanPrice(bond3, marketYield3, bondDayCount3,
+                        Compounding.Compounded, freq),
+                tolerance,
+                "Failed to reproduce the cached price for bond 3 with schedule "
+                        + "and the earlierst possible settlment date");
+        assertEquals(cachedPrice3,
+                BondFunctions.cleanPrice(bond3NoSchedule, marketYield3,
+                        bondDayCount3NoSchedule, Compounding.Compounded, freq),
+                tolerance,
+                "Failed to reproduce the cached price for bond 3 with no schedule "
+                        + "and the earlierst possible settlment date");
+    }
+
+    @Test
     public void testCachedZero() {
         // Official testCachedZero: 22 Nov 2004, US GovernmentBond, face 1e6,
         // ModifiedFollowing, redemption 100, issue 30 Nov 2004, 3% continuous
@@ -165,6 +436,88 @@ public class BondsTest {
         bond3.setPricingEngine(bondEngine);
         assertEquals(94.098006, bond3.cleanPrice(), tolerance,
                 "failed to reproduce cached zero-coupon price (2006)");
+    }
+
+    @Test
+    public void testBrazilianCached() {
+        // Official testBrazilianCached: Andima NTN-F prices against cached
+        // values. The tolerance is high because Andima truncates yields.
+        // Official constructs CommonVars even though its face amount is not
+        // used here (faceAmount is 1000, not vars.faceAmount).
+        CommonVars vars = new CommonVars();
+
+        int settlementDays = 1;
+        double faceAmount = 1000.0;
+        Date today = new Date(6, Month.JUNE, 2007);
+        Date issueDate = new Date(1, Month.JANUARY, 2007);
+
+        // The tolerance is high because Andima truncate yields
+        double tolerance = 1.0e-4;
+
+        // Reset evaluation date
+        Settings.instance.evaluationDate().equal(today);
+
+        // NTN-F maturity dates
+        Date[] maturityDates = {
+                new Date(1, Month.JANUARY, 2008),
+                new Date(1, Month.JANUARY, 2010),
+                new Date(1, Month.JULY, 2010),
+                new Date(1, Month.JANUARY, 2012),
+                new Date(1, Month.JANUARY, 2014),
+                new Date(1, Month.JANUARY, 2017)
+        };
+
+        // Andima NTN-F yields
+        double[] yields = {
+                0.114614, 0.105726, 0.105328, 0.104283, 0.103218, 0.102948
+        };
+
+        // Andima NTN-F prices
+        double[] prices = {
+                1034.63031372, 1030.09919487, 1029.98307160,
+                1028.13585068, 1028.33383817, 1026.19716497
+        };
+
+        List<InterestRate> couponRates = List.of(new InterestRate(
+                0.1, new Thirty360(Thirty360.Convention.BondBasis),
+                Compounding.Compounded, Frequency.ANNUAL));
+
+        for (int bondIndex = 0; bondIndex < maturityDates.length; bondIndex++) {
+
+            InterestRate yield = new InterestRate(
+                    yields[bondIndex], new Business252(new Brazil()),
+                    Compounding.Compounded, Frequency.ANNUAL);
+
+            Schedule schedule = new Schedule(
+                    new Date(1, Month.JANUARY, 2007),
+                    maturityDates[bondIndex], new Period(Frequency.SEMIANNUAL),
+                    new Brazil(Brazil.Market.Settlement),
+                    BusinessDayConvention.UNADJUSTED, BusinessDayConvention.UNADJUSTED,
+                    DateGenerationRule.BACKWARD, false, new Date(), new Date());
+
+            List<CashFlow> coupons = new FixedRateLeg(schedule)
+                    .withNotionals(faceAmount)
+                    .withCouponRates(couponRates)
+                    .withPaymentAdjustment(BusinessDayConvention.FOLLOWING)
+                    .leg();
+
+            Bond bond = new Bond(settlementDays,
+                    schedule.calendar(),
+                    issueDate,
+                    coupons);
+
+            double cachedPrice = prices[bondIndex];
+            double price = faceAmount *
+                    (BondFunctions.cleanPrice(bond, yield.rate(), yield.dayCounter(),
+                            yield.compounding(), yield.frequency(),
+                            today) + bond.accruedAmount(today)) / 100.0;
+
+            assertEquals(cachedPrice, price, tolerance,
+                    "failed to reproduce Andima cached price:\n"
+                            + "    calculated: " + price + "\n"
+                            + "    expected:   " + cachedPrice + "\n"
+                            + "    error:      " + (price - cachedPrice) + "\n");
+        }
     }
 
     @Test
