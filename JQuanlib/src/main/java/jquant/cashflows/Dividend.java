@@ -15,13 +15,15 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 public abstract class Dividend extends CashFlow {
     protected Date date_;
     public Dividend(final Date date) {
-        date_ = date;
+        // Official Date is a value type; store an owned copy (empty serial 0
+        // stays an empty Date through Date.copy()).
+        date_ = date == null ? new Date() : date.copy();
     }
     //! \name Event interface
     //@{
     @Override
     public Date date() {
-        return date_;
+        return date_.copy();
     }
     //@}
     //! \name CashFlow interface

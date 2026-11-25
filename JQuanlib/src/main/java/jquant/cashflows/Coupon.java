@@ -28,28 +28,36 @@ public abstract class Coupon extends CashFlow {
                   final Date refPeriodStart,
                   final Date refPeriodEnd,
                   final Date exCouponDate) {
-        paymentDate_ = paymentDate;
+        // Official Date is a value type; Java Dates are mutable, so every
+        // stored date is an owned copy rather than an alias of the caller's.
+        paymentDate_ = copyOrEmpty(paymentDate);
         nominal_ = nominal;
-        accrualStartDate_ = accrualStartDate;
-        accrualEndDate_ = accrualEndDate;
-        refPeriodStart_ = refPeriodStart;
-        refPeriodEnd_ = refPeriodEnd;
-        exCouponDate_ = exCouponDate;
+        accrualStartDate_ = copyOrEmpty(accrualStartDate);
+        accrualEndDate_ = copyOrEmpty(accrualEndDate);
+        refPeriodStart_ = copyOrEmpty(refPeriodStart);
+        refPeriodEnd_ = copyOrEmpty(refPeriodEnd);
+        exCouponDate_ = copyOrEmpty(exCouponDate);
         accrualPeriod_ = Double.NaN;
+        // The official fallback for an empty reference period must not alias
+        // the accrual dates, or mutating one accessor result would edit both.
         if (TimeUtils.equals(refPeriodStart_, new Date()))
-            refPeriodStart_ = accrualStartDate_;
+            refPeriodStart_ = accrualStartDate_.copy();
         if (TimeUtils.equals(refPeriodEnd_, new Date()))
-            refPeriodEnd_ = accrualEndDate_;
+            refPeriodEnd_ = accrualEndDate_.copy();
+    }
+
+    private static Date copyOrEmpty(Date date) {
+        return date == null ? new Date() : date.copy();
     }
 
     @Override
     public Date date() {
-        return paymentDate_;
+        return paymentDate_.copy();
     }
 
     @Override
     public Date exCouponDate() {
-        return exCouponDate_;
+        return exCouponDate_.copy();
     }
 
     public double nominal() {
@@ -58,22 +66,22 @@ public abstract class Coupon extends CashFlow {
 
     //! start of the accrual period
     public final Date accrualStartDate() {
-        return accrualStartDate_;
+        return accrualStartDate_.copy();
     }
 
     //! end of the accrual period
     public final Date accrualEndDate() {
-        return accrualEndDate_;
+        return accrualEndDate_.copy();
     }
 
     //! start date of the reference period
     public final Date referencePeriodStart() {
-        return refPeriodStart_;
+        return refPeriodStart_.copy();
     }
 
     //! end date of the reference period
     public final Date referencePeriodEnd() {
-        return refPeriodEnd_;
+        return refPeriodEnd_.copy();
     }
 
     //! accrual period as fraction of year

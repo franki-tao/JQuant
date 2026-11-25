@@ -457,20 +457,23 @@ public class Schedule {
     }
 
     public Date at(int i) {
-        return dates_.get(i);
+        return dates_.get(i).copy();
     }
 
     public Date date(int i) {
-        return dates_.get(i);
+        return dates_.get(i).copy();
     }
 
     /**
-     * The schedule's dates. The returned list is a copy so callers cannot
-     * structurally mutate the schedule; the Date elements are the schedule's
-     * own (as with {@link #date(int)}), not the constructor caller's objects.
+     * The schedule's dates. Both the list and every Date element are copies,
+     * so callers can neither structurally mutate the schedule nor edit a
+     * stored date through a returned element.
      */
     public List<Date> dates() {
-        return new ArrayList<>(dates_);
+        List<Date> result = new ArrayList<>(dates_.size());
+        for (Date date : dates_)
+            result.add(date.copy());
+        return result;
     }
 
     public boolean empty() {
@@ -479,18 +482,18 @@ public class Schedule {
 
     public Date front() {
         QL_REQUIRE(!dates_.isEmpty(), "no front date for empty schedule");
-        return dates_.get(0);
+        return dates_.get(0).copy();
     }
 
     public Date back() {
         QL_REQUIRE(!dates_.isEmpty(), "no back date for empty schedule");
-        return dates_.get(dates_.size() - 1);
+        return dates_.get(dates_.size() - 1).copy();
     }
 
     public Date previousDate(final Date refDate) {
         int res = lower_bound(refDate);
         if (res != 0)
-            return dates_.get(--res);
+            return dates_.get(--res).copy();
         else
             return new Date();
     }
@@ -498,7 +501,7 @@ public class Schedule {
     public Date nextDate(final Date refDate) {
         int res = lower_bound(refDate);
         if (res != dates_.size())
-            return dates_.get(res);
+            return dates_.get(res).copy();
         else
             return new Date();
     }
@@ -518,7 +521,7 @@ public class Schedule {
 
     public final List<Boolean> isRegular() {
         QL_REQUIRE(!isRegular_.isEmpty(), "full interface (isRegular) not available");
-        return isRegular_;
+        return new ArrayList<>(isRegular_);
     }
 
     public final Calendar calendar() {
@@ -526,11 +529,11 @@ public class Schedule {
     }
 
     public final Date startDate() {
-        return dates_.get(0);
+        return dates_.get(0).copy();
     }
 
     public final Date endDate() {
-        return dates_.get(dates_.size() - 1);
+        return dates_.get(dates_.size() - 1).copy();
     }
 
     public boolean hasTenor() {
@@ -664,8 +667,9 @@ public class Schedule {
         Schedule result = new Schedule(new ArrayList<>(this.dates_), this.calendar_, this.convention_,
                 this.terminationDateConvention_, this.tenor_, this.rule_, this.endOfMonth_,
                 new ArrayList<>(this.isRegular_));
-        result.firstDate_ = this.firstDate_ != null ? this.firstDate_ : new Date();
-        result.nextToLastDate_ = this.nextToLastDate_ != null ? this.nextToLastDate_ : new Date();
+        result.firstDate_ = this.firstDate_ != null ? this.firstDate_.copy() : new Date();
+        result.nextToLastDate_ = this.nextToLastDate_ != null
+                ? this.nextToLastDate_.copy() : new Date();
         return result;
     }
 }
