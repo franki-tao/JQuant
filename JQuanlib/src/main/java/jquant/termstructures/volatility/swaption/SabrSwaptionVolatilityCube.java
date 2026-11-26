@@ -56,10 +56,13 @@ public class SabrSwaptionVolatilityCube extends SwaptionVolatilityCube {
     /** Official tolerance used when the smile fit is vega-weighted. */
     private static final double SWAPTIONVOLCUBE_VEGAWEIGHTED_TOL = 15.0e-4;
 
-    private Cube marketVolCube_;
-    private Cube volCubeAtmCalibrated_;
-    private Cube sparseParameters_;
-    private Cube denseParameters_;
+    private Cube marketVolCube_ = new Cube();
+    private Cube volCubeAtmCalibrated_ = new Cube();
+    private Cube sparseParameters_ = new Cube();
+    // Official Cube is a value member default-constructed to empty.
+    // When isAtmCalibrated is false, denseParameters_ is never filled;
+    // denseSabrParameters() then browses the official default (empty) cube.
+    private Cube denseParameters_ = new Cube();
     private List<List<SmileSection>> sparseSmiles_;
 
     private final List<List<Handle<Quote>>> parametersGuessQuotes_;
@@ -921,6 +924,20 @@ public class SabrSwaptionVolatilityCube extends SwaptionVolatilityCube {
         private final boolean backwardFlat_;
         private Interpolation2D[] interpolators_;
 
+        /** Official {@code Cube() = default}: empty axes, zero layers. */
+        public Cube() {
+            optionTimes_ = new double[0];
+            swapLengths_ = new double[0];
+            optionDates_ = new Date[0];
+            swapTenors_ = new Period[0];
+            nLayers_ = 0;
+            points_ = new double[0][][];
+            transposedPoints_ = new double[0][][];
+            interpolators_ = new Interpolation2D[0];
+            extrapolation_ = true;
+            backwardFlat_ = false;
+        }
+
         public Cube(Date[] optionDates,
                     Period[] swapTenors,
                     double[] optionTimes,
@@ -1160,6 +1177,10 @@ public class SabrSwaptionVolatilityCube extends SwaptionVolatilityCube {
 
         public Matrix browse() {
             int n = swapLengths_.length * optionTimes_.length;
+            // Official default Cube has empty axes; Matrix(0, nLayers+2)
+            // matches official browse() of a default-constructed Cube.
+            if (n == 0)
+                return new Matrix(0, nLayers_ + 2, 0.0);
             double[][] result = new double[n][nLayers_ + 2];
             for (int i = 0; i < swapLengths_.length; ++i) {
                 for (int j = 0; j < optionTimes_.length; ++j) {
