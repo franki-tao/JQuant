@@ -12,6 +12,8 @@ import jquant.math.Matrix;
 import jquant.math.integrals.SegmentIntegral;
 import jquant.math.optimization.EndCriteria;
 import jquant.math.statistics.GenericRiskStatistics;
+import jquant.methods.montecarlo.GenericLongstaffSchwartzRegression;
+import jquant.methods.montecarlo.NodeData;
 import jquant.models.marketmodels.AccountingEngine;
 import jquant.models.marketmodels.BrownianGeneratorFactory;
 import jquant.models.marketmodels.EvolutionDescription;
@@ -27,7 +29,10 @@ import jquant.models.marketmodels.Utilities;
 import jquant.models.marketmodels.browniangenerators.MTBrownianGeneratorFactory;
 import jquant.models.marketmodels.browniangenerators.SobolBrownianGeneratorBase;
 import jquant.models.marketmodels.browniangenerators.SobolBrownianGeneratorFactory;
+import jquant.models.marketmodels.callability.CollectNodeData;
+import jquant.models.marketmodels.callability.LongstaffSchwartzExerciseStrategy;
 import jquant.models.marketmodels.callability.NothingExerciseValue;
+import jquant.models.marketmodels.callability.SwapBasisSystem;
 import jquant.models.marketmodels.callability.SwapRateTrigger;
 import jquant.models.marketmodels.callability.UpperBoundEngine;
 import jquant.models.marketmodels.correlations.ExponentialCorrelations;
@@ -1771,6 +1776,176 @@ public class MarketModelTest {
                             UpperBoundEngine uEngine = new UpperBoundEngine(
                                     evolver, innerEvolvers, receiverSwap, nullRebate,
                                     receiverSwap, nullRebate, naifStrategy,
+                                    initialNumeraireValue);
+                            GenericRiskStatistics uStats = new GenericRiskStatistics();
+                            uEngine.multiplePathValues(uStats, 255, 256);
+                            double delta = uStats.mean();
+                            double deltaError = uStats.errorEstimate();
+                            if (printReport_)
+                                System.out.println("    upper bound delta: "
+                                        + rate(delta) + " +- " + rate(deltaError));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void testCallableSwapLS() {
+        System.out.println("Pricing callable swap with Longstaff-Schwartz exercise "
+                + "strategy in a LIBOR market model...");
+        setup();
+
+        double fixedRate = 0.04;
+
+        // 0. a payer swap
+        MultiStepSwap payerSwap = new MultiStepSwap(rateTimes, accruals, accruals,
+                paymentTimes, fixedRate, true);
+
+        // 1. the equivalent receiver swap
+        MultiStepSwap receiverSwap = new MultiStepSwap(rateTimes, accruals, accruals,
+                paymentTimes, fixedRate, false);
+
+        // exercise schedule
+        List<Double> exerciseTimes = new ArrayList<>(rateTimes);
+        exerciseTimes.remove(exerciseTimes.size() - 1);
+        //std::vector<Rate> exerciseTimes;
+        //for (Size i=2; i<rateTimes.size()-1; i+=2)
+        //    exerciseTimes.push_back(rateTimes[i]);
+
+        // naif exercise strategy
+        List<Double> swapTriggers = filledList(exerciseTimes.size(), fixedRate);
+        SwapRateTrigger naifStrategy = new SwapRateTrigger(rateTimes, swapTriggers,
+                exerciseTimes);
+
+        // Longstaff-Schwartz exercise strategy
+        List<List<NodeData>> collectedData = new ArrayList<>();
+        List<List<Double>> basisCoefficients = new ArrayList<>();
+        NothingExerciseValue control = new NothingExerciseValue(rateTimes);
+        SwapBasisSystem basisSystem = new SwapBasisSystem(rateTimes, exerciseTimes);
+        NothingExerciseValue nullRebate = new NothingExerciseValue(rateTimes);
+
+        CallSpecifiedMultiProduct dummyProduct =
+                new CallSpecifiedMultiProduct(receiverSwap, naifStrategy,
+                        new ExerciseAdapter(nullRebate));
+
+        EvolutionDescription evolution = dummyProduct.evolution();
+
+        MarketModelType[] marketModels = {
+                // CalibratedMM,
+                MarketModelType.ExponentialCorrelationFlatVolatility,
+                MarketModelType.ExponentialCorrelationAbcdVolatility};
+        for (MarketModelType j : marketModels) {
+
+            int[] testedFactors = {4, // 8,
+                    todaysForwards.size()};
+            for (int factors : testedFactors) {
+                // Composite's ProductSuggested is the Terminal one
+                MeasureType[] measures = {
+                        // ProductSuggested,
+                        // MoneyMarketPlus,
+                        MeasureType.MoneyMarket
+                        // Terminal
+                };
+                for (MeasureType measure : measures) {
+                    List<Integer> numeraires = makeMeasure(dummyProduct, measure);
+
+                    boolean logNormal = true;
+                    MarketModel marketModel =
+                            makeMarketModel(logNormal, evolution, factors, j);
+
+                    EvolverType[] evolvers = {EvolverType.Pc, EvolverType.Balland,
+                            EvolverType.Ipc};
+                    MarketModelEvolver evolver;
+                    int stop = EvolutionDescription.isInTerminalMeasure(evolution,
+                            numeraires) ? 0 : 1;
+                    for (int i = 0; i < evolvers.length - stop; i++) {
+
+                        for (int n = 0; n < 1; n++) {
+                            // MTBrownianGeneratorFactory generatorFactory(seed_);
+                            SobolBrownianGeneratorFactory generatorFactory =
+                                    new SobolBrownianGeneratorFactory(
+                                            SobolBrownianGeneratorBase.Ordering.Diagonal,
+                                            seed_);
+
+                            evolver = makeMarketModelEvolver(marketModel, numeraires,
+                                    generatorFactory, evolvers[i]);
+                            String config = configString(j, factors, measure,
+                                    evolvers[i]);
+                            if (printReport_)
+                                System.out.println("    " + config);
+
+                            // calculate the exercise strategy
+                            CollectNodeData.collectNodeData(evolver, receiverSwap,
+                                    basisSystem, nullRebate, control,
+                                    trainingPaths_, collectedData);
+                            GenericLongstaffSchwartzRegression
+                                    .genericLongstaffSchwartzRegression(
+                                            collectedData, basisCoefficients);
+                            LongstaffSchwartzExerciseStrategy exerciseStrategy =
+                                    new LongstaffSchwartzExerciseStrategy(
+                                            basisSystem, basisCoefficients, evolution,
+                                            numeraires, nullRebate, control);
+
+                            // 2. bermudan swaption to enter into the payer swap
+                            CallSpecifiedMultiProduct bermudanProduct =
+                                    new CallSpecifiedMultiProduct(
+                                            new MultiStepNothing(evolution),
+                                            exerciseStrategy, payerSwap);
+
+                            // 3. callable receiver swap
+                            CallSpecifiedMultiProduct callableProduct =
+                                    new CallSpecifiedMultiProduct(receiverSwap,
+                                            exerciseStrategy,
+                                            new ExerciseAdapter(nullRebate));
+
+                            // lower bound: evolve all 4 products togheter
+                            MultiProductComposite allProducts =
+                                    new MultiProductComposite();
+                            allProducts.add(payerSwap);
+                            allProducts.add(receiverSwap);
+                            allProducts.add(bermudanProduct);
+                            allProducts.add(callableProduct);
+                            allProducts.finalize();
+
+                            SequenceStatisticsInc stats = simulate(evolver,
+                                    allProducts);
+                            checkCallableSwap(stats, config);
+
+                            // upper bound
+
+                            // MTBrownianGeneratorFactory uFactory(seed_+142);
+                            SobolBrownianGeneratorFactory uFactory =
+                                    new SobolBrownianGeneratorFactory(
+                                            SobolBrownianGeneratorBase.Ordering.Diagonal,
+                                            seed_ + 142);
+                            evolver = makeMarketModelEvolver(marketModel, numeraires,
+                                    uFactory, evolvers[i]);
+
+                            List<MarketModelEvolver> innerEvolvers = new ArrayList<>();
+
+                            boolean[] isExerciseTime = Utilities.isInSubset(
+                                    evolution.evolutionTimes(),
+                                    exerciseStrategy.exerciseTimes());
+                            for (int s = 0; s < isExerciseTime.length; ++s) {
+                                if (isExerciseTime[s]) {
+                                    MTBrownianGeneratorFactory iFactory =
+                                            new MTBrownianGeneratorFactory(seed_ + s);
+                                    MarketModelEvolver e = makeMarketModelEvolver(
+                                            marketModel, numeraires, iFactory,
+                                            evolvers[i], s);
+                                    innerEvolvers.add(e);
+                                }
+                            }
+
+                            int initialNumeraire = evolver.numeraires().get(0);
+                            double initialNumeraireValue =
+                                    todaysDiscounts.get(initialNumeraire);
+
+                            UpperBoundEngine uEngine = new UpperBoundEngine(
+                                    evolver, innerEvolvers, receiverSwap, nullRebate,
+                                    receiverSwap, nullRebate, exerciseStrategy,
                                     initialNumeraireValue);
                             GenericRiskStatistics uStats = new GenericRiskStatistics();
                             uEngine.multiplePathValues(uStats, 255, 256);
