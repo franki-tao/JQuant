@@ -18,6 +18,7 @@ import jquant.methods.montecarlo.GenericLongstaffSchwartzRegression;
 import jquant.methods.montecarlo.NodeData;
 import jquant.models.marketmodels.AccountingEngine;
 import jquant.models.marketmodels.BrownianGeneratorFactory;
+import jquant.models.marketmodels.ConstrainedEvolver;
 import jquant.models.marketmodels.EvolutionDescription;
 import jquant.models.marketmodels.ForwardForwardMappings;
 import jquant.models.marketmodels.MarketModel;
@@ -25,6 +26,7 @@ import jquant.models.marketmodels.MarketModelEvolver;
 import jquant.models.marketmodels.MarketModelMultiProduct;
 import jquant.models.marketmodels.MarketModelPathwiseMultiProduct;
 import jquant.models.marketmodels.PiecewiseConstantCorrelation;
+import jquant.models.marketmodels.ProxyGreekEngine;
 import jquant.models.marketmodels.SequenceStatisticsInc;
 import jquant.models.marketmodels.SwapForwardMappings;
 import jquant.models.marketmodels.Utilities;
@@ -44,6 +46,8 @@ import jquant.models.marketmodels.correlations.TimeHomogeneousForwardCorrelation
 import jquant.models.marketmodels.curvestates.LMMCurveState;
 import jquant.models.marketmodels.driftcomputation.LMMDriftCalculator;
 import jquant.models.marketmodels.evolvers.LogNormalFwdRateBalland;
+import jquant.models.marketmodels.evolvers.LogNormalFwdRateEuler;
+import jquant.models.marketmodels.evolvers.LogNormalFwdRateEulerConstrained;
 import jquant.models.marketmodels.evolvers.LogNormalFwdRateIpc;
 import jquant.models.marketmodels.evolvers.LogNormalFwdRatePc;
 import jquant.models.marketmodels.evolvers.NormalFwdRatePc;
@@ -69,6 +73,7 @@ import jquant.models.marketmodels.products.onestep.OneStepOptionlets;
 import jquant.models.marketmodels.products.pathwise.MarketModelPathwiseInverseFloater;
 import jquant.pricingengines.BlackCalculator;
 import jquant.pricingengines.BlackFormula;
+import jquant.pricingengines.CashOrNothingPayoff;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.StrikedTypePayoff;
 import jquant.termstructures.volatility.AbcdCalibration;
@@ -2143,6 +2148,261 @@ public class MarketModelTest {
                         if (printReport_)
                             System.out.println("    upper bound delta: "
                                     + rate(delta) + " +- " + rate(deltaError));
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void testGreeks() {
+        System.out.println("Testing caplet greeks in a lognormal forward rate "
+                + "market model using partial proxy simulation...");
+
+        setup();
+
+        List<Payoff> payoffs = new ArrayList<>();
+        List<StrikedTypePayoff> displacedPayoffs = new ArrayList<>();
+        for (int i = 0; i < todaysForwards.size(); ++i) {
+            payoffs.add(new
+                    //PlainVanillaPayoff(Option.Type.Call, todaysForwards.get(i)));
+                    CashOrNothingPayoff(Option.Type.Call, todaysForwards.get(i), 0.01));
+            displacedPayoffs.add(new
+                    //PlainVanillaPayoff(Option.Type.Call, todaysForwards.get(i)+displacement));
+                    CashOrNothingPayoff(Option.Type.Call,
+                            todaysForwards.get(i) + displacement, 0.01));
+        }
+
+        MultiStepOptionlets product = new MultiStepOptionlets(rateTimes, accruals,
+                paymentTimes, payoffs);
+
+        EvolutionDescription evolution = product.evolution();
+
+        MarketModelType[] marketModels = {
+                // CalibratedMM,
+                // ExponentialCorrelationFlatVolatility,
+                MarketModelType.ExponentialCorrelationAbcdVolatility};
+        for (MarketModelType j : marketModels) {
+
+            int[] testedFactors = {4, 8, todaysForwards.size()};
+            for (int factors : testedFactors) {
+                MeasureType[] measures = {
+                        // MoneyMarketPlus,
+                        MeasureType.MoneyMarket
+                        // Terminal
+                };
+                for (MeasureType measure : measures) {
+                    List<Integer> numeraires = makeMeasure(product, measure);
+
+                    for (int n = 0; n < 1; n++) {
+                        // MTBrownianGeneratorFactory generatorFactory(seed_);
+                        SobolBrownianGeneratorFactory generatorFactory =
+                                new SobolBrownianGeneratorFactory(
+                                        SobolBrownianGeneratorBase.Ordering.Diagonal,
+                                        seed_);
+
+                        boolean logNormal = true;
+                        MarketModel marketModel =
+                                makeMarketModel(logNormal, evolution, factors, j);
+                        MarketModelEvolver evolver = new LogNormalFwdRateEuler(
+                                marketModel, generatorFactory, numeraires);
+                        SequenceStatisticsInc stats =
+                                new SequenceStatisticsInc(product.numberOfProducts());
+
+                        List<Integer> startIndexOfConstraint = new ArrayList<>();
+                        List<Integer> endIndexOfConstraint = new ArrayList<>();
+
+                        for (int i = 0; i < evolution.evolutionTimes().size(); ++i) {
+                            startIndexOfConstraint.add(i);
+                            endIndexOfConstraint.add(i + 1);
+                        }
+
+                        List<List<ConstrainedEvolver>> constrainedEvolvers =
+                                new ArrayList<>();
+                        List<List<List<Double>>> diffWeights = new ArrayList<>();
+                        List<List<SequenceStatisticsInc>> greekStats =
+                                new ArrayList<>();
+
+                        List<ConstrainedEvolver> deltaGammaEvolvers = new ArrayList<>();
+                        List<List<Double>> deltaGammaWeights = new ArrayList<>();
+                        deltaGammaWeights.add(filledList(3, 0.0));
+                        deltaGammaWeights.add(filledList(3, 0.0));
+                        List<SequenceStatisticsInc> deltaGammaStats =
+                                new ArrayList<>();
+                        deltaGammaStats.add(
+                                new SequenceStatisticsInc(product.numberOfProducts()));
+                        deltaGammaStats.add(
+                                new SequenceStatisticsInc(product.numberOfProducts()));
+
+                        double forwardBump = 1.0e-6;
+                        marketModel = makeMarketModel(logNormal, evolution, factors,
+                                j, -forwardBump, 0.0);
+                        deltaGammaEvolvers.add(
+                                new LogNormalFwdRateEulerConstrained(marketModel,
+                                        generatorFactory, numeraires));
+                        deltaGammaEvolvers.get(deltaGammaEvolvers.size() - 1)
+                                .setConstraintType(startIndexOfConstraint,
+                                        endIndexOfConstraint);
+                        marketModel = makeMarketModel(logNormal, evolution, factors,
+                                j, forwardBump, 0.0);
+                        deltaGammaEvolvers.add(
+                                new LogNormalFwdRateEulerConstrained(marketModel,
+                                        generatorFactory, numeraires));
+                        deltaGammaEvolvers.get(deltaGammaEvolvers.size() - 1)
+                                .setConstraintType(startIndexOfConstraint,
+                                        endIndexOfConstraint);
+
+                        deltaGammaWeights.get(0).set(0, 0.0);
+                        deltaGammaWeights.get(0).set(1, -1.0 / (2.0 * forwardBump));
+                        deltaGammaWeights.get(0).set(2, 1.0 / (2.0 * forwardBump));
+
+                        deltaGammaWeights.get(1).set(0,
+                                -2.0 / (forwardBump * forwardBump));
+                        deltaGammaWeights.get(1).set(1,
+                                1.0 / (forwardBump * forwardBump));
+                        deltaGammaWeights.get(1).set(2,
+                                1.0 / (forwardBump * forwardBump));
+
+                        List<ConstrainedEvolver> vegaEvolvers = new ArrayList<>();
+                        List<List<Double>> vegaWeights = new ArrayList<>();
+                        vegaWeights.add(filledList(3, 0.0));
+                        List<SequenceStatisticsInc> vegaStats = new ArrayList<>();
+                        vegaStats.add(
+                                new SequenceStatisticsInc(product.numberOfProducts()));
+
+                        double volBump = 1.0e-4;
+                        marketModel = makeMarketModel(logNormal, evolution, factors,
+                                j, 0.0, -volBump);
+                        vegaEvolvers.add(new LogNormalFwdRateEulerConstrained(
+                                marketModel, generatorFactory, numeraires));
+                        vegaEvolvers.get(vegaEvolvers.size() - 1)
+                                .setConstraintType(startIndexOfConstraint,
+                                        endIndexOfConstraint);
+                        marketModel = makeMarketModel(logNormal, evolution, factors,
+                                j, 0.0, volBump);
+                        vegaEvolvers.add(new LogNormalFwdRateEulerConstrained(
+                                marketModel, generatorFactory, numeraires));
+                        vegaEvolvers.get(vegaEvolvers.size() - 1)
+                                .setConstraintType(startIndexOfConstraint,
+                                        endIndexOfConstraint);
+
+                        vegaWeights.get(0).set(0, 0.0);
+                        vegaWeights.get(0).set(1, -1.0 / (2.0 * volBump));
+                        vegaWeights.get(0).set(2, 1.0 / (2.0 * volBump));
+
+                        constrainedEvolvers.add(deltaGammaEvolvers);
+                        diffWeights.add(deltaGammaWeights);
+                        greekStats.add(deltaGammaStats);
+
+                        constrainedEvolvers.add(vegaEvolvers);
+                        diffWeights.add(vegaWeights);
+                        greekStats.add(vegaStats);
+
+                        String config = marketModelTypeToString(j) + ", " + factors
+                                + (factors > 1
+                                ? (factors == todaysForwards.size()
+                                ? " (full) factors, "
+                                : " factors, ")
+                                : " factor,")
+                                + measureTypeToString(measure) + ", "
+                                + "MT BGF";
+                        if (printReport_)
+                            System.out.println("    " + config);
+
+                        int initialNumeraire = evolver.numeraires().get(0);
+                        double initialNumeraireValue =
+                                todaysDiscounts.get(initialNumeraire);
+
+                        ProxyGreekEngine engine = new ProxyGreekEngine(evolver,
+                                constrainedEvolvers, diffWeights,
+                                startIndexOfConstraint, endIndexOfConstraint,
+                                product, initialNumeraireValue);
+
+                        engine.multiplePathValues(stats, greekStats, paths_);
+
+                        List<Double> values = stats.mean();
+                        List<Double> errors = stats.errorEstimate();
+                        List<Double> deltas = greekStats.get(0).get(0).mean();
+                        List<Double> deltaErrors =
+                                greekStats.get(0).get(0).errorEstimate();
+                        List<Double> gammas = greekStats.get(0).get(1).mean();
+                        List<Double> gammaErrors =
+                                greekStats.get(0).get(1).errorEstimate();
+                        List<Double> vegas = greekStats.get(1).get(0).mean();
+                        List<Double> vegaErrors =
+                                greekStats.get(1).get(0).errorEstimate();
+
+                        List<Double> discPlus = filledList(
+                                todaysForwards.size() + 1,
+                                todaysDiscounts.get(0));
+                        List<Double> discMinus = filledList(
+                                todaysForwards.size() + 1,
+                                todaysDiscounts.get(0));
+                        List<Double> fwdPlus = filledList(
+                                todaysForwards.size(), 0.0);
+                        List<Double> fwdMinus = filledList(
+                                todaysForwards.size(), 0.0);
+                        List<Double> pricePlus = filledList(
+                                todaysForwards.size(), 0.0);
+                        List<Double> price0 = filledList(
+                                todaysForwards.size(), 0.0);
+                        List<Double> priceMinus = filledList(
+                                todaysForwards.size(), 0.0);
+                        for (int i = 0; i < todaysForwards.size(); ++i) {
+                            double tau = rateTimes.get(i + 1) - rateTimes.get(i);
+                            fwdPlus.set(i, todaysForwards.get(i) + forwardBump);
+                            fwdMinus.set(i, todaysForwards.get(i) - forwardBump);
+                            discPlus.set(i + 1, discPlus.get(i)
+                                    / (1.0 + fwdPlus.get(i) * tau));
+                            discMinus.set(i + 1, discMinus.get(i)
+                                    / (1.0 + fwdMinus.get(i) * tau));
+                            pricePlus.set(i, new BlackCalculator(
+                                    displacedPayoffs.get(i), fwdPlus.get(i),
+                                    volatilities.get(i) * Math.sqrt(rateTimes.get(i)),
+                                    discPlus.get(i + 1) * tau)
+                                    .value());
+                            price0.set(i, new BlackCalculator(
+                                    displacedPayoffs.get(i), todaysForwards.get(i),
+                                    volatilities.get(i) * Math.sqrt(rateTimes.get(i)),
+                                    todaysDiscounts.get(i + 1) * tau)
+                                    .value());
+                            priceMinus.set(i, new BlackCalculator(
+                                    displacedPayoffs.get(i), fwdMinus.get(i),
+                                    volatilities.get(i) * Math.sqrt(rateTimes.get(i)),
+                                    discMinus.get(i + 1) * tau)
+                                    .value());
+                        }
+
+                        for (int i = 0; i < product.numberOfProducts(); ++i) {
+                            double numDelta = (pricePlus.get(i) - priceMinus.get(i))
+                                    / (2.0 * forwardBump);
+                            double numGamma = (pricePlus.get(i)
+                                    - 2 * price0.get(i) + priceMinus.get(i))
+                                    / (forwardBump * forwardBump);
+                            if (printReport_) {
+                                System.out.println(Utilities.ordinal(i + 1)
+                                        + " caplet: "
+                                        + "value = " + price0.get(i) + ", "
+                                        + "delta = " + numDelta + ", "
+                                        + "gamma = " + numGamma);
+                                System.out.println(Utilities.ordinal(i + 1)
+                                        + " caplet: "
+                                        + "value = " + values.get(i) + " +- "
+                                        + errors.get(i) + " ("
+                                        + (values.get(i) - price0.get(i))
+                                        / errors.get(i) + " s.e.), "
+                                        + "delta = " + deltas.get(i) + " +- "
+                                        + deltaErrors.get(i) + " ("
+                                        + (deltas.get(i) - numDelta)
+                                        / deltaErrors.get(i) + " s.e.), "
+                                        + "gamma = " + gammas.get(i) + " +- "
+                                        + gammaErrors.get(i) + " ("
+                                        + (gammas.get(i) - numGamma)
+                                        / gammaErrors.get(i) + " s.e.), "
+                                        + "vega = " + vegas.get(i) + " +- "
+                                        + vegaErrors.get(i));
+                            }
+                        }
                     }
                 }
             }
