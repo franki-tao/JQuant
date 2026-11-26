@@ -17,6 +17,7 @@ import jquant.methods.montecarlo.GenericEarlyExerciseOptimization;
 import jquant.methods.montecarlo.GenericLongstaffSchwartzRegression;
 import jquant.methods.montecarlo.NodeData;
 import jquant.models.marketmodels.AccountingEngine;
+import jquant.models.marketmodels.BrownianGenerator;
 import jquant.models.marketmodels.BrownianGeneratorFactory;
 import jquant.models.marketmodels.ConstrainedEvolver;
 import jquant.models.marketmodels.EvolutionDescription;
@@ -26,6 +27,8 @@ import jquant.models.marketmodels.MarketModelEvolver;
 import jquant.models.marketmodels.MarketModelMultiProduct;
 import jquant.models.marketmodels.MarketModelPathwiseMultiProduct;
 import jquant.models.marketmodels.PathwiseAccountingEngine;
+import jquant.models.marketmodels.PathwiseVegasAccountingEngine;
+import jquant.models.marketmodels.PathwiseVegasOuterAccountingEngine;
 import jquant.models.marketmodels.PiecewiseConstantCorrelation;
 import jquant.models.marketmodels.ProxyGreekEngine;
 import jquant.models.marketmodels.SequenceStatisticsInc;
@@ -56,6 +59,13 @@ import jquant.models.marketmodels.models.AbcdVol;
 import jquant.models.marketmodels.models.FlatVol;
 import jquant.models.marketmodels.models.FwdPeriodAdapter;
 import jquant.models.marketmodels.models.FwdToCotSwapAdapter;
+import jquant.models.marketmodels.models.PseudoRootFacade;
+import jquant.models.marketmodels.pathwisegreeks.CapPseudoDerivative;
+import jquant.models.marketmodels.pathwisegreeks.RatePseudoRootJacobian;
+import jquant.models.marketmodels.pathwisegreeks.RatePseudoRootJacobianAllElements;
+import jquant.models.marketmodels.pathwisegreeks.RatePseudoRootJacobianNumerical;
+import jquant.models.marketmodels.pathwisegreeks.SwaptionPseudoDerivative;
+import jquant.models.marketmodels.pathwisegreeks.VolatilityBumpInstrumentJacobian;
 import jquant.models.marketmodels.products.MultiProductComposite;
 import jquant.models.marketmodels.products.multistep.CallSpecifiedMultiProduct;
 import jquant.models.marketmodels.products.multistep.ExerciseAdapter;
@@ -73,6 +83,7 @@ import jquant.models.marketmodels.products.onestep.OneStepForwards;
 import jquant.models.marketmodels.products.onestep.OneStepOptionlets;
 import jquant.models.marketmodels.products.pathwise.MarketModelPathwiseInverseFloater;
 import jquant.models.marketmodels.products.pathwise.MarketModelPathwiseMultiCaplet;
+import jquant.models.marketmodels.products.pathwise.MarketModelPathwiseMultiDeflatedCap;
 import jquant.models.marketmodels.products.pathwise.MarketModelPathwiseMultiDeflatedCaplet;
 import jquant.pricingengines.BlackCalculator;
 import jquant.pricingengines.BlackFormula;
@@ -2668,6 +2679,1300 @@ public class MarketModelTest {
                 }
             }
         }
+    }
+
+    @Test
+    void testPathwiseVegas() {
+        System.out.println(
+                "Testing pathwise vegas in a lognormal forward rate market model...");
+
+        setup();
+
+        List<Payoff> payoffs = new ArrayList<>();
+        List<StrikedTypePayoff> displacedPayoffs = new ArrayList<>();
+        for (int i = 0; i < todaysForwards.size(); ++i) {
+            payoffs.add(new
+                    PlainVanillaPayoff(Option.Type.Call, todaysForwards.get(i)));
+            //CashOrNothingPayoff(Option.Type.Call, todaysForwards.get(i), 0.01));
+            displacedPayoffs.add(new
+                    PlainVanillaPayoff(Option.Type.Call,
+                    todaysForwards.get(i) + displacement));
+            //CashOrNothingPayoff(Option.Type.Call, todaysForwards.get(i)+displacement, 0.01));
+        }
+
+        MultiStepOptionlets product = new MultiStepOptionlets(rateTimes, accruals,
+                paymentTimes, payoffs);
+
+        MarketModelPathwiseMultiCaplet caplets = new MarketModelPathwiseMultiCaplet(
+                rateTimes, accruals, paymentTimes, todaysForwards);
+
+        MarketModelPathwiseMultiDeflatedCaplet capletsDeflated =
+                new MarketModelPathwiseMultiDeflatedCaplet(rateTimes, accruals,
+                        paymentTimes, todaysForwards);
+
+        LMMCurveState cs = new LMMCurveState(rateTimes);
+        cs.setOnForwardRates(todaysForwards);
+
+        EvolutionDescription evolution = product.evolution();
+        int steps = evolution.numberOfSteps();
+        int numberRates = evolution.numberOfRates();
+
+        double bumpSizeNumericalDifferentiation = 1E-6;
+        double vegaBumpSize = 1e-2;
+        int pathsToDo = 10; // for the numerical differentiation test we are
+                            // requiring equality on each path so this is
+                            // actually quite strict
+        int pathsToDoSimulation = paths_;
+        int bumpIncrement = 1 + evolution.numberOfSteps() / 3;
+        double numericalBumpSizeForSwaptionPseudo = 1E-7;
+
+        double multiplier = 50; // how many times the bump size squared, the numerical differentation is allowed to differ by
+        // printReport_ = true;
+        double maxError = 0.0;
+        int numberSwaptionPseudoFailures = 0;
+        int numberCapPseudoFailures = 0;
+        int numberCapImpVolFailures = 0;
+        int numberCapVolPseudoFailures = 0;
+        double swaptionPseudoTolerance = 1e-8;
+        double impVolTolerance = 1e-5;
+        double capStrike = meanForward;
+        double initialNumeraireValue = 0.95;
+
+        // Official BOOST_ERROR records a failure but continues the test case.
+        // Accumulate the official messages and fail at the end unless a later
+        // BOOST_FAIL (fail()) aborts first.
+        List<String> boostErrors = new ArrayList<>();
+
+        MarketModelType[] marketModels = {
+                // CalibratedMM,
+                // ExponentialCorrelationFlatVolatility,
+                MarketModelType.ExponentialCorrelationAbcdVolatility
+        };
+
+        /////////////////////////////////// test derivative of swaption implied
+        // vol with respect to pseudo-root elements
+
+        for (MarketModelType j : marketModels) {
+
+            int[] testedFactors = {Math.min(3, todaysForwards.size())
+                    //    todaysForwards.size()
+                    //, 4, 8,
+            };
+
+            for (int factors : testedFactors) {
+                boolean logNormal = true;
+
+                MarketModel marketModel =
+                        makeMarketModel(logNormal, evolution, factors, j);
+
+                int startIndex = Math.min(1, evolution.numberOfRates() - 2);
+                int endIndex = evolution.numberOfRates() - 1;
+
+                SwaptionPseudoDerivative derivative = new SwaptionPseudoDerivative(
+                        marketModel,
+                        startIndex,
+                        endIndex);
+
+                List<Matrix> pseudoRoots = new ArrayList<>();
+                for (int k = 0; k < marketModel.numberOfSteps(); ++k)
+                    pseudoRoots.add(deepCopyMatrix(marketModel.pseudoRoot(k)));
+
+                // test that the derivative of swaption implied vols to the
+                // pseudo-root elements are correct, finite differencing versus
+                // analytic value
+
+                for (int step = 0; step < evolution.numberOfSteps(); ++step) {
+                    for (int l = 0; l < evolution.numberOfRates(); ++l)
+                        for (int f = 0; f < factors; ++f) {
+
+                            // change one pseudo root element in the calibration
+                            // by adding a bump to it
+
+                            pseudoRoots.get(step).set(l, f,
+                                    pseudoRoots.get(step).get(l, f)
+                                            + numericalBumpSizeForSwaptionPseudo);
+
+                            // create new market model with the pseudo root bumped
+
+                            PseudoRootFacade bumpedUp = new PseudoRootFacade(
+                                    pseudoRoots, rateTimes, marketModel.initialRates(),
+                                    marketModel.displacements());
+
+                            // compute the implied vol of the swaption with the
+                            // bumped pseudo roots
+
+                            double upImpVol =
+                                    SwapForwardMappings.swaptionImpliedVolatility(
+                                            bumpedUp, startIndex, endIndex);
+
+                            // undo the bump
+
+                            pseudoRoots.get(step).set(l, f,
+                                    pseudoRoots.get(step).get(l, f)
+                                            - numericalBumpSizeForSwaptionPseudo);
+
+                            // bump down
+
+                            pseudoRoots.get(step).set(l, f,
+                                    pseudoRoots.get(step).get(l, f)
+                                            - numericalBumpSizeForSwaptionPseudo);
+
+                            // create facade for the bumped down pseudo roots
+
+                            PseudoRootFacade bumpedDown = new PseudoRootFacade(
+                                    pseudoRoots, rateTimes, marketModel.initialRates(),
+                                    marketModel.displacements());
+
+                            // compute the implied vol of the swaption with the
+                            // bumped down pseudo roots
+
+                            double downImpVol =
+                                    SwapForwardMappings.swaptionImpliedVolatility(
+                                            bumpedDown, startIndex, endIndex);
+
+                            // undo bumping
+
+                            pseudoRoots.get(step).set(l, f,
+                                    pseudoRoots.get(step).get(l, f)
+                                            + numericalBumpSizeForSwaptionPseudo);
+
+                            // use symmetric finite differencing to compute the
+                            // change in the swaptions implied vol for changes
+                            // in this pseudo-root element
+
+                            double volDeriv = (upImpVol - downImpVol)
+                                    / (2.0 * numericalBumpSizeForSwaptionPseudo);
+
+                            double modelVal =
+                                    derivative.volatilityDerivative(step).get(l, f);
+
+                            double error = volDeriv - modelVal;
+
+                            if (Math.abs(error) > swaptionPseudoTolerance)
+                                ++numberSwaptionPseudoFailures;
+
+                        }
+
+                }
+
+                if (numberSwaptionPseudoFailures > 0) {
+                    String message = "swaption pseudo test failed "
+                            + numberSwaptionPseudoFailures + " times";
+                    System.out.println(message);
+                    boostErrors.add(message);
+                }
+            }
+        }
+
+        /////////////////////////////////////
+
+        for (MarketModelType j : marketModels) {
+
+            int[] testedFactors = {Math.min(3, todaysForwards.size())
+                    //    todaysForwards.size()
+                    //, 4, 8,
+            };
+
+            for (int factors : testedFactors) {
+                boolean logNormal = true;
+
+                MarketModel marketModel =
+                        makeMarketModel(logNormal, evolution, factors, j);
+
+                for (int startIndex = 1; startIndex < evolution.numberOfRates() - 1;
+                     ++startIndex)
+                    for (int endIndex = startIndex + 1;
+                         endIndex < evolution.numberOfRates(); ++endIndex) {
+
+                        CapPseudoDerivative derivative = new CapPseudoDerivative(
+                                marketModel,
+                                capStrike,
+                                startIndex,
+                                endIndex, initialNumeraireValue);
+
+                        List<Matrix> pseudoRoots = new ArrayList<>();
+                        for (int k = 0; k < marketModel.numberOfSteps(); ++k)
+                            pseudoRoots.add(deepCopyMatrix(marketModel.pseudoRoot(k)));
+
+                        // test cap price derivatives with respect to
+                        // pseudo-root elements
+
+                        for (int step = 0; step < evolution.numberOfSteps(); ++step) {
+                            for (int l = 0; l < evolution.numberOfRates(); ++l)
+                                for (int f = 0; f < factors; ++f) {
+
+                                    // similar to swaption pseudo derivative
+                                    // test but with prices not implied vols
+
+                                    pseudoRoots.get(step).set(l, f,
+                                            pseudoRoots.get(step).get(l, f)
+                                                    + numericalBumpSizeForSwaptionPseudo);
+
+                                    PseudoRootFacade bumpedUp = new PseudoRootFacade(
+                                            pseudoRoots, rateTimes,
+                                            marketModel.initialRates(),
+                                            marketModel.displacements());
+
+                                    // get total covariances of rates with
+                                    // bumped up pseudo-roots, we really only
+                                    // need the variances
+                                    Matrix totalCovUp = bumpedUp.totalCovariance(
+                                            marketModel.numberOfSteps() - 1);
+
+                                    pseudoRoots.get(step).set(l, f,
+                                            pseudoRoots.get(step).get(l, f)
+                                                    - numericalBumpSizeForSwaptionPseudo);
+
+                                    pseudoRoots.get(step).set(l, f,
+                                            pseudoRoots.get(step).get(l, f)
+                                                    - numericalBumpSizeForSwaptionPseudo);
+
+                                    PseudoRootFacade bumpedDown = new PseudoRootFacade(
+                                            pseudoRoots, rateTimes,
+                                            marketModel.initialRates(),
+                                            marketModel.displacements());
+
+                                    // get total covariances of rates with
+                                    // bumped down pseudo-roots, we really only
+                                    // need the variances
+                                    Matrix totalCovDown = bumpedDown.totalCovariance(
+                                            marketModel.numberOfSteps() - 1);
+
+                                    pseudoRoots.get(step).set(l, f,
+                                            pseudoRoots.get(step).get(l, f)
+                                                    + numericalBumpSizeForSwaptionPseudo);
+
+                                    // we have to loop through all the caplets
+                                    // underlying the cap to get the price
+
+                                    double priceDeriv = 0.0;
+                                    for (int k = startIndex; k < endIndex; ++k) {
+                                        double upSd = Math.sqrt(totalCovUp.get(k, k));
+                                        double downSd = Math.sqrt(totalCovDown.get(k, k));
+
+                                        double annuity = todaysDiscounts.get(k + 1)
+                                                * marketModel.evolution().rateTaus().get(k);
+                                        double forward = todaysForwards.get(k);
+
+                                        double upPrice = BlackFormula.blackFormula(
+                                                Option.Type.Call,
+                                                capStrike,
+                                                forward,
+                                                upSd,
+                                                annuity,
+                                                marketModel.displacements().get(k));
+
+                                        double downPrice = BlackFormula.blackFormula(
+                                                Option.Type.Call,
+                                                capStrike,
+                                                forward,
+                                                downSd,
+                                                annuity,
+                                                marketModel.displacements().get(k));
+
+                                        priceDeriv += (upPrice - downPrice)
+                                                / (2.0 * numericalBumpSizeForSwaptionPseudo);
+
+                                    }
+
+                                    double modelVal =
+                                            derivative.priceDerivative(step).get(l, f);
+
+                                    double error = priceDeriv - modelVal;
+
+                                    if (Math.abs(error) > swaptionPseudoTolerance)
+                                        ++numberCapPseudoFailures;
+
+                                }
+
+                        }
+
+                        // test the implied vol of the cap, each underlying
+                        // caplet has a different implied vol and the cap's is
+                        // different again
+
+                        double impVol = derivative.impliedVolatility();
+
+                        Matrix totalCov = marketModel.totalCovariance(
+                                evolution.numberOfSteps() - 1);
+                        double priceConstVol = 0.0;
+                        double priceVarVol = 0.0;
+
+                        for (int m = startIndex; m < endIndex; ++m) {
+                            double annuity = todaysDiscounts.get(m + 1)
+                                    * marketModel.evolution().rateTaus().get(m);
+                            double expiry = rateTimes.get(m);
+                            double forward = todaysForwards.get(m);
+
+                            priceConstVol += BlackFormula.blackFormula(
+                                    Option.Type.Call,
+                                    capStrike,
+                                    forward,
+                                    impVol * Math.sqrt(expiry),
+                                    annuity,
+                                    marketModel.displacements().get(m));
+
+                            priceVarVol += BlackFormula.blackFormula(
+                                    Option.Type.Call,
+                                    capStrike,
+                                    forward,
+                                    Math.sqrt(totalCov.get(m, m)),
+                                    annuity,
+                                    marketModel.displacements().get(m));
+
+                        }
+
+                        if (Math.abs(priceVarVol - priceConstVol) > impVolTolerance)
+                            ++numberCapImpVolFailures;
+
+                    }
+
+                if (numberCapPseudoFailures > 0) {
+                    String message = "cap pseudo test failed for prices "
+                            + numberCapPseudoFailures + " times";
+                    System.out.println(message);
+                    boostErrors.add(message);
+                }
+
+                if (numberCapImpVolFailures > 0) {
+                    String message = "cap pseudo test failed for implied vols "
+                            + numberCapImpVolFailures + " times";
+                    System.out.println(message);
+                    boostErrors.add(message);
+                }
+            }
+
+            // we have tested the price derivative and the implied vol
+            // function, now the derivative of the cap implied vols with
+            // respect to pseudo-root elements
+
+            // since we have already tested the imp vol function we use it here
+
+            for (int factors : testedFactors) {
+                boolean logNormal = true;
+
+                MarketModel marketModel =
+                        makeMarketModel(logNormal, evolution, factors, j);
+
+                for (int startIndex = 1; startIndex < evolution.numberOfRates() - 1;
+                     ++startIndex)
+                    for (int endIndex = startIndex + 1;
+                         endIndex < evolution.numberOfRates(); ++endIndex) {
+
+                        CapPseudoDerivative derivative = new CapPseudoDerivative(
+                                marketModel,
+                                capStrike,
+                                startIndex,
+                                endIndex, initialNumeraireValue);
+
+                        List<Matrix> pseudoRoots = new ArrayList<>();
+                        for (int k = 0; k < marketModel.numberOfSteps(); ++k)
+                            pseudoRoots.add(deepCopyMatrix(marketModel.pseudoRoot(k)));
+
+                        for (int step = 0; step < evolution.numberOfSteps(); ++step) {
+                            for (int l = 0; l < evolution.numberOfRates(); ++l)
+                                for (int f = 0; f < factors; ++f) {
+                                    pseudoRoots.get(step).set(l, f,
+                                            pseudoRoots.get(step).get(l, f)
+                                                    + numericalBumpSizeForSwaptionPseudo);
+
+                                    PseudoRootFacade bumpedUp = new PseudoRootFacade(
+                                            pseudoRoots, rateTimes,
+                                            marketModel.initialRates(),
+                                            marketModel.displacements());
+
+                                    // Official wraps the facade in another
+                                    // PseudoRootFacade clone; passing the
+                                    // freshly constructed facade is equivalent.
+                                    CapPseudoDerivative upDerivative =
+                                            new CapPseudoDerivative(bumpedUp,
+                                                    capStrike,
+                                                    startIndex,
+                                                    endIndex, initialNumeraireValue);
+
+                                    double volUp = upDerivative.impliedVolatility();
+
+                                    pseudoRoots.get(step).set(l, f,
+                                            pseudoRoots.get(step).get(l, f)
+                                                    - numericalBumpSizeForSwaptionPseudo);
+
+                                    pseudoRoots.get(step).set(l, f,
+                                            pseudoRoots.get(step).get(l, f)
+                                                    - numericalBumpSizeForSwaptionPseudo);
+
+                                    PseudoRootFacade bumpedDown = new PseudoRootFacade(
+                                            pseudoRoots, rateTimes,
+                                            marketModel.initialRates(),
+                                            marketModel.displacements());
+
+                                    CapPseudoDerivative downDerivative =
+                                            new CapPseudoDerivative(bumpedDown,
+                                                    capStrike,
+                                                    startIndex,
+                                                    endIndex, initialNumeraireValue);
+
+                                    double volDown = downDerivative.impliedVolatility();
+
+                                    pseudoRoots.get(step).set(l, f,
+                                            pseudoRoots.get(step).get(l, f)
+                                                    + numericalBumpSizeForSwaptionPseudo);
+
+                                    double volDeriv = (volUp - volDown)
+                                            / (2.0 * numericalBumpSizeForSwaptionPseudo);
+
+                                    double modelVal =
+                                            derivative.volatilityDerivative(step).get(l, f);
+
+                                    double error = volDeriv - modelVal;
+
+                                    if (Math.abs(error) > impVolTolerance * 10)
+                                        ++numberCapVolPseudoFailures;
+
+                                }
+
+                        }
+
+                    }
+
+                if (numberCapVolPseudoFailures > 0) {
+                    String message = "cap pseudo test failed for implied vols "
+                            + numberCapVolPseudoFailures + " times";
+                    System.out.println(message);
+                    boostErrors.add(message);
+                }
+            }
+        }
+
+        /////////////////////////////////////
+
+        for (int j = 0; j < marketModels.length; j++) {
+
+            int[] testedFactors = {
+                    Math.min(1, todaysForwards.size())
+                    //    todaysForwards.size()
+                    //, 4, 8,
+
+            };
+
+            for (int factors : testedFactors) {
+                int factorsToTest =
+                        Math.min(2, factors); // doing all possible vegas is combinatorially explosive
+
+                MeasureType[] measures = {
+                        MeasureType.MoneyMarket
+                };
+
+                List<Matrix> pseudoBumps = new ArrayList<>();
+                List<Matrix> pseudoBumpsDown = new ArrayList<>();
+
+                for (int k = 0; k < evolution.numberOfRates(); ++k) {
+                    for (int f = 0; f < factors; ++f) {
+                        Matrix modelBump = new Matrix(evolution.numberOfRates(),
+                                factors, 0.0);
+                        modelBump.set(k, f, bumpSizeNumericalDifferentiation);
+                        pseudoBumps.add(deepCopyMatrix(modelBump));
+                        modelBump.set(k, f, -bumpSizeNumericalDifferentiation);
+                        pseudoBumpsDown.add(deepCopyMatrix(modelBump));
+                    }
+                }
+
+                List<List<Matrix>> vegaBumps = new ArrayList<>();
+
+                Matrix modelBump = new Matrix(evolution.numberOfRates(), factors, 0.0);
+
+                for (int l = 0; l < evolution.numberOfSteps(); ++l) {
+                    List<Matrix> stepBumps = new ArrayList<>();
+                    vegaBumps.add(stepBumps);
+                    for (int k = 0; k < evolution.numberOfRates(); k = k + bumpIncrement) {
+                        for (int f = 0; f < factorsToTest; ++f) {
+
+                            for (int m = 0; m < evolution.numberOfSteps(); ++m) {
+                                if (l == m && k >= l)
+                                    modelBump.set(k, f, vegaBumpSize);
+
+                                stepBumps.add(deepCopyMatrix(modelBump));
+
+                                modelBump.set(k, f, 0.0);
+                            }
+                        }
+                    }
+
+                }
+
+                for (MeasureType measure : measures) {
+
+                    List<Integer> numeraires = makeMeasure(product, measure);
+
+                    List<RatePseudoRootJacobian> testees = new ArrayList<>();
+                    List<RatePseudoRootJacobianAllElements> testees2 = new ArrayList<>();
+
+                    List<RatePseudoRootJacobianNumerical> testers = new ArrayList<>();
+                    List<RatePseudoRootJacobianNumerical> testersDown = new ArrayList<>();
+
+                    MTBrownianGeneratorFactory generatorFactory =
+                            new MTBrownianGeneratorFactory(seed_);
+
+                    boolean logNormal = true;
+                    MarketModel marketModel =
+                            makeMarketModel(logNormal, evolution, factors, marketModels[j]);
+
+                    for (int l = 0; l < evolution.numberOfSteps(); ++l) {
+                        final Matrix pseudoRoot = marketModel.pseudoRoot(l);
+                        testees.add(new RatePseudoRootJacobian(pseudoRoot,
+                                evolution.firstAliveRate().get(l), numeraires.get(l),
+                                evolution.rateTaus(), pseudoBumps,
+                                marketModel.displacements()));
+
+                        testees2.add(new RatePseudoRootJacobianAllElements(pseudoRoot,
+                                evolution.firstAliveRate().get(l), numeraires.get(l),
+                                evolution.rateTaus(),
+                                marketModel.displacements()));
+
+                        testers.add(new RatePseudoRootJacobianNumerical(pseudoRoot,
+                                evolution.firstAliveRate().get(l), numeraires.get(l),
+                                evolution.rateTaus(), pseudoBumps,
+                                marketModel.displacements()));
+                        testersDown.add(new RatePseudoRootJacobianNumerical(pseudoRoot,
+                                evolution.firstAliveRate().get(l),
+                                numeraires.get(l), evolution.rateTaus(), pseudoBumpsDown,
+                                marketModel.displacements()));
+                    }
+
+                    BrownianGenerator generator = generatorFactory.create(factors,
+                            steps);
+                    LogNormalFwdRateEuler evolver = new LogNormalFwdRateEuler(marketModel,
+                            generatorFactory,
+                            numeraires);
+
+                    List<Double> oldRates = filledList(evolution.numberOfRates(), 0.0);
+                    List<Double> newRates = filledList(evolution.numberOfRates(), 0.0);
+                    List<Double> gaussians = filledList(factors, 0.0);
+
+                    List<Integer> numberCashFlowsThisStep = new ArrayList<>();
+                    for (int i = 0; i < product.numberOfProducts(); ++i)
+                        numberCashFlowsThisStep.add(0);
+
+                    List<List<MarketModelMultiProduct.CashFlow>> cashFlowsGenerated =
+                            new ArrayList<>();
+                    for (int i = 0; i < product.numberOfProducts(); ++i) {
+                        List<MarketModelMultiProduct.CashFlow> flows = new ArrayList<>();
+                        for (int k = 0;
+                             k < product.maxNumberOfCashFlowsPerProductPerStep(); ++k)
+                            flows.add(new MarketModelMultiProduct.CashFlow());
+                        cashFlowsGenerated.add(flows);
+                    }
+
+                    Matrix B = new Matrix(pseudoBumps.size(),
+                            evolution.numberOfRates(), 0.0);
+                    Matrix B2 = new Matrix(pseudoBumps.size(),
+                            evolution.numberOfRates(), 0.0);
+                    Matrix B3 = new Matrix(pseudoBumps.size(),
+                            evolution.numberOfRates(), 0.0);
+                    Matrix B4 = new Matrix(pseudoBumps.size(),
+                            evolution.numberOfRates(), 0.0);
+
+                    List<Matrix> globalB = new ArrayList<>();
+                    {
+                        Matrix modelB = new Matrix(evolution.numberOfRates(), factors,
+                                0.0);
+                        for (int i = 0; i < steps; ++i)
+                            globalB.add(deepCopyMatrix(modelB));
+                    }
+
+                    List<Double> oneStepDFs = filledList(
+                            evolution.numberOfRates() + 1, 0.0);
+                    oneStepDFs.set(0, 1.0);
+
+                    int numberFailures = 0;
+                    int numberFailures2 = 0;
+
+                    for (int l = 0; l < pathsToDo; ++l) {
+                        evolver.startNewPath();
+                        product.reset();
+                        generator.nextPath();
+
+                        boolean done;
+                        newRates = new ArrayList<>(marketModel.initialRates());
+                        int currentStep = 0;
+
+                        do {
+                            oldRates = new ArrayList<>(newRates);
+
+                            evolver.advanceStep();
+                            done = product.nextTimeStep(evolver.currentState(),
+                                    numberCashFlowsThisStep,
+                                    cashFlowsGenerated);
+
+                            newRates = new ArrayList<>(
+                                    evolver.currentState().forwardRates());
+
+                            for (int i = 1; i <= evolution.numberOfRates(); ++i)
+                                oneStepDFs.set(i,
+                                        1.0 / (1 + oldRates.get(i - 1)
+                                                * evolution.rateTaus().get(i - 1)));
+
+                            generator.nextStep(gaussians);
+
+                            testees.get(currentStep).getBumps(oldRates, oneStepDFs,
+                                    newRates, gaussians, B);
+                            testees2.get(currentStep).getBumps(oldRates, oneStepDFs,
+                                    newRates, gaussians, globalB);
+
+                            testers.get(currentStep).getBumps(oldRates, oneStepDFs,
+                                    newRates, gaussians, B2);
+                            testersDown.get(currentStep).getBumps(oldRates, oneStepDFs,
+                                    newRates, gaussians, B3);
+
+                            // now do make out put of allElements class into same form
+
+                            for (int i1 = 0; i1 < pseudoBumps.size(); ++i1) {
+                                int j1 = 0;
+
+                                for (; j1 < evolution.firstAliveRate().get(i1); ++j1) {
+                                    B4.set(i1, j1, 0.0);
+                                }
+                                for (; j1 < numberRates; ++j1) {
+                                    double sum = 0.0;
+
+                                    for (int k1 = evolution.firstAliveRate().get(i1);
+                                         k1 < numberRates; ++k1)
+                                        for (int f1 = 0; f1 < factors; ++f1)
+                                            sum += pseudoBumps.get(i1).get(k1, f1)
+                                                    * globalB.get(j1).get(k1, f1);
+
+                                    B4.set(i1, j1, sum);
+
+                                }
+                            }
+
+                            for (int jj = 0; jj < B.rows(); ++jj)
+                                for (int kk = 0; kk < B.cols(); ++kk) {
+                                    double analytic = B.get(jj, kk)
+                                            / bumpSizeNumericalDifferentiation;
+                                    double analytic2 = B4.get(jj, kk)
+                                            / bumpSizeNumericalDifferentiation;
+                                    double numerical = (B2.get(jj, kk) - B3.get(jj, kk))
+                                            / (2 * bumpSizeNumericalDifferentiation);
+                                    double errorSize = (analytic - numerical)
+                                            / (bumpSizeNumericalDifferentiation
+                                            * bumpSizeNumericalDifferentiation);
+                                    double errorSize2 = (analytic2 - numerical)
+                                            / (bumpSizeNumericalDifferentiation
+                                            * bumpSizeNumericalDifferentiation);
+
+                                    maxError = Math.max(maxError,
+                                            Math.abs(errorSize));
+
+                                    if (Math.abs(errorSize) > multiplier) {
+                                        ++numberFailures;
+                                        if (printReport_)
+                                            System.out.println("path " + l + " step "
+                                                    + currentStep + " j " + jj
+                                                    + " k " + kk + " B "
+                                                    + B.get(jj, kk) + "  B2 "
+                                                    + B2.get(jj, kk));
+
+                                    }
+
+                                    if (Math.abs(errorSize2) > multiplier) {
+                                        ++numberFailures2;
+                                        if (printReport_)
+                                            System.out.println("path " + l + " step "
+                                                    + currentStep + " j " + jj
+                                                    + " k " + kk + " B4 "
+                                                    + B4.get(jj, kk) + "  B2 "
+                                                    + B2.get(jj, kk));
+
+                                    }
+
+                                }
+                            ++currentStep;
+                        } while (!done);
+
+                    }
+
+                    if (numberFailures > 0)
+                        fail("Pathwise rate pseudoroot jacobian test fails : "
+                                + numberFailures + "\n");
+
+                    if (numberFailures2 > 0)
+                        fail("Pathwise rate pseudoroot jacobian all elements test fails : "
+                                + numberFailures2 + "\n");
+                } // end of k loop over measures
+
+                // the quick test done now do a simulation test for the vegas for caplets
+
+                int numberDeflatedErrors = 0;
+                int numberUndeflatedErrors = 0;
+                double biggestError = 0.0;
+
+                for (int deflate = 0; deflate < 2; ++deflate) {
+                    MarketModelPathwiseMultiProduct productToUse;
+
+                    if (deflate == 0)
+                        productToUse = caplets.copy();
+                    else
+                        productToUse = capletsDeflated.copy();
+
+                    for (MeasureType measure : measures) {
+
+                        List<Integer> numeraires = makeMeasure(product, measure);
+
+                        MTBrownianGeneratorFactory generatorFactory =
+                                new MTBrownianGeneratorFactory(seed_);
+
+                        boolean logNormal = true;
+                        MarketModel marketModel =
+                                makeMarketModel(logNormal, evolution, factors,
+                                        marketModels[j]);
+
+                        LogNormalFwdRateEuler evolver = new LogNormalFwdRateEuler(
+                                marketModel,
+                                generatorFactory,
+                                numeraires);
+
+                        //      SequenceStatistics stats(product.numberOfProducts()*(todaysForwards.size()+1+vegaBumps[0].size()));
+
+                        String config = marketModelTypeToString(marketModels[j])
+                                + ", " + factors
+                                + (factors > 1
+                                ? (factors == todaysForwards.size()
+                                ? " (full) factors, "
+                                : " factors, ")
+                                : " factor,")
+                                + measureTypeToString(measure) + ", "
+                                + "MT BGF";
+                        if (printReport_)
+                            System.out.println("    " + config);
+
+                        List<Double> values = new ArrayList<>();
+
+                        List<Double> errors = new ArrayList<>();
+
+                        {
+
+                            PathwiseVegasAccountingEngine accountingengine =
+                                    new PathwiseVegasAccountingEngine(
+                                            new LogNormalFwdRateEuler(
+                                                    evolver), // method relies heavily on LMM Euler
+                                            productToUse,
+                                            marketModel, // we need pseudo-roots and displacements
+                                            vegaBumps,
+                                            initialNumeraireValue);
+
+                            accountingengine.multiplePathValues(values, errors,
+                                    pathsToDoSimulation);
+                        }
+
+                        // we have computed the vegas now we have to test them
+                        // against the analytic values
+
+                        // extract into easier format
+
+                        Matrix vegasMatrix = new Matrix(caplets.numberOfProducts(),
+                                vegaBumps.get(0).size(), 0.0);
+                        Matrix standardErrors = new Matrix(
+                                caplets.numberOfProducts(),
+                                vegaBumps.get(0).size(), 0.0);
+                        Matrix deltasMatrix = new Matrix(caplets.numberOfProducts(),
+                                numberRates, 0.0);
+                        Matrix deltasErrors = new Matrix(
+                                caplets.numberOfProducts(), numberRates, 0.0);
+                        List<Double> prices = filledList(caplets.numberOfProducts(),
+                                0.0);
+                        List<Double> priceErrors = filledList(
+                                caplets.numberOfProducts(), 0.0);
+
+                        int entriesPerProduct = 1 + numberRates
+                                + vegaBumps.get(0).size();
+
+                        for (int i = 0; i < caplets.numberOfProducts(); ++i) {
+                            prices.set(i, values.get(i * entriesPerProduct));
+                            priceErrors.set(i, errors.get(i * entriesPerProduct));
+
+                            for (int jj = 0; jj < vegaBumps.get(0).size(); ++jj) {
+                                vegasMatrix.set(i, jj,
+                                        values.get(i * entriesPerProduct
+                                                + numberRates + 1 + jj));
+                                standardErrors.set(i, jj,
+                                        errors.get(i * entriesPerProduct
+                                                + numberRates + 1 + jj));
+                            }
+                            for (int jj = 0; jj < numberRates; ++jj) {
+                                deltasMatrix.set(i, jj,
+                                        values.get(i * entriesPerProduct + 1 + jj));
+                                deltasErrors.set(i, jj,
+                                        errors.get(i * entriesPerProduct + 1 + jj));
+                            }
+                        }
+
+                        // first get the terminal vols
+
+                        Matrix totalCovariance = marketModel.totalCovariance(
+                                marketModel.numberOfSteps() - 1);
+
+                        List<Double> truePrices = filledList(
+                                caplets.numberOfProducts(), 0.0);
+
+                        for (int r = 0; r < truePrices.size(); ++r) {
+                            truePrices.set(r, new BlackCalculator(
+                                    displacedPayoffs.get(r), todaysForwards.get(r),
+                                    Math.sqrt(totalCovariance.get(r, r)),
+                                    todaysDiscounts.get(r + 1)
+                                            * (rateTimes.get(r + 1) - rateTimes.get(r)))
+                                    .value());
+                        }
+
+                        for (int b = 0; b < vegaBumps.get(0).size(); ++b) {
+
+                            List<Double> bumpedPrices = filledList(
+                                    truePrices.size(), 0.0);
+                            List<Double> variances = filledList(
+                                    truePrices.size(), 0.0);
+                            List<Double> vegas = filledList(truePrices.size(), 0.0);
+
+                            for (int step = 0; step < marketModel.numberOfSteps();
+                                 ++step) {
+                                Matrix pseudoRoot = deepCopyMatrix(
+                                        marketModel.pseudoRoot(step));
+                                for (int rate = 0; rate < numberRates; ++rate)
+                                    for (int f = 0;
+                                         f < marketModel.numberOfFactors(); ++f)
+                                        pseudoRoot.addEq(rate, f,
+                                                vegaBumps.get(step).get(b).get(rate, f));
+
+                                for (int rate = step; rate < marketModel.numberOfRates();
+                                     ++rate) {
+                                    double variance = 0.0;
+                                    for (int f = 0;
+                                         f < marketModel.numberOfFactors(); ++f)
+                                        variance += pseudoRoot.get(rate, f)
+                                                * pseudoRoot.get(rate, f);
+
+                                    variances.set(rate,
+                                            variances.get(rate) + variance);
+                                }
+                            }
+
+                            for (int r = 0; r < truePrices.size(); ++r) {
+
+                                bumpedPrices.set(r, new BlackCalculator(
+                                        displacedPayoffs.get(r),
+                                        todaysForwards.get(r),
+                                        Math.sqrt(variances.get(r)),
+                                        todaysDiscounts.get(r + 1)
+                                                * (rateTimes.get(r + 1)
+                                                - rateTimes.get(r)))
+                                        .value());
+
+                                vegas.set(r,
+                                        bumpedPrices.get(r) - truePrices.get(r));
+
+                            }
+
+                            for (int s = 0; s < truePrices.size(); ++s) {
+                                double mcVega = vegasMatrix.get(s, b);
+                                double analyticVega = vegas.get(s);
+                                double thisError = mcVega - analyticVega;
+                                double thisSE = standardErrors.get(s, b);
+
+                                if (Math.abs(thisError) > 0.0) {
+                                    double errorInSEs = thisError / thisSE;
+                                    biggestError = Math.max(Math.abs(errorInSEs),
+                                            biggestError);
+
+                                    if (Math.abs(errorInSEs) > 4.5) {
+                                        if (deflate == 0)
+                                            ++numberUndeflatedErrors;
+                                        else
+                                            ++numberDeflatedErrors;
+                                    }
+                                }
+
+                            }
+
+                        }
+
+                        // for deltas and prices the pathwise vega engine
+                        // should agree precisely with the pathwiseaccounting
+                        // engine so lets see if it does
+
+                        MarketModelPathwiseMultiProduct productToUse2;
+
+                        if (deflate == 0)
+                            productToUse2 = caplets.copy();
+                        else
+                            productToUse2 = capletsDeflated.copy();
+
+                        SequenceStatisticsInc stats = new SequenceStatisticsInc(
+                                productToUse2.numberOfProducts()
+                                        * (todaysForwards.size() + 1));
+                        {
+                            PathwiseAccountingEngine accountingengine =
+                                    new PathwiseAccountingEngine(
+                                            new LogNormalFwdRateEuler(
+                                                    evolver), // method relies heavily on LMM Euler
+                                            productToUse2,
+                                            marketModel, // we need pseudo-roots and displacements
+                                            initialNumeraireValue);
+
+                            accountingengine.multiplePathValues(stats,
+                                    pathsToDoSimulation);
+                        }
+
+                        List<Double> valuesAndDeltas2 = stats.mean();
+                        List<Double> errors2 = stats.errorEstimate();
+
+                        List<Double> prices2 = filledList(
+                                productToUse2.numberOfProducts(), 0.0);
+                        List<Double> priceErrors2 = filledList(
+                                productToUse2.numberOfProducts(), 0.0);
+
+                        Matrix deltas2 = new Matrix(
+                                productToUse2.numberOfProducts(),
+                                todaysForwards.size(), 0.0);
+                        Matrix deltasErrors2 = new Matrix(
+                                productToUse2.numberOfProducts(),
+                                todaysForwards.size(), 0.0);
+                        List<Double> modelPrices2 = filledList(
+                                productToUse2.numberOfProducts(), 0.0);
+
+                        for (int i = 0; i < productToUse2.numberOfProducts(); ++i) {
+                            prices2.set(i, valuesAndDeltas2.get(i));
+                            priceErrors2.set(i, errors2.get(i));
+
+                            for (int jj = 0; jj < todaysForwards.size(); ++jj) {
+                                deltas2.set(i, jj, valuesAndDeltas2.get(
+                                        (i + 1) * productToUse2.numberOfProducts()
+                                                + jj));
+                                deltasErrors2.set(i, jj, errors2.get(
+                                        (i + 1) * productToUse2.numberOfProducts()
+                                                + jj));
+                            }
+                        }
+
+                        for (int i = 0; i < productToUse2.numberOfProducts(); ++i) {
+
+                            double priceDiff = prices2.get(i) - prices.get(i);
+
+                            if (Math.abs(priceDiff) > 5 * priceErrors2.get(i)) // two sets of standard error
+                                fail("pathwise accounting engine and pathwise vegas accounting engine not in perfect agreement for price.\n product "
+                                        + i + ",  vega computed price: "
+                                        + prices.get(j) + " previous price "
+                                        + prices2.get(j) + ", deflate " + deflate
+                                        + "\n");
+
+                            for (int jj = 0; jj < todaysForwards.size(); ++jj) {
+                                double error = deltas2.get(i, jj)
+                                        - deltasMatrix.get(i, jj);
+                                if (Math.abs(error) > 5 * deltasErrors2.get(i, jj)) // two sets of standard error
+                                    fail("pathwise accounting engine and pathwise vegas accounting engine not in perfect agreement for dealts.\n product "
+                                            + i + ", rate " + jj
+                                            + " vega computed delta: "
+                                            + deltasMatrix.get(i, jj)
+                                            + " previous delta "
+                                            + deltas2.get(i, jj) + "\n");
+                            }
+                        }
+                    } // end of k loop over measures
+                } // end of loop over deflation
+
+                if (numberDeflatedErrors + numberUndeflatedErrors > 0)
+                    fail("Model pathwise vega test for caplets fails : "
+                            + numberDeflatedErrors + " deflated errors and "
+                            + numberUndeflatedErrors
+                            + " undeflated errors , biggest error in SEs is "
+                            + biggestError + "\n");
+
+                {
+                    //  now do a simulation test for the vegas for caps
+
+                    List<VolatilityBumpInstrumentJacobian.Cap> caps =
+                            new ArrayList<>();
+
+                    double capStrikeCaps = todaysForwards.get(0);
+
+                    for (int i = 0; i + 2 < numberRates; i = i + 3) {
+                        VolatilityBumpInstrumentJacobian.Cap nextCap =
+                                new VolatilityBumpInstrumentJacobian.Cap();
+                        //            nextCap.startIndex_ = i;
+                        //            nextCap.endIndex_ = i+3;
+                        //             nextCap.strike_ = capStrike;
+                        //             caps.push_back(nextCap);
+
+                        //        nextCap.startIndex_ = i+1;
+                        //      nextCap.endIndex_ = i+3;
+                        //    nextCap.strike_ = capStrike;
+                        //  caps.push_back(nextCap);
+
+                        nextCap.startIndex_ = i + 2;
+                        nextCap.endIndex_ = i + 3;
+                        nextCap.strike_ = capStrikeCaps;
+                        caps.add(nextCap);
+
+                    }
+
+                    List<int[]> startsAndEnds = new ArrayList<>(caps.size());
+
+                    for (int r = 0; r < caps.size(); ++r) {
+                        startsAndEnds.add(new int[]{
+                                caps.get(r).startIndex_, caps.get(r).endIndex_});
+                    }
+
+                    MarketModelPathwiseMultiDeflatedCap capsDeflated =
+                            new MarketModelPathwiseMultiDeflatedCap(
+                                    rateTimes,
+                                    accruals,
+                                    paymentTimes,
+                                    capStrikeCaps,
+                                    startsAndEnds);
+
+                    for (MeasureType measure : measures) {
+
+                        List<Integer> numeraires = makeMeasure(product, measure);
+
+                        MTBrownianGeneratorFactory generatorFactory =
+                                new MTBrownianGeneratorFactory(seed_);
+                        MTBrownianGeneratorFactory generatorFactory2 =
+                                new MTBrownianGeneratorFactory(seed_);
+
+                        boolean logNormal = true;
+                        MarketModel marketModel =
+                                makeMarketModel(logNormal, evolution, factors,
+                                        marketModels[j]);
+
+                        LogNormalFwdRateEuler evolver = new LogNormalFwdRateEuler(
+                                marketModel,
+                                generatorFactory,
+                                numeraires);
+
+                        LogNormalFwdRateEuler evolver2 = new LogNormalFwdRateEuler(
+                                marketModel,
+                                generatorFactory2,
+                                numeraires);
+
+                        //      SequenceStatistics stats(product.numberOfProducts()*(todaysForwards.size()+1+vegaBumps[0].size()));
+
+                        String config = marketModelTypeToString(marketModels[j])
+                                + ", " + factors
+                                + (factors > 1
+                                ? (factors == todaysForwards.size()
+                                ? " (full) factors, "
+                                : " factors, ")
+                                : " factor,")
+                                + measureTypeToString(measure) + ", "
+                                + "MT BGF";
+                        if (printReport_)
+                            System.out.println("    " + config);
+
+                        List<Double> values = new ArrayList<>();
+                        List<Double> errors = new ArrayList<>();
+
+                        List<Double> values2 = new ArrayList<>();
+                        List<Double> errors2 = new ArrayList<>();
+
+                        {
+
+                            PathwiseVegasOuterAccountingEngine accountingengine =
+                                    new PathwiseVegasOuterAccountingEngine(
+                                            new LogNormalFwdRateEuler(
+                                                    evolver2), // method relies heavily on LMM Euler
+                                            capsDeflated,
+                                            marketModel, // we need pseudo-roots and displacements
+                                            vegaBumps,
+                                            initialNumeraireValue);
+
+                            accountingengine.multiplePathValues(values2, errors2,
+                                    pathsToDoSimulation);
+                        }
+
+                        {
+
+                            PathwiseVegasAccountingEngine accountingengine =
+                                    new PathwiseVegasAccountingEngine(
+                                            new LogNormalFwdRateEuler(
+                                                    evolver), // method relies heavily on LMM Euler
+                                            capsDeflated,
+                                            marketModel, // we need pseudo-roots and displacements
+                                            vegaBumps,
+                                            initialNumeraireValue);
+
+                            accountingengine.multiplePathValues(values, errors,
+                                    pathsToDoSimulation);
+                        }
+
+                        // first test to see that the two implementation give the same results
+
+                        {
+                            double tol = 1E-8;
+
+                            int numberMeanFailures = 0;
+
+                            for (int i = 0; i < values.size(); ++i)
+                                if (Math.abs(values.get(i) - values2.get(i)) > tol)
+                                    ++numberMeanFailures;
+
+                            if (numberMeanFailures > 0)
+                                fail("Comparison of Pathwise vegas accounting engine and PathwiseVegasOuterAccountingEngine yields discrepancies:"
+                                        + numberMeanFailures
+                                        + "  out of "
+                                        + values.size());
+
+                        }
+
+
+                        // we have computed the vegas now we have to test them
+                        // against the analytic values
+
+                        // extract into easier format
+
+                        Matrix vegasMatrix = new Matrix(
+                                capsDeflated.numberOfProducts(),
+                                vegaBumps.get(0).size(), 0.0);
+                        Matrix standardErrors = new Matrix(
+                                capsDeflated.numberOfProducts(),
+                                vegaBumps.get(0).size(), 0.0);
+                        int entriesPerProduct = 1 + numberRates
+                                + vegaBumps.get(0).size();
+
+                        for (int i = 0; i < capsDeflated.numberOfProducts(); ++i)
+                            for (int jj = 0; jj < vegaBumps.get(0).size(); ++jj) {
+                                vegasMatrix.set(i, jj,
+                                        values.get(i * entriesPerProduct
+                                                + numberRates + 1 + jj));
+                                standardErrors.set(i, jj,
+                                        errors.get(i * entriesPerProduct
+                                                + numberRates + 1 + jj));
+                            }
+
+                        // first get the terminal vols
+
+                        Matrix totalCovariance = marketModel.totalCovariance(
+                                marketModel.numberOfSteps() - 1);
+
+                        List<Double> trueCapletPrices = filledList(numberRates, 0.0);
+                        StrikedTypePayoff dispayoff = new
+                                PlainVanillaPayoff(Option.Type.Call,
+                                capStrikeCaps + displacement);
+
+                        for (int r = 0; r < trueCapletPrices.size(); ++r)
+                            trueCapletPrices.set(r, new BlackCalculator(dispayoff,
+                                    todaysForwards.get(r),
+                                    Math.sqrt(totalCovariance.get(r, r)),
+                                    todaysDiscounts.get(r + 1)
+                                            * (rateTimes.get(r + 1)
+                                            - rateTimes.get(r))).value());
+
+                        List<Double> trueCapPrices = filledList(
+                                capsDeflated.numberOfProducts(), 0.0);
+                        List<Double> vegaCaps = filledList(
+                                capsDeflated.numberOfProducts(), 0.0);
+
+                        for (int s = 0; s < capsDeflated.numberOfProducts(); ++s) {
+
+                            trueCapPrices.set(s, 0.0);
+
+                            for (int t = caps.get(s).startIndex_;
+                                 t < caps.get(s).endIndex_; ++t)
+                                trueCapPrices.set(s,
+                                        trueCapPrices.get(s)
+                                                + trueCapletPrices.get(t));
+                        }
+
+                        int numberErrors = 0;
+
+                        for (int b = 0; b < vegaBumps.get(0).size(); ++b) {
+
+                            List<Double> bumpedCapletPrices = filledList(
+                                    trueCapletPrices.size(), 0.0);
+                            //                  std::vector<Real> bumpedCapPrices(trueCapPrices.size());
+
+                            List<Double> variances = filledList(
+                                    trueCapletPrices.size(), 0.0);
+                            List<Double> vegasCaplets = filledList(
+                                    trueCapletPrices.size(), 0.0);
+
+                            for (int step = 0; step < marketModel.numberOfSteps();
+                                 ++step) {
+                                Matrix pseudoRoot = deepCopyMatrix(
+                                        marketModel.pseudoRoot(step));
+                                for (int rate = 0; rate < numberRates; ++rate)
+                                    for (int f = 0;
+                                         f < marketModel.numberOfFactors(); ++f)
+                                        pseudoRoot.addEq(rate, f,
+                                                vegaBumps.get(step).get(b).get(rate, f));
+
+                                for (int rate = step;
+                                     rate < marketModel.numberOfRates(); ++rate) {
+                                    double variance = 0.0;
+                                    for (int f = 0;
+                                         f < marketModel.numberOfFactors(); ++f)
+                                        variance += pseudoRoot.get(rate, f)
+                                                * pseudoRoot.get(rate, f);
+
+                                    variances.set(rate,
+                                            variances.get(rate) + variance);
+                                }
+                            }
+
+                            for (int r = 0; r < trueCapletPrices.size(); ++r) {
+                                bumpedCapletPrices.set(r, new BlackCalculator(
+                                        dispayoff, todaysForwards.get(r),
+                                        Math.sqrt(variances.get(r)),
+                                        todaysDiscounts.get(r + 1)
+                                                * (rateTimes.get(r + 1)
+                                                - rateTimes.get(r))).value());
+
+                                vegasCaplets.set(r,
+                                        bumpedCapletPrices.get(r)
+                                                - trueCapletPrices.get(r));
+                            }
+
+                            for (int s = 0; s < capsDeflated.numberOfProducts(); ++s) {
+                                vegaCaps.set(s, 0.0);
+
+                                for (int t = caps.get(s).startIndex_;
+                                     t < caps.get(s).endIndex_; ++t)
+                                    vegaCaps.set(s,
+                                            vegaCaps.get(s) + vegasCaplets.get(t));
+                            }
+
+                            for (int s = 0; s < capsDeflated.numberOfProducts(); ++s) {
+                                double mcVega = vegasMatrix.get(s, b);
+                                double analyticVega = vegaCaps.get(s);
+                                double thisError = mcVega - analyticVega;
+                                double thisSE = standardErrors.get(s, b);
+
+                                if (Math.abs(thisError) > 0.0) {
+                                    double errorInSEs = Math.abs(thisError / thisSE);
+
+                                    if (errorInSEs > 4.0)
+                                        ++numberErrors;
+                                }
+
+                            }
+
+                        }
+
+                        if (numberErrors > 0)
+                            fail("caps Pathwise vega test fails : " + numberErrors
+                                    + "\n");
+
+                    } // end of k loop over measures
+                }
+            }
+        }
+
+        if (!boostErrors.isEmpty())
+            fail(String.join("\n", boostErrors));
+    }
+
+    private static Matrix deepCopyMatrix(final Matrix source) {
+        Matrix result = new Matrix(source.rows(), source.cols(), 0.0);
+        for (int i = 0; i < source.rows(); ++i)
+            for (int j = 0; j < source.cols(); ++j)
+                result.set(i, j, source.get(i, j));
+        return result;
     }
 
     private String configString(MarketModelType j, int factors,
