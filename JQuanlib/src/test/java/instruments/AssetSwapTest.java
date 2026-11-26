@@ -2,14 +2,18 @@ package instruments;
 
 import jquant.CashFlow;
 import jquant.Compounding;
+import jquant.Handle;
 import jquant.PricingEngine;
 import jquant.RelinkableHandle;
 import jquant.SavedSettings;
 import jquant.Settings;
+import jquant.cashflows.AnalyticHaganPricer;
 import jquant.cashflows.BlackIborCouponPricer;
 import jquant.cashflows.CashFlows;
 import jquant.cashflows.CashflowUtil;
+import jquant.cashflows.CmsLeg;
 import jquant.cashflows.FixedRateLeg;
+import jquant.cashflows.GFunctionFactory;
 import jquant.cashflows.IborCoupon;
 import jquant.cashflows.IborLeg;
 import jquant.cashflows.SimpleCashFlow;
@@ -17,15 +21,20 @@ import jquant.indexes.Estr;
 import jquant.indexes.Euribor;
 import jquant.indexes.IborIndex;
 import jquant.indexes.IndexManager;
+import jquant.indexes.SwapIndex;
 import jquant.instruments.AssetSwap;
 import jquant.instruments.Bond;
+import jquant.instruments.CmsRateBond;
 import jquant.instruments.FixedRateBond;
 import jquant.instruments.FloatingRateBond;
 import jquant.instruments.ZeroCouponBond;
 import jquant.pricingengines.DiscountingBondEngine;
 import jquant.pricingengines.DiscountingMultiLegSwapEngine;
 import jquant.pricingengines.bond.BondFunctions;
+import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
+import jquant.termstructures.volatility.Sarb;
+import jquant.termstructures.volatility.swaption.ConstantSwaptionVolatility;
 import jquant.termstructures.yield.FlatForward;
 import jquant.time.BusinessDayConvention;
 import jquant.time.Calendar;
@@ -37,6 +46,7 @@ import jquant.time.Month;
 import jquant.time.Period;
 import jquant.time.Schedule;
 import jquant.time.TimeUnit;
+import jquant.time.calendars.NullCalendar;
 import jquant.time.calendars.Target;
 import jquant.time.daycounters.Actual360;
 import jquant.time.daycounters.Actual365Fixed;
@@ -67,9 +77,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * settlementDate, npvDate); the later cases use the official
  * one-argument constructor, which leaves the optional arguments defaulted.
  *
- * <p>The CMS/CmsRateBond branches of the official cases are out of scope
- * and are skipped: Java has no CMS pricer, so no substitute results are
- * asserted.
+ * <p>The CMS branches use the official {@link CmsRateBond} and generic
+ * {@link CmsLeg} constructions with the official {@code CommonVars}
+ * {@code swapIndex} and {@code cmspricer} ({@link AnalyticHaganPricer} over a
+ * {@link ConstantSwaptionVolatility}), as in {@code assetswap.cpp}.
  */
 public class AssetSwapTest {
 
@@ -91,7 +102,9 @@ public class AssetSwapTest {
     /** Official {@code CommonVars} from test-suite/assetswap.cpp. */
     private static class CommonVars {
         final IborIndex iborIndex;
+        final SwapIndex swapIndex;
         final BlackIborCouponPricer pricer;
+        final AnalyticHaganPricer cmspricer;
         final double spread;
         final double nonnullspread;
         final double faceAmount;
@@ -110,7 +123,20 @@ public class AssetSwapTest {
             termStructure.linkTo(
                     new FlatForward(today, 0.05, new Actual365Fixed()), true);
             iborIndex = new Euribor(new Period(Frequency.SEMIANNUAL), termStructure);
+            swapIndex = new SwapIndex("EuriborSwapIsdaFixA",
+                    new Period(10, TimeUnit.YEARS), 2,
+                    iborIndex.currency(), iborIndex.fixingCalendar(),
+                    new Period(Frequency.ANNUAL),
+                    BusinessDayConvention.UNADJUSTED,
+                    iborIndex.dayCounter(), iborIndex);
             pricer = new BlackIborCouponPricer();
+            cmspricer = new AnalyticHaganPricer(
+                    new Handle<>(new ConstantSwaptionVolatility(today,
+                            new NullCalendar(), BusinessDayConvention.FOLLOWING,
+                            0.2, new Actual365Fixed(),
+                            Sarb.VolatilityType.ShiftedLognormal, 0.0), true),
+                    GFunctionFactory.YieldCurveModel.Standard,
+                    new Handle<>(new SimpleQuote(0.01), true));
         }
     }
 
@@ -167,6 +193,36 @@ public class AssetSwapTest {
                                         int settlementDays,
                                         Date startDate, Date maturityDate) {
         List<CashFlow> leg = new ArrayList<>();
+        leg.add(new SimpleCashFlow(100.0, calendar.adjust(
+                maturityDate, BusinessDayConvention.FOLLOWING)));
+        return new Bond(settlementDays, calendar, vars.faceAmount,
+                maturityDate, startDate, leg);
+    }
+
+    /**
+     * Generic CMS bond of the official generic-bond cases:
+     * {@link CmsLeg} plus an explicit redemption {@code SimpleCashFlow}.
+     * Official bond 1 sets caps/floors (no gearing), bond 2 sets a gearing
+     * (no caps/floors); a {@code null} argument leaves that official default
+     * in place, so only the official builder calls are made.
+     */
+    private static Bond genericCmsBond(CommonVars vars, Calendar calendar,
+                                       int settlementDays, int fixingDays,
+                                       Date startDate, Date maturityDate,
+                                       Schedule schedule,
+                                       Double gearing, List<Double> caps,
+                                       List<Double> floors, boolean inArrears) {
+        CmsLeg cmsLeg = new CmsLeg(schedule, vars.swapIndex)
+                .withNotionals(vars.faceAmount)
+                .withPaymentDayCounter(
+                        new Thirty360(Thirty360.Convention.BondBasis))
+                .withFixingDays(fixingDays);
+        if (caps != null)
+            cmsLeg.withCaps(caps).withFloors(floors);
+        if (gearing != null)
+            cmsLeg.withGearings(gearing);
+        cmsLeg.inArrears(inArrears);
+        List<CashFlow> leg = cmsLeg.leg();
         leg.add(new SimpleCashFlow(100.0, calendar.adjust(
                 maturityDate, BusinessDayConvention.FOLLOWING)));
         return new Bond(settlementDays, calendar, vars.faceAmount,
@@ -680,13 +736,13 @@ public class AssetSwapTest {
     }
 
     /**
-     * Official {@code testImpliedValue} (Fixed + Floating + Zero branches).
+     * Official {@code testImpliedValue} (Fixed + Floating + CMS + Zero
+     * branches).
      *
      * <p>Official {@code DiscountingSwapEngine(termStructure)} maps to the
      * one-argument Java {@link DiscountingMultiLegSwapEngine}; both leave the
      * settlement/NPV dates empty (the curve reference date) and the
-     * include-settlement-date-flows flag to the settings. The CMS branches are
-     * out of DON-17 scope (Java has no {@code CmsRateBond}).
+     * include-settlement-date-flows flag to the settings.
      */
     @Test
     public void testImpliedValue() {
@@ -871,9 +927,81 @@ public class AssetSwapTest {
         checkZeroSpreadPrice("floater", floatingBondPrice2,
                 floatingBondAssetSwapPrice2, error5, tolerance2);
 
-        // CMS Underlying bonds (Isin: XS0228052402 CRDIT 0 8/22/20 and
-        // Isin: XS0218766664 ISPIM 0 5/6/15) are out of DON-17 scope:
-        // Java has no CmsRateBond/CMS pricer, so those branches are skipped.
+        // CMS Underlying bond (Isin: XS0228052402 CRDIT 0 8/22/20)
+        // maturity doesn't occur on a business day
+
+        Schedule cmsBondSchedule1 = new Schedule(
+                new Date(22, Month.AUGUST, 2005),
+                new Date(22, Month.AUGUST, 2020),
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond1 = new CmsRateBond(settlementDays, vars.faceAmount,
+                cmsBondSchedule1,
+                vars.swapIndex,
+                new Thirty360(Thirty360.Convention.BondBasis),
+                BusinessDayConvention.FOLLOWING, fixingDays,
+                List.of(1.0), List.of(0.0),
+                List.of(0.055), List.of(0.025),
+                inArrears,
+                100.0, new Date(22, Month.AUGUST, 2005));
+
+        cmsBond1.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond1.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(18, Month.AUGUST, 2006), 0.04158, false);
+        double cmsBondPrice1 = cmsBond1.cleanPrice();
+        AssetSwap cmsBondAssetSwap1 = new AssetSwap(payFixedRate,
+                cmsBond1, cmsBondPrice1,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondAssetSwap1.setPricingEngine(swapEngine);
+        double cmsBondAssetSwapPrice1 = cmsBondAssetSwap1.fairCleanPrice();
+        double error6 = Math.abs(cmsBondAssetSwapPrice1 - cmsBondPrice1);
+        checkZeroSpreadPrice("cms bond", cmsBondPrice1,
+                cmsBondAssetSwapPrice1, error6, tolerance2);
+
+        // CMS Underlying bond (Isin: XS0218766664 ISPIM 0 5/6/15)
+        // maturity occurs on a business day
+
+        Schedule cmsBondSchedule2 = new Schedule(
+                new Date(6, Month.MAY, 2005),
+                new Date(6, Month.MAY, 2015),
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond2 = new CmsRateBond(settlementDays, vars.faceAmount,
+                cmsBondSchedule2,
+                vars.swapIndex,
+                new Thirty360(Thirty360.Convention.BondBasis),
+                BusinessDayConvention.FOLLOWING, fixingDays,
+                List.of(0.84), List.of(0.0),
+                List.of(), List.of(),
+                inArrears,
+                100.0, new Date(6, Month.MAY, 2005));
+
+        cmsBond2.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond2.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(4, Month.MAY, 2006), 0.04217, false);
+        double cmsBondPrice2 = cmsBond2.cleanPrice();
+        AssetSwap cmsBondAssetSwap2 = new AssetSwap(payFixedRate,
+                cmsBond2, cmsBondPrice2,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondAssetSwap2.setPricingEngine(swapEngine);
+        double cmsBondAssetSwapPrice2 = cmsBondAssetSwap2.fairCleanPrice();
+        double error7 = Math.abs(cmsBondAssetSwapPrice2 - cmsBondPrice2);
+        checkZeroSpreadPrice("cms bond", cmsBondPrice2,
+                cmsBondAssetSwapPrice2, error7, tolerance2);
 
         // Zero Coupon bond (Isin: DE0004771662 IBRD 0 12/20/15)
         // maturity doesn't occur on a business day
@@ -896,10 +1024,9 @@ public class AssetSwapTest {
         zeroCpnAssetSwap1.setPricingEngine(swapEngine);
         double zeroCpnBondAssetSwapPrice1 =
                 zeroCpnAssetSwap1.fairCleanPrice();
-        // Official source typo: error8 compares the CMS prices while its
-        // message describes this zero-coupon bond. CMS is out of scope, so
-        // implement the check the official message describes.
-        double error8 = Math.abs(zeroCpnBondAssetSwapPrice1 - zeroCpnBondPrice1);
+        // Official source typo: error8 compares the CMS bond prices while the
+        // failure message describes this zero-coupon bond. Kept as official.
+        double error8 = Math.abs(cmsBondAssetSwapPrice1 - cmsBondPrice1);
         checkZeroSpreadPrice("zero cpn bond", zeroCpnBondPrice1,
                 zeroCpnBondAssetSwapPrice1, error8, tolerance2);
 
@@ -925,17 +1052,18 @@ public class AssetSwapTest {
         double zeroCpnBondAssetSwapPrice2 =
                 zeroCpnAssetSwap2.fairCleanPrice();
         // Official source typo as for error8 above.
-        double error9 = Math.abs(zeroCpnBondAssetSwapPrice2 - zeroCpnBondPrice2);
+        double error9 = Math.abs(cmsBondAssetSwapPrice2 - cmsBondPrice2);
         checkZeroSpreadPriceWide(zeroCpnBondPrice2,
                 zeroCpnBondAssetSwapPrice2, error9, tolerance2);
     }
 
     /**
-     * Official {@code testMarketASWSpread} (Fixed + Floating + Zero branches).
+     * Official {@code testMarketASWSpread} (Fixed + Floating + CMS + Zero
+     * branches).
      *
      * <p>Same one-argument mapping of the official
      * {@code DiscountingSwapEngine(termStructure)} as in
-     * {@link #testImpliedValue()}. CMS branches are out of DON-17 scope.
+     * {@link #testImpliedValue()}. Includes the official CMS bonds.
      */
     @Test
     public void testMarketASWSpread() {
@@ -1154,9 +1282,107 @@ public class AssetSwapTest {
         checkMarketSpread("floating bond", floatingBondMktAssetSwapSpread2,
                 floatingBondParAssetSwapSpread2, error4, tolerance2);
 
-        // CMS Underlying bonds (Isin: XS0228052402 CRDIT 0 8/22/20 and
-        // Isin: XS0218766664 ISPIM 0 5/6/15) are out of DON-17 scope:
-        // Java has no CmsRateBond/CMS pricer, so those branches are skipped.
+        // CMS Underlying bond (Isin: XS0228052402 CRDIT 0 8/22/20)
+        // maturity doesn't occur on a business day
+
+        Schedule cmsBondSchedule1 = new Schedule(
+                new Date(22, Month.AUGUST, 2005),
+                new Date(22, Month.AUGUST, 2020),
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond1 = new CmsRateBond(settlementDays, vars.faceAmount,
+                cmsBondSchedule1,
+                vars.swapIndex,
+                new Thirty360(Thirty360.Convention.BondBasis),
+                BusinessDayConvention.FOLLOWING, fixingDays,
+                List.of(1.0), List.of(0.0),
+                List.of(0.055), List.of(0.025),
+                inArrears,
+                100.0, new Date(22, Month.AUGUST, 2005));
+
+        cmsBond1.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond1.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(18, Month.AUGUST, 2006), 0.04158, false);
+        // market price observed on 7th June 2007
+        double cmsBondMktPrice1 = 88.45;
+        double cmsBondMktFullPrice1 =
+                cmsBondMktPrice1 + cmsBond1.accruedAmount();
+        AssetSwap cmsBondParAssetSwap1 = new AssetSwap(payFixedRate,
+                cmsBond1, cmsBondMktPrice1,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondParAssetSwap1.setPricingEngine(swapEngine);
+        double cmsBondParAssetSwapSpread1 =
+                cmsBondParAssetSwap1.fairSpread();
+        AssetSwap cmsBondMktAssetSwap1 = new AssetSwap(payFixedRate,
+                cmsBond1, cmsBondMktPrice1,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                mktAssetSwap);
+        cmsBondMktAssetSwap1.setPricingEngine(swapEngine);
+        double cmsBondMktAssetSwapSpread1 = cmsBondMktAssetSwap1.fairSpread();
+        double error5 = Math.abs(cmsBondMktAssetSwapSpread1
+                - 100 * cmsBondParAssetSwapSpread1 / cmsBondMktFullPrice1);
+        checkMarketSpread("cms bond", cmsBondMktAssetSwapSpread1,
+                cmsBondParAssetSwapSpread1, error5, tolerance2);
+
+        // CMS Underlying bond (Isin: XS0218766664 ISPIM 0 5/6/15)
+        // maturity occurs on a business day
+
+        Schedule cmsBondSchedule2 = new Schedule(
+                new Date(6, Month.MAY, 2005),
+                new Date(6, Month.MAY, 2015),
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond2 = new CmsRateBond(settlementDays, vars.faceAmount,
+                cmsBondSchedule2,
+                vars.swapIndex,
+                new Thirty360(Thirty360.Convention.BondBasis),
+                BusinessDayConvention.FOLLOWING, fixingDays,
+                List.of(0.84), List.of(0.0),
+                List.of(), List.of(),
+                inArrears,
+                100.0, new Date(6, Month.MAY, 2005));
+
+        cmsBond2.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond2.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(4, Month.MAY, 2006), 0.04217, false);
+        // market price observed on 7th June 2007
+        double cmsBondMktPrice2 = 94.08;
+        double cmsBondMktFullPrice2 =
+                cmsBondMktPrice2 + cmsBond2.accruedAmount();
+        AssetSwap cmsBondParAssetSwap2 = new AssetSwap(payFixedRate,
+                cmsBond2, cmsBondMktPrice2,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondParAssetSwap2.setPricingEngine(swapEngine);
+        double cmsBondParAssetSwapSpread2 =
+                cmsBondParAssetSwap2.fairSpread();
+        AssetSwap cmsBondMktAssetSwap2 = new AssetSwap(payFixedRate,
+                cmsBond2, cmsBondMktPrice2,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                mktAssetSwap);
+        cmsBondMktAssetSwap2.setPricingEngine(swapEngine);
+        double cmsBondMktAssetSwapSpread2 = cmsBondMktAssetSwap2.fairSpread();
+        double error6 = Math.abs(cmsBondMktAssetSwapSpread2
+                - 100 * cmsBondParAssetSwapSpread2 / cmsBondMktFullPrice2);
+        checkMarketSpread("cms bond", cmsBondMktAssetSwapSpread2,
+                cmsBondParAssetSwapSpread2, error6, tolerance2);
 
         // Zero Coupon bond (Isin: DE0004771662 IBRD 0 12/20/15)
         // maturity doesn't occur on a business day
@@ -1238,14 +1464,13 @@ public class AssetSwapTest {
     }
 
     /**
-     * Official {@code testZSpread} (Fixed + Floating + Zero branches).
+     * Official {@code testZSpread} (Fixed + Floating + CMS + Zero branches).
      *
      * <p>No AssetSwap is built here: each bond's engine clean price is
      * compared with
      * {@link BondFunctions#cleanPrice(Bond, YieldTermStructure, double,
      * Compounding, Frequency, Date)} at the official null Z-spread
-     * ({@code vars.spread == 0.0}). The CMS branches are out of DON-17
-     * scope (Java has no {@code CmsRateBond}).
+     * ({@code vars.spread == 0.0}).
      */
     @Test
     public void testZSpread() {
@@ -1394,10 +1619,79 @@ public class AssetSwapTest {
         checkZSpreadFixedPrice(floatingBondImpliedValue2, floatingBondCleanPrice2,
                 error7, tolerance);
 
-        // CMS bonds (Isin: XS0228052402 CRDIT 0 8/22/20 and
-        // Isin: XS0218766664 ISPIM 0 5/6/15) are out of DON-17 scope:
-        // Java has no CmsRateBond/CMS pricer, so those (official error9 and
-        // error11) branches are skipped.
+        // CMS bond (Isin: XS0228052402 CRDIT 0 8/22/20)
+        // maturity doesn't occur on a business day
+
+        Schedule cmsBondSchedule1 = new Schedule(
+                new Date(22, Month.AUGUST, 2005),
+                new Date(22, Month.AUGUST, 2020),
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond1 = new CmsRateBond(settlementDays, vars.faceAmount,
+                cmsBondSchedule1,
+                vars.swapIndex,
+                new Thirty360(Thirty360.Convention.BondBasis),
+                BusinessDayConvention.FOLLOWING, fixingDays,
+                List.of(1.0), List.of(0.0),
+                List.of(0.055), List.of(0.025),
+                inArrears,
+                100.0, new Date(22, Month.AUGUST, 2005));
+
+        cmsBond1.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond1.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(18, Month.AUGUST, 2006), 0.04158, false);
+        double cmsBondImpliedValue1 = cmsBond1.cleanPrice();
+        Date cmsBondSettlementDate1 = cmsBond1.settlementDate();
+        // standard market conventions:
+        // bond's frequency + coumpounding and daycounter of the YieldCurve
+        double cmsBondCleanPrice1 = BondFunctions.cleanPrice(
+                cmsBond1, vars.termStructure.currentLink(), vars.spread,
+                vars.compounding, Frequency.ANNUAL,
+                cmsBondSettlementDate1);
+        double error9 = Math.abs(cmsBondImpliedValue1 - cmsBondCleanPrice1);
+        checkZSpreadFixedPrice(cmsBondImpliedValue1, cmsBondCleanPrice1,
+                error9, tolerance);
+
+        // CMS bond (Isin: XS0218766664 ISPIM 0 5/6/15)
+        // maturity occurs on a business day
+
+        Schedule cmsBondSchedule2 = new Schedule(
+                new Date(6, Month.MAY, 2005),
+                new Date(6, Month.MAY, 2015),
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond2 = new CmsRateBond(settlementDays, vars.faceAmount,
+                cmsBondSchedule2,
+                vars.swapIndex,
+                new Thirty360(Thirty360.Convention.BondBasis),
+                BusinessDayConvention.FOLLOWING, fixingDays,
+                List.of(0.84), List.of(0.0),
+                List.of(), List.of(),
+                inArrears,
+                100.0, new Date(6, Month.MAY, 2005));
+
+        cmsBond2.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond2.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(4, Month.MAY, 2006), 0.04217, false);
+        double cmsBondImpliedValue2 = cmsBond2.cleanPrice();
+        Date cmsBondSettlementDate2 = cmsBond2.settlementDate();
+        // standard market conventions:
+        // bond's frequency + coumpounding and daycounter of the YieldCurve
+        double cmsBondCleanPrice2 = BondFunctions.cleanPrice(
+                cmsBond2, vars.termStructure.currentLink(), vars.spread,
+                vars.compounding, Frequency.ANNUAL,
+                cmsBondSettlementDate2);
+        double error11 = Math.abs(cmsBondImpliedValue2 - cmsBondCleanPrice2);
+        checkZSpreadFixedPrice(cmsBondImpliedValue2, cmsBondCleanPrice2,
+                error11, tolerance);
 
         // Zero-Coupon bond (Isin: DE0004771662 IBRD 0 12/20/15)
         // maturity doesn't occur on a business day
@@ -1449,9 +1743,9 @@ public class AssetSwapTest {
     }
 
     /**
-     * Official {@code testGenericBondImplied} (Fixed + Floating + Zero).
-     * The generic legs are built with {@code FixedRateLeg}/{@code IborLeg} and
-     * an explicit redemption; CMS branches are out of DON-17 scope.
+     * Official {@code testGenericBondImplied} (Fixed + Floating + CMS + Zero).
+     * The generic legs are built with {@code FixedRateLeg}/{@code IborLeg}/
+     * {@code CmsLeg} and an explicit redemption.
      */
     @Test
     public void testGenericBondImplied() {
@@ -1616,9 +1910,68 @@ public class AssetSwapTest {
         checkZeroSpreadPrice("floater", floatingBondPrice2,
                 floatingBondAssetSwapPrice2, error5, tolerance2);
 
-        // CMS Underlying bonds (Isin: XS0228052402 CRDIT 0 8/22/20 and
-        // Isin: XS0218766664 ISPIM 0 5/6/15) are out of DON-17 scope:
-        // Java has no CmsRateBond/CMS pricer, so those branches are skipped.
+        // CMS Underlying bond (Isin: XS0228052402 CRDIT 0 8/22/20)
+        // maturity doesn't occur on a business day
+        Date cmsBondStartDate1 = new Date(22, Month.AUGUST, 2005);
+        Date cmsBondMaturityDate1 = new Date(22, Month.AUGUST, 2020);
+        Schedule cmsBondSchedule1 = new Schedule(
+                cmsBondStartDate1, cmsBondMaturityDate1,
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond1 = genericCmsBond(vars, bondCalendar, settlementDays,
+                fixingDays, cmsBondStartDate1, cmsBondMaturityDate1,
+                cmsBondSchedule1, null,
+                List.of(0.055), List.of(0.025), inArrears);
+        cmsBond1.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond1.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(18, Month.AUGUST, 2006), 0.04158, false);
+        double cmsBondPrice1 = cmsBond1.cleanPrice();
+        AssetSwap cmsBondAssetSwap1 = new AssetSwap(payFixedRate,
+                cmsBond1, cmsBondPrice1,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondAssetSwap1.setPricingEngine(swapEngine);
+        double cmsBondAssetSwapPrice1 = cmsBondAssetSwap1.fairCleanPrice();
+        double error6 = Math.abs(cmsBondAssetSwapPrice1 - cmsBondPrice1);
+        checkZeroSpreadPrice("cms bond", cmsBondPrice1,
+                cmsBondAssetSwapPrice1, error6, tolerance2);
+
+        // CMS Underlying bond (Isin: XS0218766664 ISPIM 0 5/6/15)
+        // maturity occurs on a business day
+        Date cmsBondStartDate2 = new Date(6, Month.MAY, 2005);
+        Date cmsBondMaturityDate2 = new Date(6, Month.MAY, 2015);
+        Schedule cmsBondSchedule2 = new Schedule(
+                cmsBondStartDate2, cmsBondMaturityDate2,
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond2 = genericCmsBond(vars, bondCalendar, settlementDays,
+                fixingDays, cmsBondStartDate2, cmsBondMaturityDate2,
+                cmsBondSchedule2, 0.84, null, null, inArrears);
+        cmsBond2.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond2.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(4, Month.MAY, 2006), 0.04217, false);
+        double cmsBondPrice2 = cmsBond2.cleanPrice();
+        AssetSwap cmsBondAssetSwap2 = new AssetSwap(payFixedRate,
+                cmsBond2, cmsBondPrice2,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondAssetSwap2.setPricingEngine(swapEngine);
+        double cmsBondAssetSwapPrice2 = cmsBondAssetSwap2.fairCleanPrice();
+        double error7 = Math.abs(cmsBondAssetSwapPrice2 - cmsBondPrice2);
+        checkZeroSpreadPrice("cms bond", cmsBondPrice2,
+                cmsBondAssetSwapPrice2, error7, tolerance2);
 
         // Zero Coupon bond (Isin: DE0004771662 IBRD 0 12/20/15)
         // maturity doesn't occur on a business day
@@ -1666,7 +2019,7 @@ public class AssetSwapTest {
     }
 
     /**
-     * Official {@code testMASWWithGenericBond} (Fixed + Floating + Zero).
+     * Official {@code testMASWWithGenericBond} (Fixed + Floating + CMS + Zero).
      */
     @Test
     public void testMASWWithGenericBond() {
@@ -1869,9 +2222,94 @@ public class AssetSwapTest {
         checkGenericMaswSpread("floating bond", floatingBondMktAssetSwapSpread2,
                 floatingBondParAssetSwapSpread2, error4, tolerance2);
 
-        // CMS Underlying bonds (Isin: XS0228052402 CRDIT 0 8/22/20 and
-        // Isin: XS0218766664 ISPIM 0 5/6/15) are out of DON-17 scope:
-        // Java has no CmsRateBond/CMS pricer, so those branches are skipped.
+        // CMS Underlying bond (Isin: XS0228052402 CRDIT 0 8/22/20)
+        // maturity doesn't occur on a business day
+        Date cmsBondStartDate1 = new Date(22, Month.AUGUST, 2005);
+        Date cmsBondMaturityDate1 = new Date(22, Month.AUGUST, 2020);
+        Schedule cmsBondSchedule1 = new Schedule(
+                cmsBondStartDate1, cmsBondMaturityDate1,
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond1 = genericCmsBond(vars, bondCalendar, settlementDays,
+                fixingDays, cmsBondStartDate1, cmsBondMaturityDate1,
+                cmsBondSchedule1, null,
+                List.of(0.055), List.of(0.025), inArrears);
+        cmsBond1.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond1.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(18, Month.AUGUST, 2006), 0.04158, false);
+        // market price observed on 7th June 2007
+        double cmsBondMktPrice1 = 88.45;
+        double cmsBondMktFullPrice1 =
+                cmsBondMktPrice1 + cmsBond1.accruedAmount();
+        AssetSwap cmsBondParAssetSwap1 = new AssetSwap(payFixedRate,
+                cmsBond1, cmsBondMktPrice1,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondParAssetSwap1.setPricingEngine(swapEngine);
+        double cmsBondParAssetSwapSpread1 =
+                cmsBondParAssetSwap1.fairSpread();
+        AssetSwap cmsBondMktAssetSwap1 = new AssetSwap(payFixedRate,
+                cmsBond1, cmsBondMktPrice1,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                mktAssetSwap);
+        cmsBondMktAssetSwap1.setPricingEngine(swapEngine);
+        double cmsBondMktAssetSwapSpread1 = cmsBondMktAssetSwap1.fairSpread();
+        double error5 = Math.abs(cmsBondMktAssetSwapSpread1
+                - 100 * cmsBondParAssetSwapSpread1 / cmsBondMktFullPrice1);
+        checkGenericMaswSpread("cms bond", cmsBondMktAssetSwapSpread1,
+                cmsBondParAssetSwapSpread1, error5, tolerance2);
+
+        // CMS Underlying bond (Isin: XS0218766664 ISPIM 0 5/6/15)
+        // maturity occurs on a business day
+        Date cmsBondStartDate2 = new Date(6, Month.MAY, 2005);
+        Date cmsBondMaturityDate2 = new Date(6, Month.MAY, 2015);
+        Schedule cmsBondSchedule2 = new Schedule(
+                cmsBondStartDate2, cmsBondMaturityDate2,
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond2 = genericCmsBond(vars, bondCalendar, settlementDays,
+                fixingDays, cmsBondStartDate2, cmsBondMaturityDate2,
+                cmsBondSchedule2, 0.84, null, null, inArrears);
+        cmsBond2.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond2.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(4, Month.MAY, 2006), 0.04217, false);
+        // market price observed on 7th June 2007
+        double cmsBondMktPrice2 = 94.08;
+        double cmsBondMktFullPrice2 =
+                cmsBondMktPrice2 + cmsBond2.accruedAmount();
+        AssetSwap cmsBondParAssetSwap2 = new AssetSwap(payFixedRate,
+                cmsBond2, cmsBondMktPrice2,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondParAssetSwap2.setPricingEngine(swapEngine);
+        double cmsBondParAssetSwapSpread2 =
+                cmsBondParAssetSwap2.fairSpread();
+        AssetSwap cmsBondMktAssetSwap2 = new AssetSwap(payFixedRate,
+                cmsBond2, cmsBondMktPrice2,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                mktAssetSwap);
+        cmsBondMktAssetSwap2.setPricingEngine(swapEngine);
+        double cmsBondMktAssetSwapSpread2 = cmsBondMktAssetSwap2.fairSpread();
+        double error6 = Math.abs(cmsBondMktAssetSwapSpread2
+                - 100 * cmsBondParAssetSwapSpread2 / cmsBondMktFullPrice2);
+        checkGenericMaswSpread("cms bond", cmsBondMktAssetSwapSpread2,
+                cmsBondParAssetSwapSpread2, error6, tolerance2);
 
         // Zero Coupon bond (Isin: DE0004771662 IBRD 0 12/20/15)
         // maturity doesn't occur on a business day
@@ -1946,7 +2384,8 @@ public class AssetSwapTest {
     }
 
     /**
-     * Official {@code testZSpreadWithGenericBond} (Fixed + Floating + Zero).
+     * Official {@code testZSpreadWithGenericBond} (Fixed + Floating + CMS +
+     * Zero).
      * The FRN checks pass the first fixed bond's settlement date, as official.
      */
     @Test
@@ -2081,9 +2520,66 @@ public class AssetSwapTest {
         checkZSpreadFixedPrice(floatingBondImpliedValue2, floatingBondCleanPrice2,
                 error7, tolerance);
 
-        // CMS Underlying bonds (Isin: XS0228052402 CRDIT 0 8/22/20 and
-        // Isin: XS0218766664 ISPIM 0 5/6/15) are out of DON-17 scope:
-        // Java has no CmsRateBond/CMS pricer, so those branches are skipped.
+        // CMS Underlying bond (Isin: XS0228052402 CRDIT 0 8/22/20)
+        // maturity doesn't occur on a business day
+        Date cmsBondStartDate1 = new Date(22, Month.AUGUST, 2005);
+        Date cmsBondMaturityDate1 = new Date(22, Month.AUGUST, 2020);
+        Schedule cmsBondSchedule1 = new Schedule(
+                cmsBondStartDate1, cmsBondMaturityDate1,
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond1 = genericCmsBond(vars, bondCalendar, settlementDays,
+                fixingDays, cmsBondStartDate1, cmsBondMaturityDate1,
+                cmsBondSchedule1, null,
+                List.of(0.055), List.of(0.025), inArrears);
+        cmsBond1.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond1.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(18, Month.AUGUST, 2006), 0.04158, false);
+        double cmsBondImpliedValue1 = cmsBond1.cleanPrice();
+        Date cmsBondSettlementDate1 = cmsBond1.settlementDate();
+        // standard market conventions:
+        // bond's frequency + coumpounding and daycounter of the YieldCurve
+        double cmsBondCleanPrice1 = BondFunctions.cleanPrice(
+                cmsBond1, vars.termStructure.currentLink(), vars.spread,
+                vars.compounding, Frequency.ANNUAL,
+                cmsBondSettlementDate1);
+        double error9 = Math.abs(cmsBondImpliedValue1 - cmsBondCleanPrice1);
+        checkZSpreadFixedPrice(cmsBondImpliedValue1, cmsBondCleanPrice1,
+                error9, tolerance);
+
+        // CMS Underlying bond (Isin: XS0218766664 ISPIM 0 5/6/15)
+        // maturity occurs on a business day
+        Date cmsBondStartDate2 = new Date(6, Month.MAY, 2005);
+        Date cmsBondMaturityDate2 = new Date(6, Month.MAY, 2015);
+        Schedule cmsBondSchedule2 = new Schedule(
+                cmsBondStartDate2, cmsBondMaturityDate2,
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond2 = genericCmsBond(vars, bondCalendar, settlementDays,
+                fixingDays, cmsBondStartDate2, cmsBondMaturityDate2,
+                cmsBondSchedule2, 0.84, null, null, inArrears);
+        cmsBond2.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond2.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(4, Month.MAY, 2006), 0.04217, false);
+        double cmsBondImpliedValue2 = cmsBond2.cleanPrice();
+        Date cmsBondSettlementDate2 = cmsBond2.settlementDate();
+        // standard market conventions:
+        // bond's frequency + coumpounding and daycounter of the YieldCurve
+        double cmsBondCleanPrice2 = BondFunctions.cleanPrice(
+                cmsBond2, vars.termStructure.currentLink(), vars.spread,
+                vars.compounding, Frequency.ANNUAL,
+                cmsBondSettlementDate2);
+        double error11 = Math.abs(cmsBondImpliedValue2 - cmsBondCleanPrice2);
+        checkZSpreadFixedPrice(cmsBondImpliedValue2, cmsBondCleanPrice2,
+                error11, tolerance);
 
         // Zero Coupon bond (Isin: DE0004771662 IBRD 0 12/20/15)
         // maturity doesn't occur on a business day
@@ -2130,7 +2626,7 @@ public class AssetSwapTest {
 
     /**
      * Official {@code testSpecializedBondVsGenericBond} (Fixed + Floating +
-     * Zero). The official clean/dirty messages have swapped or mistyped
+     * CMS + Zero). The official clean/dirty messages have swapped or mistyped
      * labels; the official label/value pairing and wording are kept.
      */
     @Test
@@ -2368,9 +2864,116 @@ public class AssetSwapTest {
                 "equivalent specialized  bond's theo dirty price:",
                 floatingSpecializedTheoDirty2, error8, tolerance, true);
 
-        // CMS Underlying bonds (Isin: XS0228052402 CRDIT 0 8/22/20 and
-        // Isin: XS0218766664 ISPIM 0 5/6/15) are out of DON-17 scope:
-        // Java has no CmsRateBond/CMS pricer, so those branches are skipped.
+        // CMS Underlying bond (Isin: XS0228052402 CRDIT 0 8/22/20)
+        // maturity doesn't occur on a business day
+        Date cmsBondStartDate1 = new Date(22, Month.AUGUST, 2005);
+        Date cmsBondMaturityDate1 = new Date(22, Month.AUGUST, 2020);
+        Schedule cmsBondSchedule1 = new Schedule(
+                cmsBondStartDate1, cmsBondMaturityDate1,
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond1 = genericCmsBond(vars, bondCalendar, settlementDays,
+                fixingDays, cmsBondStartDate1, cmsBondMaturityDate1,
+                cmsBondSchedule1, null,
+                List.of(0.055), List.of(0.025), inArrears);
+        cmsBond1.setPricingEngine(bondEngine);
+
+        // equivalent specialized cms bond
+        Bond cmsSpecializedBond1 = new CmsRateBond(settlementDays,
+                vars.faceAmount, cmsBondSchedule1,
+                vars.swapIndex,
+                new Thirty360(Thirty360.Convention.BondBasis),
+                BusinessDayConvention.FOLLOWING, fixingDays,
+                List.of(1.0), List.of(0.0),
+                List.of(0.055), List.of(0.025),
+                inArrears,
+                100.0, new Date(22, Month.AUGUST, 2005));
+        cmsSpecializedBond1.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond1.cashflows(), vars.cmspricer);
+        CashflowUtil.setCouponPricer(
+                cmsSpecializedBond1.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(18, Month.AUGUST, 2006), 0.04158, false);
+        double cmsBondTheoValue1 = cmsBond1.cleanPrice();
+        double cmsSpecializedBondTheoValue1 = cmsSpecializedBond1.cleanPrice();
+        double error9 = Math.abs(cmsBondTheoValue1 - cmsSpecializedBondTheoValue1);
+        checkBondPair("wrong clean price for cms bond:",
+                "generic cms bond's theo clean price:",
+                cmsBondTheoValue1,
+                "equivalent specialized bond's theo clean price:",
+                cmsSpecializedBondTheoValue1, error9, tolerance, true);
+
+        double cmsBondTheoDirty1 =
+                cmsBondTheoValue1 + cmsBond1.accruedAmount();
+        double cmsSpecializedBondTheoDirty1 =
+                cmsSpecializedBondTheoValue1
+                        + cmsSpecializedBond1.accruedAmount();
+        double error10 =
+                Math.abs(cmsBondTheoDirty1 - cmsSpecializedBondTheoDirty1);
+        checkBondPair("wrong dirty price for cms bond:",
+                "generic cms bond's theo dirty price:",
+                cmsBondTheoDirty1,
+                "specialized cms bond's theo dirty price:",
+                cmsSpecializedBondTheoDirty1, error10, tolerance, true);
+
+        // CMS Underlying bond (Isin: XS0218766664 ISPIM 0 5/6/15)
+        // maturity occurs on a business day
+        Date cmsBondStartDate2 = new Date(6, Month.MAY, 2005);
+        Date cmsBondMaturityDate2 = new Date(6, Month.MAY, 2015);
+        Schedule cmsBondSchedule2 = new Schedule(
+                cmsBondStartDate2, cmsBondMaturityDate2,
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond2 = genericCmsBond(vars, bondCalendar, settlementDays,
+                fixingDays, cmsBondStartDate2, cmsBondMaturityDate2,
+                cmsBondSchedule2, 0.84, null, null, inArrears);
+        cmsBond2.setPricingEngine(bondEngine);
+
+        // equivalent specialized cms bond
+        Bond cmsSpecializedBond2 = new CmsRateBond(settlementDays,
+                vars.faceAmount, cmsBondSchedule2,
+                vars.swapIndex,
+                new Thirty360(Thirty360.Convention.BondBasis),
+                BusinessDayConvention.FOLLOWING, fixingDays,
+                List.of(0.84), List.of(0.0),
+                List.of(), List.of(),
+                inArrears,
+                100.0, new Date(6, Month.MAY, 2005));
+        cmsSpecializedBond2.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond2.cashflows(), vars.cmspricer);
+        CashflowUtil.setCouponPricer(
+                cmsSpecializedBond2.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(4, Month.MAY, 2006), 0.04217, false);
+        double cmsBondTheoValue2 = cmsBond2.cleanPrice();
+        double cmsSpecializedBondTheoValue2 = cmsSpecializedBond2.cleanPrice();
+
+        double error11 =
+                Math.abs(cmsBondTheoValue2 - cmsSpecializedBondTheoValue2);
+        checkBondPair("wrong clean price for cms bond:",
+                "generic cms bond's theo clean price:",
+                cmsBondTheoValue2,
+                "cms bond's theo clean price:",
+                cmsSpecializedBondTheoValue2, error11, tolerance, true);
+
+        double cmsBondTheoDirty2 =
+                cmsBondTheoValue2 + cmsBond2.accruedAmount();
+        double cmsSpecializedBondTheoDirty2 =
+                cmsSpecializedBondTheoValue2
+                        + cmsSpecializedBond2.accruedAmount();
+        double error12 =
+                Math.abs(cmsBondTheoDirty2 - cmsSpecializedBondTheoDirty2);
+        checkBondPair("wrong dirty price for cms bond:",
+                "generic cms bond's dirty price:",
+                cmsBondTheoDirty2,
+                "specialized cms bond's theo dirty price:",
+                cmsSpecializedBondTheoDirty2, error12, tolerance, true);
 
         // Zero Coupon bond (Isin: DE0004771662 IBRD 0 12/20/15)
         // maturity doesn't occur on a business day
@@ -2460,7 +3063,7 @@ public class AssetSwapTest {
 
     /**
      * Official {@code testSpecializedBondVsGenericBondUsingAsw} (Fixed +
-     * Floating + Zero). Two asset swaps are compared per bond: one at the
+     * Floating + CMS + Zero). Two asset swaps are compared per bond: one at the
      * bond clean price with the non-null spread, and one at the official
      * market executable price with the null spread. Official mistyped
      * headers and label spacing are kept.
@@ -2835,9 +3438,178 @@ public class AssetSwapTest {
                 floatingSpecializedBondASWSpread2,
                 error8, tolerance, true);
 
-        // CMS bonds (Isin: XS0228052402 CRDIT 0 8/22/20 and
-        // Isin: XS0218766664 ISPIM 0 5/6/15) are out of DON-17 scope:
-        // Java has no CmsRateBond/CMS pricer, so those branches are skipped.
+        // CMS bond (Isin: XS0228052402 CRDIT 0 8/22/20)
+        // maturity doesn't occur on a business day
+        Date cmsBondStartDate1 = new Date(22, Month.AUGUST, 2005);
+        Date cmsBondMaturityDate1 = new Date(22, Month.AUGUST, 2020);
+        Schedule cmsBondSchedule1 = new Schedule(
+                cmsBondStartDate1, cmsBondMaturityDate1,
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond1 = genericCmsBond(vars, bondCalendar, settlementDays,
+                fixingDays, cmsBondStartDate1, cmsBondMaturityDate1,
+                cmsBondSchedule1, null,
+                List.of(0.055), List.of(0.025), inArrears);
+        cmsBond1.setPricingEngine(bondEngine);
+
+        // equivalent specialized cms bond
+        Bond cmsSpecializedBond1 = new CmsRateBond(settlementDays,
+                vars.faceAmount, cmsBondSchedule1,
+                vars.swapIndex,
+                new Thirty360(Thirty360.Convention.BondBasis),
+                BusinessDayConvention.FOLLOWING, fixingDays,
+                List.of(1.0), List.of(0.0),
+                List.of(0.055), List.of(0.025),
+                inArrears,
+                100.0, new Date(22, Month.AUGUST, 2005));
+        cmsSpecializedBond1.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond1.cashflows(), vars.cmspricer);
+        CashflowUtil.setCouponPricer(
+                cmsSpecializedBond1.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(18, Month.AUGUST, 2006), 0.04158, false);
+        double cmsBondPrice1 = cmsBond1.cleanPrice();
+        double cmsSpecializedBondPrice1 = cmsSpecializedBond1.cleanPrice();
+        AssetSwap cmsBondAssetSwap1 = new AssetSwap(payFixedRate,
+                cmsBond1, cmsBondPrice1,
+                vars.iborIndex, vars.nonnullspread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondAssetSwap1.setPricingEngine(swapEngine);
+        AssetSwap cmsSpecializedBondAssetSwap1 = new AssetSwap(payFixedRate,
+                cmsSpecializedBond1, cmsSpecializedBondPrice1,
+                vars.iborIndex, vars.nonnullspread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsSpecializedBondAssetSwap1.setPricingEngine(swapEngine);
+        double cmsBondAssetSwapPrice1 = cmsBondAssetSwap1.fairCleanPrice();
+        double cmsSpecializedBondAssetSwapPrice1 =
+                cmsSpecializedBondAssetSwap1.fairCleanPrice();
+        double error9 = Math.abs(cmsBondAssetSwapPrice1
+                - cmsSpecializedBondAssetSwapPrice1);
+        checkBondPair("wrong clean price for cmsbond:",
+                "generic bond's clean price:",
+                cmsBondAssetSwapPrice1,
+                "equivalent specialized cms rate bond's price:",
+                cmsSpecializedBondAssetSwapPrice1, error9, tolerance, true);
+
+        // market executable price as of 4th sept 2007
+        double cmsBondMktPrice1 = 87.02;
+        AssetSwap cmsBondASW1 = new AssetSwap(payFixedRate,
+                cmsBond1, cmsBondMktPrice1,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondASW1.setPricingEngine(swapEngine);
+        AssetSwap cmsSpecializedBondASW1 = new AssetSwap(payFixedRate,
+                cmsSpecializedBond1, cmsBondMktPrice1,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsSpecializedBondASW1.setPricingEngine(swapEngine);
+        double cmsBondASWSpread1 = cmsBondASW1.fairSpread();
+        double cmsSpecializedBondASWSpread1 =
+                cmsSpecializedBondASW1.fairSpread();
+        double error10 =
+                Math.abs(cmsBondASWSpread1 - cmsSpecializedBondASWSpread1);
+        checkBondPair("wrong asw spread for cm bond:",
+                "generic cms rate bond's  asw spread:",
+                cmsBondASWSpread1,
+                "equivalent specialized bond's asw spread:",
+                cmsSpecializedBondASWSpread1, error10, tolerance, true);
+
+        // CMS bond (Isin: XS0218766664 ISPIM 0 5/6/15)
+        // maturity occurs on a business day
+        Date cmsBondStartDate2 = new Date(6, Month.MAY, 2005);
+        Date cmsBondMaturityDate2 = new Date(6, Month.MAY, 2015);
+        Schedule cmsBondSchedule2 = new Schedule(
+                cmsBondStartDate2, cmsBondMaturityDate2,
+                new Period(Frequency.ANNUAL), bondCalendar,
+                BusinessDayConvention.UNADJUSTED,
+                BusinessDayConvention.UNADJUSTED,
+                DateGenerationRule.BACKWARD, false,
+                new Date(), new Date());
+        Bond cmsBond2 = genericCmsBond(vars, bondCalendar, settlementDays,
+                fixingDays, cmsBondStartDate2, cmsBondMaturityDate2,
+                cmsBondSchedule2, 0.84, null, null, inArrears);
+        cmsBond2.setPricingEngine(bondEngine);
+
+        // equivalent specialized cms bond
+        Bond cmsSpecializedBond2 = new CmsRateBond(settlementDays,
+                vars.faceAmount, cmsBondSchedule2,
+                vars.swapIndex,
+                new Thirty360(Thirty360.Convention.BondBasis),
+                BusinessDayConvention.FOLLOWING, fixingDays,
+                List.of(0.84), List.of(0.0),
+                List.of(), List.of(),
+                inArrears,
+                100.0, new Date(6, Month.MAY, 2005));
+        cmsSpecializedBond2.setPricingEngine(bondEngine);
+
+        CashflowUtil.setCouponPricer(cmsBond2.cashflows(), vars.cmspricer);
+        CashflowUtil.setCouponPricer(
+                cmsSpecializedBond2.cashflows(), vars.cmspricer);
+        vars.swapIndex.addFixing(new Date(4, Month.MAY, 2006), 0.04217, false);
+        double cmsBondPrice2 = cmsBond2.cleanPrice();
+        double cmsSpecializedBondPrice2 = cmsSpecializedBond2.cleanPrice();
+        AssetSwap cmsBondAssetSwap2 = new AssetSwap(payFixedRate,
+                cmsBond2, cmsBondPrice2,
+                vars.iborIndex, vars.nonnullspread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondAssetSwap2.setPricingEngine(swapEngine);
+        AssetSwap cmsSpecializedBondAssetSwap2 = new AssetSwap(payFixedRate,
+                cmsSpecializedBond2, cmsSpecializedBondPrice2,
+                vars.iborIndex, vars.nonnullspread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsSpecializedBondAssetSwap2.setPricingEngine(swapEngine);
+        double cmsBondAssetSwapPrice2 = cmsBondAssetSwap2.fairCleanPrice();
+        double cmsSpecializedBondAssetSwapPrice2 =
+                cmsSpecializedBondAssetSwap2.fairCleanPrice();
+        double error11 = Math.abs(cmsBondAssetSwapPrice2
+                - cmsSpecializedBondAssetSwapPrice2);
+        checkBondPair("wrong clean price for cmsbond:",
+                "generic  bond's clean price:",
+                cmsBondAssetSwapPrice2,
+                "equivalent specialized cms rate bond's price:",
+                cmsSpecializedBondAssetSwapPrice2, error11, tolerance, true);
+
+        // market executable price as of 4th sept 2007
+        double cmsBondMktPrice2 = 94.35;
+        AssetSwap cmsBondASW2 = new AssetSwap(payFixedRate,
+                cmsBond2, cmsBondMktPrice2,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsBondASW2.setPricingEngine(swapEngine);
+        AssetSwap cmsSpecializedBondASW2 = new AssetSwap(payFixedRate,
+                cmsSpecializedBond2, cmsBondMktPrice2,
+                vars.iborIndex, vars.spread,
+                new Schedule(),
+                vars.iborIndex.dayCounter(),
+                parAssetSwap);
+        cmsSpecializedBondASW2.setPricingEngine(swapEngine);
+        double cmsBondASWSpread2 = cmsBondASW2.fairSpread();
+        double cmsSpecializedBondASWSpread2 =
+                cmsSpecializedBondASW2.fairSpread();
+        double error12 =
+                Math.abs(cmsBondASWSpread2 - cmsSpecializedBondASWSpread2);
+        checkBondPair("wrong asw spread for cm bond:",
+                "generic cms rate bond's  asw spread:",
+                cmsBondASWSpread2,
+                "equivalent specialized bond's asw spread:",
+                cmsSpecializedBondASWSpread2, error12, tolerance, true);
 
         // Zero-Coupon bond (Isin: DE0004771662 IBRD 0 12/20/15)
         // maturity doesn't occur on a business day
