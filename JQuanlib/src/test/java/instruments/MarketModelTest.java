@@ -25,6 +25,7 @@ import jquant.models.marketmodels.MarketModel;
 import jquant.models.marketmodels.MarketModelEvolver;
 import jquant.models.marketmodels.MarketModelMultiProduct;
 import jquant.models.marketmodels.MarketModelPathwiseMultiProduct;
+import jquant.models.marketmodels.PathwiseAccountingEngine;
 import jquant.models.marketmodels.PiecewiseConstantCorrelation;
 import jquant.models.marketmodels.ProxyGreekEngine;
 import jquant.models.marketmodels.SequenceStatisticsInc;
@@ -71,6 +72,8 @@ import jquant.models.marketmodels.products.multistep.MultiStepSwap;
 import jquant.models.marketmodels.products.onestep.OneStepForwards;
 import jquant.models.marketmodels.products.onestep.OneStepOptionlets;
 import jquant.models.marketmodels.products.pathwise.MarketModelPathwiseInverseFloater;
+import jquant.models.marketmodels.products.pathwise.MarketModelPathwiseMultiCaplet;
+import jquant.models.marketmodels.products.pathwise.MarketModelPathwiseMultiDeflatedCaplet;
 import jquant.pricingengines.BlackCalculator;
 import jquant.pricingengines.BlackFormula;
 import jquant.pricingengines.CashOrNothingPayoff;
@@ -2402,6 +2405,264 @@ public class MarketModelTest {
                                         + "vega = " + vegas.get(i) + " +- "
                                         + vegaErrors.get(i));
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void testPathwiseGreeks() {
+        System.out.println("Testing caplet deltas in a lognormal forward rate "
+                + "market model using pathwise method...");
+
+        setup();
+
+        List<Payoff> payoffs = new ArrayList<>();
+        List<StrikedTypePayoff> displacedPayoffs = new ArrayList<>();
+        for (int i = 0; i < todaysForwards.size(); ++i) {
+            payoffs.add(new
+                    PlainVanillaPayoff(Option.Type.Call, todaysForwards.get(i)));
+            //CashOrNothingPayoff(Option.Type.Call, todaysForwards.get(i), 0.01));
+            displacedPayoffs.add(new
+                    PlainVanillaPayoff(Option.Type.Call,
+                    todaysForwards.get(i) + displacement));
+            //CashOrNothingPayoff(Option.Type.Call, todaysForwards.get(i)+displacement, 0.01));
+        }
+
+        for (int whichProduct = 0; whichProduct < 2; ++whichProduct) {
+            MarketModelPathwiseMultiDeflatedCaplet product1 =
+                    new MarketModelPathwiseMultiDeflatedCaplet(rateTimes, accruals,
+                            paymentTimes, todaysForwards);
+
+            MarketModelPathwiseMultiCaplet product2 =
+                    new MarketModelPathwiseMultiCaplet(rateTimes, accruals,
+                            paymentTimes, todaysForwards);
+
+            MarketModelPathwiseMultiProduct product;
+
+            if (whichProduct == 0)
+                product = product2.copy();
+            else
+                product = product1.copy();
+
+            MultiStepOptionlets productDummy = new MultiStepOptionlets(rateTimes,
+                    accruals, paymentTimes, payoffs);
+
+            EvolutionDescription evolution = product.evolution();
+
+            MarketModelType[] marketModels = {
+                    // CalibratedMM,
+                    // ExponentialCorrelationFlatVolatility,
+                    MarketModelType.ExponentialCorrelationAbcdVolatility};
+
+            for (MarketModelType j : marketModels) {
+
+                int[] testedFactors = {
+                        2
+                        //, 4, 8, todaysForwards.size()
+                };
+
+                for (int factors : testedFactors) {
+                    MeasureType[] measures = {MeasureType.MoneyMarket};
+
+                    for (MeasureType measure : measures) {
+                        List<Integer> numeraires = makeMeasure(productDummy, measure);
+
+                        for (int n = 0; n < 1; n++) {
+                            MTBrownianGeneratorFactory generatorFactory =
+                                    new MTBrownianGeneratorFactory(seed_);
+
+                            boolean logNormal = true;
+                            MarketModel marketModel =
+                                    makeMarketModel(logNormal, evolution, factors, j);
+
+                            LogNormalFwdRateEuler evolver = new LogNormalFwdRateEuler(
+                                    marketModel, generatorFactory, numeraires);
+                            SequenceStatisticsInc stats = new SequenceStatisticsInc(
+                                    product.numberOfProducts()
+                                            * (todaysForwards.size() + 1));
+
+                            double forwardBump = 1.0e-6;
+
+                            String config = marketModelTypeToString(j) + ", " + factors
+                                    + (factors > 1
+                                    ? (factors == todaysForwards.size()
+                                    ? " (full) factors, "
+                                    : " factors, ")
+                                    : " factor,")
+                                    + measureTypeToString(measure) + ", "
+                                    + "MT BGF";
+                            if (printReport_)
+                                System.out.println("    " + config);
+
+                            int initialNumeraire = evolver.numeraires().get(0);
+                            double initialNumeraireValue =
+                                    todaysDiscounts.get(initialNumeraire);
+
+                            {
+                                PathwiseAccountingEngine accountingengine =
+                                        new PathwiseAccountingEngine(
+                                                new LogNormalFwdRateEuler(
+                                                        evolver), // method relies heavily on LMM Euler
+                                                product,
+                                                marketModel, // we need pseudo-roots and displacements
+                                                initialNumeraireValue);
+
+                                accountingengine.multiplePathValues(stats, paths_);
+                            }
+
+                            List<Double> valuesAndDeltas = stats.mean();
+                            List<Double> errors = stats.errorEstimate();
+
+                            List<Double> prices = filledList(
+                                    product.numberOfProducts(), 0.0);
+                            List<Double> priceErrors = filledList(
+                                    product.numberOfProducts(), 0.0);
+
+                            Matrix deltas = new Matrix(product.numberOfProducts(),
+                                    todaysForwards.size(), 0.0);
+                            Matrix deltasErrors = new Matrix(
+                                    product.numberOfProducts(),
+                                    todaysForwards.size(), 0.0);
+                            List<Double> modelPrices = filledList(
+                                    product.numberOfProducts(), 0.0);
+
+                            for (int i = 0; i < product.numberOfProducts(); ++i) {
+                                prices.set(i, valuesAndDeltas.get(i));
+
+                                priceErrors.set(i, errors.get(i));
+
+                                modelPrices.set(i, new BlackCalculator(
+                                        displacedPayoffs.get(i), todaysForwards.get(i),
+                                        volatilities.get(i) * Math.sqrt(rateTimes.get(i)),
+                                        todaysDiscounts.get(i + 1)
+                                                * (rateTimes.get(i + 1) - rateTimes.get(i)))
+                                        .value());
+
+                                for (int jj = 0; jj < todaysForwards.size(); ++jj) {
+                                    deltas.set(i, jj,
+                                            valuesAndDeltas.get((i + 1)
+                                                    * product.numberOfProducts() + jj));
+                                    deltasErrors.set(i, jj,
+                                            errors.get((i + 1)
+                                                    * product.numberOfProducts() + jj));
+                                }
+                            }
+
+                            Matrix modelDeltas = new Matrix(
+                                    product.numberOfProducts(),
+                                    todaysForwards.size(), 0.0);
+
+                            List<Double> discPlus = filledList(
+                                    todaysForwards.size() + 1,
+                                    todaysDiscounts.get(0));
+                            List<Double> discMinus = filledList(
+                                    todaysForwards.size() + 1,
+                                    todaysDiscounts.get(0));
+                            List<Double> fwdPlus = filledList(
+                                    todaysForwards.size(), 0.0);
+                            List<Double> fwdMinus = filledList(
+                                    todaysForwards.size(), 0.0);
+
+                            for (int i = 0; i < todaysForwards.size(); ++i) {
+                                for (int jj = 0; jj < todaysForwards.size(); ++jj) {
+                                    if (i != jj) {
+                                        fwdPlus.set(jj, todaysForwards.get(jj));
+                                        fwdMinus.set(jj, todaysForwards.get(jj));
+
+                                    } else {
+                                        fwdPlus.set(jj,
+                                                todaysForwards.get(jj) + forwardBump);
+                                        fwdMinus.set(jj,
+                                                todaysForwards.get(jj) - forwardBump);
+                                    }
+
+                                    double tau = rateTimes.get(jj + 1)
+                                            - rateTimes.get(jj);
+                                    discPlus.set(jj + 1, discPlus.get(jj)
+                                            / (1.0 + fwdPlus.get(jj) * tau));
+                                    discMinus.set(jj + 1, discMinus.get(jj)
+                                            / (1.0 + fwdMinus.get(jj) * tau));
+                                }
+
+                                for (int k = 0; k < product.numberOfProducts(); ++k) {
+                                    double tau = rateTimes.get(k + 1)
+                                            - rateTimes.get(k);
+                                    double priceUp = new BlackCalculator(
+                                            displacedPayoffs.get(k), fwdPlus.get(k),
+                                            volatilities.get(k)
+                                                    * Math.sqrt(rateTimes.get(k)),
+                                            discPlus.get(k + 1) * tau)
+                                            .value();
+                                    double priceDown = new BlackCalculator(
+                                            displacedPayoffs.get(k), fwdMinus.get(k),
+                                            volatilities.get(k)
+                                                    * Math.sqrt(rateTimes.get(k)),
+                                            discMinus.get(k + 1) * tau)
+                                            .value();
+
+                                    modelDeltas.set(k, i,
+                                            (priceUp - priceDown) / (2 * forwardBump));
+                                }
+                            }
+
+                            int numberErrors = 0;
+
+                            for (int i = 0; i < product.numberOfProducts(); ++i) {
+
+                                double thisPrice = prices.get(i);
+                                double thisModelPrice = modelPrices.get(i);
+                                double priceErrorInSds =
+                                        ((thisPrice - thisModelPrice) / priceErrors.get(i));
+
+                                double errorTheshold = 3.5;
+
+                                if (Math.abs(priceErrorInSds) > errorTheshold) {
+                                    System.out.println("Caplet "
+                                            + i + " price " + prices.get(i)
+                                            + " model price "
+                                            + modelPrices.get(i)
+                                            + "   Standard error: " + priceErrors.get(i)
+                                            + " errors in sds: " + priceErrorInSds);
+
+                                    ++numberErrors;
+                                }
+
+                                double threshold = 1e-10;
+
+                                for (int jj = 0; jj < todaysForwards.size(); ++jj) {
+                                    double delta = deltas.get(i, jj);
+                                    double modelDelta = modelDeltas.get(i, jj);
+
+                                    double deltaErrorInSds = 100;
+
+                                    if (deltasErrors.get(i, jj) > 0.0)
+                                        deltaErrorInSds =
+                                                ((delta - modelDelta)
+                                                        / deltasErrors.get(i, jj));
+                                    else if (Math.abs(modelDelta - delta)
+                                            < threshold) // to cope with zero over zero
+                                        deltaErrorInSds = 0.0;
+
+                                    if (Math.abs(deltaErrorInSds) > errorTheshold) {
+
+                                        System.out.println("Caplet "
+                                                + i + " delta " + jj + "has value "
+                                                + deltas.get(i, jj) + " model value "
+                                                + modelDeltas.get(i, jj)
+                                                + "   Standard error: "
+                                                + deltasErrors.get(i, jj)
+                                                + " errors in sds: " + deltaErrorInSds);
+
+                                        ++numberErrors;
+                                    }
+                                }
+                            }
+
+                            if (numberErrors > 0)
+                                fail("Pathwise greeks test has " + numberErrors + "\n");
                         }
                     }
                 }
