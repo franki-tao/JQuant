@@ -166,7 +166,11 @@ public class SequenceStatistics {
                     stats_.get(i).reset();
             } else {
                 dimension_ = dimension;
+                // Official std::vector<Statistics>(dimension) default-constructs
+                // each element; CommonUtil.ArrayInit(n) would leave them null.
                 stats_ = CommonUtil.ArrayInit(dimension);
+                for (int i = 0; i < dimension; ++i)
+                    stats_.set(i, new GenericRiskStatistics());
                 results_ = CommonUtil.ArrayInit(dimension, 0d);
             }
             quadraticSum_ = new Matrix(dimension_, dimension_, 0.0);
