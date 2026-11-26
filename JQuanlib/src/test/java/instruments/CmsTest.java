@@ -18,9 +18,16 @@ import jquant.indexes.IndexManager;
 import jquant.indexes.SwapIndex;
 import jquant.instruments.MakeCms;
 import jquant.instruments.Swap;
+import jquant.math.Array;
 import jquant.math.Matrix;
+import jquant.math.optimization.EndCriteria;
+import jquant.math.optimization.LevenbergMarquardt;
+import jquant.math.optimization.OptimizationMethod;
+import jquant.math.optimization.Simplex;
 import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
+import jquant.termstructures.volatility.swaption.CmsMarket;
+import jquant.termstructures.volatility.swaption.CmsMarketCalibration;
 import jquant.termstructures.volatility.swaption.InterpolatedSwaptionVolatilityCube;
 import jquant.termstructures.volatility.swaption.SabrSwaptionVolatilityCube;
 import jquant.termstructures.volatility.swaption.SwaptionVolatilityMatrix;
@@ -46,15 +53,20 @@ import static jquant.cashflows.GFunctionFactory.YieldCurveModel.NonParallelShift
 import static jquant.cashflows.GFunctionFactory.YieldCurveModel.ParallelShifts;
 import static jquant.cashflows.GFunctionFactory.YieldCurveModel.Standard;
 import static jquant.cashflows.CashflowUtil.setCouponPricer;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Official QuantLib {@code test-suite/cms.cpp} port (ATM lognormal slice).
  *
  * <p>Ported from QuantLib at SHA {@code cf74c9f}: {@code testFairRate},
- * {@code testCmsSwap} and {@code testParity} in full (ATM surface plus the
- * official interpolated and SABR cubes). CMS market calibration and the other
- * tests of the official file are deliberately not ported.
+ * {@code testCmsSwap}, {@code testParity},
+ * {@code testCmsMarketCalibration} and
+ * {@code testSabrCubeRecalibrationInitializesLazily} in full (ATM surface plus
+ * the official interpolated and SABR cubes).
  *
  * <p>Dates, fixings, parameter branches, comparisons and tolerances are those
  * of the official test; no cached expected prices are used. The evaluation
@@ -461,5 +473,163 @@ public class CmsTest {
             }
             }
         }
+    }
+
+    /**
+     * Official {@code testCmsMarketCalibration}: calibration of the SABR cube
+     * to the CMS market over the three calibration types, with fixed and free
+     * mean reversion, plus the official array/matrix/parametric result shapes
+     * and exception cases.
+     */
+    @Test
+    public void testCmsMarketCalibration() {
+        CommonVars vars = new CommonVars();
+
+        List<Period> swapLengths = List.of(
+                new Period(1, TimeUnit.YEARS),
+                new Period(5, TimeUnit.YEARS),
+                new Period(10, TimeUnit.YEARS),
+                new Period(20, TimeUnit.YEARS));
+        SabrSwaptionVolatilityCube sabrCube =
+                (SabrSwaptionVolatilityCube) vars.SabrVolCube1.currentLink();
+        Period calibrationTenor = sabrCube.swapTenors().get(0);
+
+        List<SwapIndex> swapIndexes = new ArrayList<>(1);
+        swapIndexes.add(new EuriborSwapIsdaFixA(calibrationTenor, vars.termStructure));
+
+        List<List<Handle<Quote>>> bidAskSpreads = new ArrayList<>(4);
+        double[][] bidAsk = {
+                {0.01, 0.011},
+                {0.012, 0.013},
+                {0.014, 0.015},
+                {0.016, 0.017}
+        };
+        for (double[] row : bidAsk) {
+            List<Handle<Quote>> quotes = new ArrayList<>(2);
+            quotes.add(new Handle<>(new SimpleQuote(row[0]), true));
+            quotes.add(new Handle<>(new SimpleQuote(row[1]), true));
+            bidAskSpreads.add(quotes);
+        }
+
+        List<CmsCouponPricer> pricers = List.of(vars.analyticPricers.get(0));
+        CmsMarket cmsMarket = new CmsMarket(
+                swapLengths, swapIndexes, vars.iborIndex, bidAskSpreads,
+                pricers, vars.termStructure);
+        Matrix weights = new Matrix(4, 1, 1.0);
+        EndCriteria endCriteria =
+                new EndCriteria(20, 10, 1e-6, 1e-6, 1e-6);
+        OptimizationMethod method =
+                new LevenbergMarquardt(1e-8, 1e-8, 1e-8);
+        OptimizationMethod simplex = new Simplex(0.1);
+
+        checkClose(CmsMarketCalibration.betaTransformDirect(
+                        CmsMarketCalibration.betaTransformInverse(0.5)),
+                0.5, 1e-12, "beta transform round trip");
+        assertEquals(0.000001, CmsMarketCalibration.betaTransformDirect(20.0));
+        assertEquals(0.000001, CmsMarketCalibration.betaTransformDirect(-20.0));
+        checkClose(CmsMarketCalibration.reversionTransformDirect(
+                        CmsMarketCalibration.reversionTransformInverse(0.01)),
+                0.01, 1e-12, "reversion transform round trip");
+
+        for (CmsMarketCalibration.CalibrationType calibrationType : List.of(
+                CmsMarketCalibration.CalibrationType.OnSpread,
+                CmsMarketCalibration.CalibrationType.OnPrice,
+                CmsMarketCalibration.CalibrationType.OnForwardCmsPrice)) {
+            CmsMarketCalibration calibration = new CmsMarketCalibration(
+                    vars.SabrVolCube1, cmsMarket, weights, calibrationType);
+            Array guess = new Array(2);
+            guess.set(0, 0.5);
+            guess.set(1, 0.01);
+            Array result = calibration.compute(endCriteria, method, guess, false);
+            assertEquals(2, result.size());
+            assertTrue(result.get(0) > 0.0 && result.get(0) < 1.0,
+                    "beta out of range: " + result.get(0));
+            assertTrue(result.get(1) >= 0.0,
+                    "reversion out of range: " + result.get(1));
+            assertTrue(Double.isFinite(calibration.error()),
+                    "non-finite error: " + calibration.error());
+            assertTrue(calibration.error() < 1.0,
+                    "error too large: " + calibration.error());
+        }
+
+        CmsMarketCalibration fixedCalibration = new CmsMarketCalibration(
+                vars.SabrVolCube1, cmsMarket, weights,
+                CmsMarketCalibration.CalibrationType.OnSpread);
+        Array fixedGuess = new Array(2);
+        fixedGuess.set(0, 0.5);
+        fixedGuess.set(1, 0.01);
+        Array fixedResult = fixedCalibration.compute(
+                endCriteria, method, fixedGuess, true);
+        assertEquals(2, fixedResult.size());
+        assertEquals(fixedGuess.get(1), fixedResult.get(1));
+
+        Matrix matrixGuess = new Matrix(4, 1, 0.5);
+        Matrix matrixResult = fixedCalibration.compute(
+                endCriteria, method, matrixGuess, true, 0.01);
+        assertEquals(4, matrixResult.rows());
+        assertEquals(2, matrixResult.cols());
+        assertEquals(0.01, matrixResult.get(0, 1));
+
+        Matrix freeMatrixResult = fixedCalibration.compute(
+                endCriteria, simplex, matrixGuess, false, 0.01);
+        assertEquals(4, freeMatrixResult.rows());
+        assertEquals(2, freeMatrixResult.cols());
+
+        Matrix parametricGuess = new Matrix(3, 1, 0.5);
+        parametricGuess.set(2, 0, 0.1);
+        Matrix parametricResult = fixedCalibration.computeParametric(
+                endCriteria, method, parametricGuess, true, 0.01);
+        assertEquals(3, parametricResult.rows());
+        assertEquals(2, parametricResult.cols());
+        assertEquals(0.01, parametricResult.get(0, 1));
+
+        Matrix freeParametricResult = fixedCalibration.computeParametric(
+                endCriteria, method, parametricGuess, false, 0.01);
+        assertEquals(3, freeParametricResult.rows());
+        assertEquals(2, freeParametricResult.cols());
+        assertTrue(freeParametricResult.get(0, 1) >= 0.0,
+                "reversion out of range: " + freeParametricResult.get(0, 1));
+
+        assertThrows(IllegalArgumentException.class, () ->
+                new CmsMarketCalibration(vars.SabrVolCube1, cmsMarket,
+                        new Matrix(2, 1, 1.0),
+                        CmsMarketCalibration.CalibrationType.OnSpread));
+        assertThrows(IllegalArgumentException.class, () ->
+                new CmsMarketCalibration(vars.SabrVolCube1, cmsMarket,
+                        new Matrix(1, 2, 1.0),
+                        CmsMarketCalibration.CalibrationType.OnSpread));
+        assertThrows(IllegalArgumentException.class, () ->
+                fixedCalibration.compute(endCriteria, method,
+                        new Array(1, 0.5), false));
+        assertThrows(IllegalArgumentException.class, () ->
+                fixedCalibration.compute(endCriteria, method,
+                        new Matrix(5, 1, 0.5), true, 0.01));
+        assertThrows(IllegalArgumentException.class, () ->
+                fixedCalibration.computeParametric(endCriteria, method,
+                        new Matrix(2, 1, 0.5), true, 0.01));
+    }
+
+    /**
+     * Official {@code testSabrCubeRecalibrationInitializesLazily}: the SABR
+     * cube must initialize itself on demand inside {@code recalibration}.
+     */
+    @Test
+    public void testSabrCubeRecalibrationInitializesLazily() {
+        CommonVars vars = new CommonVars();
+
+        SabrSwaptionVolatilityCube sabrCube =
+                (SabrSwaptionVolatilityCube) vars.SabrVolCube1.currentLink();
+        double[] beta = new double[sabrCube.optionTenors().size()];
+        Arrays.fill(beta, 0.5);
+
+        assertDoesNotThrow(() ->
+                sabrCube.recalibration(beta, sabrCube.swapTenors().get(0)));
+    }
+
+    // BOOST_CHECK_CLOSE / QL_CHECK_CLOSE: the tolerance is a percentage.
+    private static void checkClose(double calculated, double expected,
+                                   double percentTolerance, String message) {
+        double relativeError = Math.abs(calculated - expected) / Math.abs(expected);
+        assertFalse(relativeError > percentTolerance / 100.0, message);
     }
 }
