@@ -60,6 +60,24 @@ public class CmsCoupon extends FloatingRateCoupon {
                 false, new Date(), BusinessDayConvention.PRECEDING);
     }
 
+    /** Official default fixing convention: Preceding. */
+    public CmsCoupon(final Date paymentDate,
+                     double nominal,
+                     final Date startDate,
+                     final Date endDate,
+                     int fixingDays,
+                     final SwapIndex index,
+                     double gearing,
+                     double spread,
+                     final Date refPeriodStart,
+                     final Date refPeriodEnd,
+                     final DayCounter dayCounter,
+                     boolean isInArrears) {
+        this(paymentDate, nominal, startDate, endDate, fixingDays, index,
+                gearing, spread, refPeriodStart, refPeriodEnd, dayCounter,
+                isInArrears, new Date(), BusinessDayConvention.PRECEDING);
+    }
+
     /** Official defaults for everything after the spread. */
     public CmsCoupon(final Date paymentDate,
                      double nominal,

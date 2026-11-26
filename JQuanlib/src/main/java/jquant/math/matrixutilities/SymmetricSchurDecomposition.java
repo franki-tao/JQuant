@@ -42,7 +42,11 @@ public class SymmetricSchurDecomposition {
             diagonal_.set(q, s.get(q, q));
             eigenVectors_.set(q, q, 1.0);
         }
-        Matrix ss = new Matrix(s.matrix);
+        // Official C++ copies the input (`Matrix ss = s`). Java Matrix(RealMatrix)
+        // aliases the same Commons Math storage, so a copy is required: Jacobi
+        // writes only one triangle of the work matrix and would otherwise leave
+        // the caller's covariance non-symmetric for the later Cholesky step.
+        Matrix ss = new Matrix(s.matrix.copy());
 
         List<Double> tmpDiag = diagonal_.getList();
         List<Double> tmpAccumulate = CommonUtil.ArrayInit(size, 0.0);
