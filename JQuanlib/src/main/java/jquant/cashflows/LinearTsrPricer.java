@@ -190,6 +190,14 @@ public class LinearTsrPricer extends CmsCouponPricer
         this(swaptionVol, meanReversion, null, new Settings(), null);
     }
 
+    /** Official 3-argument constructor with a coupon discount curve. */
+    public LinearTsrPricer(Handle<SwaptionVolatilityStructure> swaptionVol,
+                           Handle<Quote> meanReversion,
+                           Handle<YieldTermStructure> couponDiscountCurve) {
+        this(swaptionVol, meanReversion, couponDiscountCurve,
+                new Settings(), null);
+    }
+
     public LinearTsrPricer(Handle<SwaptionVolatilityStructure> swaptionVol,
                            Handle<Quote> meanReversion,
                            Handle<YieldTermStructure> couponDiscountCurve,
