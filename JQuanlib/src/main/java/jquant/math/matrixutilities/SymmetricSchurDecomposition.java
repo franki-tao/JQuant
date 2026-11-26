@@ -125,9 +125,11 @@ public class SymmetricSchurDecomposition {
 
         // sort (eigenvalues, eigenvectors)
         List<Pair> temp = CommonUtil.ArrayInit(size);
-        List<Double> eigenVector = CommonUtil.ArrayInit(size);
         int row, col;
         for (col=0; col<size; col++) {
+            // Official C++ stores the column by value in the pair; the Java
+            // Pair keeps a reference, so a fresh vector is required per column.
+            List<Double> eigenVector = CommonUtil.ArrayInit(size);
             for (int i = 0; i < eigenVectors_.rows(); i++) {
                 eigenVector.set(i, eigenVectors_.get(i, col));
             }
