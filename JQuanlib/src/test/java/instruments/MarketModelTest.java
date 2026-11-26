@@ -11,6 +11,7 @@ import jquant.math.MathUtils;
 import jquant.math.Matrix;
 import jquant.math.integrals.SegmentIntegral;
 import jquant.math.optimization.EndCriteria;
+import jquant.math.statistics.GenericRiskStatistics;
 import jquant.models.marketmodels.AccountingEngine;
 import jquant.models.marketmodels.BrownianGeneratorFactory;
 import jquant.models.marketmodels.EvolutionDescription;
@@ -26,6 +27,9 @@ import jquant.models.marketmodels.Utilities;
 import jquant.models.marketmodels.browniangenerators.MTBrownianGeneratorFactory;
 import jquant.models.marketmodels.browniangenerators.SobolBrownianGeneratorBase;
 import jquant.models.marketmodels.browniangenerators.SobolBrownianGeneratorFactory;
+import jquant.models.marketmodels.callability.NothingExerciseValue;
+import jquant.models.marketmodels.callability.SwapRateTrigger;
+import jquant.models.marketmodels.callability.UpperBoundEngine;
 import jquant.models.marketmodels.correlations.ExponentialCorrelations;
 import jquant.models.marketmodels.correlations.TimeHomogeneousForwardCorrelation;
 import jquant.models.marketmodels.curvestates.LMMCurveState;
@@ -39,14 +43,18 @@ import jquant.models.marketmodels.models.FlatVol;
 import jquant.models.marketmodels.models.FwdPeriodAdapter;
 import jquant.models.marketmodels.models.FwdToCotSwapAdapter;
 import jquant.models.marketmodels.products.MultiProductComposite;
+import jquant.models.marketmodels.products.multistep.CallSpecifiedMultiProduct;
+import jquant.models.marketmodels.products.multistep.ExerciseAdapter;
 import jquant.models.marketmodels.products.multistep.MultiProductPathwiseWrapper;
 import jquant.models.marketmodels.products.multistep.MultiStepCoinitialSwaps;
 import jquant.models.marketmodels.products.multistep.MultiStepCoterminalSwaps;
 import jquant.models.marketmodels.products.multistep.MultiStepCoterminalSwaptions;
 import jquant.models.marketmodels.products.multistep.MultiStepForwards;
 import jquant.models.marketmodels.products.multistep.MultiStepInverseFloater;
+import jquant.models.marketmodels.products.multistep.MultiStepNothing;
 import jquant.models.marketmodels.products.multistep.MultiStepOptionlets;
 import jquant.models.marketmodels.products.multistep.MultiStepPeriodCapletSwaptions;
+import jquant.models.marketmodels.products.multistep.MultiStepSwap;
 import jquant.models.marketmodels.products.onestep.OneStepForwards;
 import jquant.models.marketmodels.products.onestep.OneStepOptionlets;
 import jquant.models.marketmodels.products.pathwise.MarketModelPathwiseInverseFloater;
@@ -1598,6 +1606,179 @@ public class MarketModelTest {
                                             + ") is " + c.get(x, y) * dt
                                             + " actual value is " + cov.get(x, y));
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void checkCallableSwap(final SequenceStatisticsInc stats,
+                                   final String config) {
+        List<Double> results = stats.mean();
+        List<Double> errors = stats.errorEstimate();
+        double payerNPV = results.get(0);
+        double receiverNPV = results.get(1);
+        double bermudanNPV = results.get(2);
+        double callableNPV = results.get(3);
+        double tolerance = 1.1e-15;
+        double swapError = Math.abs(receiverNPV + payerNPV);
+        double callableError = Math.abs(receiverNPV + bermudanNPV - callableNPV);
+        if (swapError > tolerance || bermudanNPV < 0.0 ||
+                callableNPV < receiverNPV || callableError > tolerance)
+            System.out.println(config);
+        if (swapError > tolerance)
+            fail("agreement between payer and receiver swap failed:"
+                    + "\n    payer swap:    " + payerNPV
+                    + "\n    receiver swap: " + receiverNPV
+                    + "\n    error:         " + swapError
+                    + "\n    tolerance:     " + tolerance);
+        if (bermudanNPV < 0.0)
+            fail("negative bermudan option value:"
+                    + "\n    bermudan:          " + bermudanNPV);
+        if (callableNPV < receiverNPV)
+            fail("callable receiver less valuable than plain receiver:"
+                    + "\n    receiver swap:     " + receiverNPV
+                    + "\n    callable:          " + callableNPV);
+        if (callableError > tolerance)
+            fail("agreement between receiver+bermudan and callable failed:"
+                    + "\n    receiver swap:     " + receiverNPV
+                    + "\n    bermudan:          " + bermudanNPV
+                    + "\n    receiver+bermudan: " + (receiverNPV + bermudanNPV)
+                    + "\n    callable:          " + callableNPV
+                    + "\n    error:             " + callableError
+                    + "\n    tolerance:         " + tolerance);
+        if (printReport_) {
+            System.out.println(
+                    "    payer swap:        " + rate(payerNPV) + " +/- " + rate(errors.get(0))
+                            + "\n    receiver swap:     " + rate(receiverNPV) + " +/- " + rate(errors.get(1))
+                            + "\n    bermudan:          " + rate(bermudanNPV) + " +/- " + rate(errors.get(2))
+                            + "\n    receiver+bermudan: " + rate(receiverNPV + bermudanNPV)
+                            + "\n    callable:          " + rate(callableNPV) + " +/- " + rate(errors.get(3)));
+        }
+    }
+
+    @Test
+    void testCallableSwapNaif() {
+        System.out.println("Pricing callable swap with naif exercise strategy in a LIBOR market model...");
+        setup();
+        double fixedRate = 0.04;
+        MultiStepSwap payerSwap = new MultiStepSwap(rateTimes, accruals, accruals,
+                paymentTimes, fixedRate, true);
+        MultiStepSwap receiverSwap = new MultiStepSwap(rateTimes, accruals, accruals,
+                paymentTimes, fixedRate, false);
+        List<Double> exerciseTimes = new ArrayList<>(rateTimes);
+        exerciseTimes.remove(exerciseTimes.size() - 1);
+        //std::vector<Rate> exerciseTimes;
+        //for (Size i=2; i<rateTimes.size()-1; i+=2)
+        //    exerciseTimes.push_back(rateTimes[i]);
+        List<Double> swapTriggers = filledList(exerciseTimes.size(), fixedRate);
+        SwapRateTrigger naifStrategy = new SwapRateTrigger(rateTimes, swapTriggers,
+                exerciseTimes);
+        // Official unused LS locals (collectedData, basisCoefficients,
+        // NothingExerciseValue control, SwapBasisSystem basisSystem) are omitted:
+        // the Naif body does not use them.
+        NothingExerciseValue nullRebate = new NothingExerciseValue(rateTimes);
+        CallSpecifiedMultiProduct dummyProduct =
+                new CallSpecifiedMultiProduct(receiverSwap, naifStrategy,
+                        new ExerciseAdapter(nullRebate));
+        EvolutionDescription evolution = dummyProduct.evolution();
+        MarketModelType[] marketModels = {
+                // CalibratedMM,
+                MarketModelType.ExponentialCorrelationFlatVolatility,
+                MarketModelType.ExponentialCorrelationAbcdVolatility};
+        for (MarketModelType j : marketModels) {
+            int[] testedFactors = {4, // 8,
+                    todaysForwards.size()};
+            for (int factors : testedFactors) {
+                // Composite's ProductSuggested is the Terminal one
+                MeasureType[] measures = {
+                        // ProductSuggested,
+                        MeasureType.MoneyMarketPlus
+                        // MoneyMarket,
+                        // Terminal
+                };
+                for (MeasureType measure : measures) {
+                    List<Integer> numeraires = makeMeasure(dummyProduct, measure);
+                    boolean logNormal = true;
+                    MarketModel marketModel =
+                            makeMarketModel(logNormal, evolution, factors, j);
+                    EvolverType[] evolvers = {EvolverType.Pc, EvolverType.Balland,
+                            EvolverType.Ipc};
+                    MarketModelEvolver evolver;
+                    int stop = EvolutionDescription.isInTerminalMeasure(evolution,
+                            numeraires) ? 0 : 1;
+                    for (int i = 0; i < evolvers.length - stop; i++) {
+                        for (int n = 0; n < 1; n++) {
+                            // MTBrownianGeneratorFactory generatorFactory(seed_);
+                            SobolBrownianGeneratorFactory generatorFactory =
+                                    new SobolBrownianGeneratorFactory(
+                                            SobolBrownianGeneratorBase.Ordering.Diagonal,
+                                            seed_);
+                            evolver = makeMarketModelEvolver(marketModel, numeraires,
+                                    generatorFactory, evolvers[i]);
+                            String config = configString(j, factors, measure,
+                                    evolvers[i]);
+                            if (printReport_)
+                                System.out.println("    " + config);
+                            // use the naif strategy
+                            // 2. bermudan swaption to enter into the payer swap
+                            CallSpecifiedMultiProduct bermudanProduct =
+                                    new CallSpecifiedMultiProduct(
+                                            new MultiStepNothing(evolution),
+                                            naifStrategy, payerSwap);
+                            // 3. callable receiver swap
+                            CallSpecifiedMultiProduct callableProduct =
+                                    new CallSpecifiedMultiProduct(receiverSwap,
+                                            naifStrategy,
+                                            new ExerciseAdapter(nullRebate));
+                            // lower bound: evolve all 4 products togheter
+                            MultiProductComposite allProducts =
+                                    new MultiProductComposite();
+                            allProducts.add(payerSwap);
+                            allProducts.add(receiverSwap);
+                            allProducts.add(bermudanProduct);
+                            allProducts.add(callableProduct);
+                            allProducts.finalize();
+                            SequenceStatisticsInc stats = simulate(evolver,
+                                    allProducts);
+                            checkCallableSwap(stats, config);
+                            // upper bound
+                            // MTBrownianGeneratorFactory uFactory(seed_+142);
+                            SobolBrownianGeneratorFactory uFactory =
+                                    new SobolBrownianGeneratorFactory(
+                                            SobolBrownianGeneratorBase.Ordering.Diagonal,
+                                            seed_ + 142);
+                            evolver = makeMarketModelEvolver(marketModel, numeraires,
+                                    uFactory, evolvers[i]);
+                            List<MarketModelEvolver> innerEvolvers = new ArrayList<>();
+                            boolean[] isExerciseTime = Utilities.isInSubset(
+                                    evolution.evolutionTimes(),
+                                    naifStrategy.exerciseTimes());
+                            for (int s = 0; s < isExerciseTime.length; ++s) {
+                                if (isExerciseTime[s]) {
+                                    MTBrownianGeneratorFactory iFactory =
+                                            new MTBrownianGeneratorFactory(seed_ + s);
+                                    MarketModelEvolver e = makeMarketModelEvolver(
+                                            marketModel, numeraires, iFactory,
+                                            evolvers[i], s);
+                                    innerEvolvers.add(e);
+                                }
+                            }
+                            int initialNumeraire = evolver.numeraires().get(0);
+                            double initialNumeraireValue =
+                                    todaysDiscounts.get(initialNumeraire);
+                            UpperBoundEngine uEngine = new UpperBoundEngine(
+                                    evolver, innerEvolvers, receiverSwap, nullRebate,
+                                    receiverSwap, nullRebate, naifStrategy,
+                                    initialNumeraireValue);
+                            GenericRiskStatistics uStats = new GenericRiskStatistics();
+                            uEngine.multiplePathValues(uStats, 255, 256);
+                            double delta = uStats.mean();
+                            double deltaError = uStats.errorEstimate();
+                            if (printReport_)
+                                System.out.println("    upper bound delta: "
+                                        + rate(delta) + " +- " + rate(deltaError));
                         }
                     }
                 }
