@@ -99,6 +99,40 @@ public class LogNormalFwdRateEuler extends MarketModelEvolver {
         setForwards(marketModel_.initialRates());
     }
 
+    /**
+     * Copy constructor matching the official implicit copy in
+     * {@code ext::make_shared<LogNormalFwdRateEuler>(evolver)}: the market
+     * model and the Brownian generator are shared while the working state and
+     * the curve state are copied.
+     */
+    public LogNormalFwdRateEuler(final LogNormalFwdRateEuler rhs) {
+        marketModel_ = rhs.marketModel_;
+        numeraires_ = new ArrayList<>(rhs.numeraires_);
+        initialStep_ = rhs.initialStep_;
+        generator_ = rhs.generator_;
+        numberOfRates_ = rhs.numberOfRates_;
+        numberOfFactors_ = rhs.numberOfFactors_;
+        curveState_ = rhs.curveState_.copy();
+        currentStep_ = rhs.currentStep_;
+        forwards_ = new ArrayList<>(rhs.forwards_);
+        displacements_ = new ArrayList<>(rhs.displacements_);
+        logForwards_ = new ArrayList<>(rhs.logForwards_);
+        initialLogForwards_ = new ArrayList<>(rhs.initialLogForwards_);
+        drifts1_ = new ArrayList<>(rhs.drifts1_);
+        initialDrifts_ = new ArrayList<>(rhs.initialDrifts_);
+        brownians_ = new ArrayList<>(rhs.brownians_);
+        correlatedBrownians_ = new ArrayList<>(rhs.correlatedBrownians_);
+        alive_ = new ArrayList<>(rhs.alive_);
+        for (List<Double> fixedDrift : rhs.fixedDrifts_)
+            fixedDrifts_.add(new ArrayList<>(fixedDrift));
+        for (int j = 0; j < rhs.calculators_.size(); ++j) {
+            final Matrix A = marketModel_.pseudoRoot(j);
+            calculators_.add(new LMMDriftCalculator(A, displacements_,
+                    marketModel_.evolution().rateTaus(),
+                    numeraires_.get(j), alive_.get(j)));
+        }
+    }
+
     private void setForwards(final List<Double> forwards) {
         QL_REQUIRE(forwards.size() == numberOfRates_,
                 "mismatch between forwards and rateTimes");
