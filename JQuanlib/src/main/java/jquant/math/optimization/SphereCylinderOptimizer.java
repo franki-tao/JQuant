@@ -27,6 +27,15 @@ public class SphereCylinderOptimizer {
                                    double alpha,
                                    double z1,
                                    double z2,
+                                   double z3) {
+        this(r, s, alpha, z1, z2, z3, 1.0);
+    }
+
+    public SphereCylinderOptimizer(double r,
+                                   double s,
+                                   double alpha,
+                                   double z1,
+                                   double z2,
                                    double z3,
                                    double zweight) {
         r_ = r;

@@ -12,8 +12,8 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
 
 /**
  * Official QuantLib {@code ql/models/marketmodels/models/pseudorootfacade.hpp/.cpp}
- * port, vector-of-matrices constructor only. The
- * {@code PseudoRootFacade(CTSMMCapletCalibration)} constructor is not ported.
+ * port. Both official constructors are provided: the vector-of-matrices form
+ * and the {@link CTSMMCapletCalibration} form.
  */
 public class PseudoRootFacade extends MarketModel {
 
@@ -73,6 +73,19 @@ public class PseudoRootFacade extends MarketModel {
                             + this.covariancePseudoRoots_.get(k).cols()
                             + " instead of " + numberOfFactors_);
         }
+    }
+
+    public PseudoRootFacade(final CTSMMCapletCalibration c) {
+        numberOfFactors_ = c.swapPseudoRoots().get(0).cols();
+        numberOfRates_ = c.swapPseudoRoots().get(0).rows();
+        numberOfSteps_ = c.swapPseudoRoots().size();
+        initialRates_ = new ArrayList<>(c.curveState().coterminalSwapRates());
+        displacements_ = new ArrayList<>(c.displacements());
+        evolution_ = new EvolutionDescription(c.curveState().rateTimes());
+        // Official stores covariancePseudoRoots_ by value: deep-copy every root.
+        covariancePseudoRoots_ = new ArrayList<>();
+        for (Matrix pseudoRoot : c.swapPseudoRoots())
+            covariancePseudoRoots_.add(copyMatrix(pseudoRoot));
     }
 
     @Override
