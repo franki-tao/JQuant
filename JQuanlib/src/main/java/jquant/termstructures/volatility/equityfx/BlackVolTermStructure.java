@@ -7,6 +7,7 @@ import jquant.time.*;
 
 import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
+import static jquant.math.MathUtils.NULL_REAL;
 
 //! Black-volatility term structure
 /*! This abstract class defines the interface of concrete
@@ -207,6 +208,11 @@ public abstract class BlackVolTermStructure extends VolatilityTermStructure {
         assume that extrapolation is required.
     */
     //@{
+    //! forward (at-the-money) level; Null<Real>() by default
+    public double atmLevel(double t) {
+        return NULL_REAL;
+    }
+
     //! Black variance calculation
     protected abstract double blackVarianceImpl(double t, double strike);
 

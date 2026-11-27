@@ -46,10 +46,12 @@ public class MCEuropeanEngine extends McVanillaEngine {
 
         QL_REQUIRE(process_ instanceof GeneralizedBlackScholesProcess,
                 "Black-Scholes process required");
+        GeneralizedBlackScholesProcess process =
+                (GeneralizedBlackScholesProcess) process_;
 
         return new EuropeanPathPricer(
                 payoff.optionType(),
                 payoff.strike(),
-                process_.riskFreeRate().getValue().discount(timeGrid().back(), false));
+                process.riskFreeRate().getValue().discount(timeGrid().back(), false));
     }
 }
