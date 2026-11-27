@@ -1,5 +1,6 @@
 package instruments;
 
+import jquant.Handle;
 import jquant.Option;
 import jquant.Payoff;
 import jquant.SavedSettings;
@@ -9,6 +10,7 @@ import jquant.legacy.libormarketmodels.LmExtLinearExponentialVolModel;
 import jquant.math.Array;
 import jquant.math.MathUtils;
 import jquant.math.Matrix;
+import jquant.math.integrals.FourierIntegration;
 import jquant.math.integrals.SegmentIntegral;
 import jquant.math.optimization.EndCriteria;
 import jquant.math.optimization.Simplex;
@@ -16,6 +18,7 @@ import jquant.math.statistics.GenericRiskStatistics;
 import jquant.methods.montecarlo.GenericEarlyExerciseOptimization;
 import jquant.methods.montecarlo.GenericLongstaffSchwartzRegression;
 import jquant.methods.montecarlo.NodeData;
+import jquant.models.equity.HestonModel;
 import jquant.models.marketmodels.AccountingEngine;
 import jquant.models.marketmodels.BrownianGenerator;
 import jquant.models.marketmodels.BrownianGeneratorFactory;
@@ -54,7 +57,10 @@ import jquant.models.marketmodels.evolvers.LogNormalFwdRateEuler;
 import jquant.models.marketmodels.evolvers.LogNormalFwdRateEulerConstrained;
 import jquant.models.marketmodels.evolvers.LogNormalFwdRateIpc;
 import jquant.models.marketmodels.evolvers.LogNormalFwdRatePc;
+import jquant.models.marketmodels.evolvers.MarketModelVolProcess;
 import jquant.models.marketmodels.evolvers.NormalFwdRatePc;
+import jquant.models.marketmodels.evolvers.SVDDFwdRatePc;
+import jquant.models.marketmodels.evolvers.volprocesses.SquareRootAndersen;
 import jquant.models.marketmodels.models.AbcdVol;
 import jquant.models.marketmodels.models.FlatVol;
 import jquant.models.marketmodels.models.FwdPeriodAdapter;
@@ -94,9 +100,14 @@ import jquant.pricingengines.BlackFormula;
 import jquant.pricingengines.CashOrNothingPayoff;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.pricingengines.StrikedTypePayoff;
+import jquant.pricingengines.vanilla.AnalyticHestonEngine;
+import jquant.processes.HestonProcess;
+import jquant.quotes.SimpleQuote;
+import jquant.termstructures.YieldTermStructure;
 import jquant.termstructures.volatility.AbcdCalibration;
 import jquant.termstructures.volatility.AbcdFunction;
 import jquant.termstructures.volatility.AbcdSquared;
+import jquant.termstructures.yield.FlatForward;
 import jquant.time.BusinessDayConvention;
 import jquant.time.Calendar;
 import jquant.time.Date;
@@ -4709,6 +4720,182 @@ public class MarketModelTest {
 
         /////////////////////////////////////
 
+    }
+
+    @Test
+    void testStochVolForwardsAndOptionlets() {
+        System.out.println(
+                "Testing exact repricing of "
+                        + "forwards and optionlets "
+                        + "in a stochastic vol displaced diffusion forward rate market model...");
+
+        setup();
+
+        List<Double> forwardStrikes = filledList(todaysForwards.size(), 0.0);
+        List<Payoff> optionletPayoffs = new ArrayList<>();
+        /* List<PlainVanillaPayoff> displacedPayoffs =
+               new ArrayList<>(todaysForwards.size()); */
+        for (int i = 0; i < todaysForwards.size(); ++i) {
+            forwardStrikes.set(i, todaysForwards.get(i) + 0.01);
+            optionletPayoffs.add(new PlainVanillaPayoff(Option.Type.Call,
+                    todaysForwards.get(i)));
+            /* displacedPayoffs.add(new PlainVanillaPayoff(Option.Type.Call,
+                   todaysForwards.get(i) + displacement)); */
+        }
+
+        MultiStepForwards forwards = new MultiStepForwards(rateTimes, accruals,
+                paymentTimes, forwardStrikes);
+        MultiStepOptionlets optionlets = new MultiStepOptionlets(rateTimes, accruals,
+                paymentTimes, optionletPayoffs);
+
+        MultiProductComposite product = new MultiProductComposite();
+        product.add(forwards);
+        product.add(optionlets);
+        product.finalize();
+
+        EvolutionDescription evolution = product.evolution();
+
+        MarketModelType[] marketModels = {
+                MarketModelType.ExponentialCorrelationFlatVolatility
+        };
+
+        int firstVolatilityFactor = 2;
+        int volatilityFactorStep = 2;
+
+        double meanLevel = 1.0;
+        double reversionSpeed = 1.0;
+
+        double volVar = 1;
+        double v0 = 1.0;
+        int numberSubSteps = 8;
+        double w1 = 0.5;
+        double w2 = 0.5;
+        double cutPoint = 1.5;
+
+        MarketModelVolProcess volProcess = new SquareRootAndersen(meanLevel,
+                reversionSpeed,
+                volVar,
+                v0,
+                evolution.evolutionTimes(),
+                numberSubSteps,
+                w1,
+                w2,
+                cutPoint);
+
+        for (MarketModelType j : marketModels) {
+
+            int[] testedFactors = {1, 2, todaysForwards.size()};
+            for (int factors : testedFactors) {
+                MeasureType[] measures = {MeasureType.MoneyMarket, MeasureType.Terminal};
+
+                for (MeasureType measure : measures) {
+                    List<Integer> numeraires = makeMeasure(product, measure);
+
+                    boolean logNormal = true;
+                    MarketModel marketModel = makeMarketModel(logNormal, evolution, factors, j);
+
+                    for (int n = 0; n < 1; n++) {
+                        MTBrownianGeneratorFactory generatorFactory =
+                                new MTBrownianGeneratorFactory(seed_);
+
+                        MarketModelEvolver evolver = new SVDDFwdRatePc(marketModel,
+                                generatorFactory,
+                                volProcess,
+                                firstVolatilityFactor,
+                                volatilityFactorStep,
+                                numeraires);
+
+                        String config = marketModelTypeToString(j) + ", " + factors
+                                + (factors > 1
+                                ? (factors == todaysForwards.size()
+                                ? " (full) factors, "
+                                : " factors, ")
+                                : " factor,")
+                                + measureTypeToString(measure) + ", "
+                                + "SVDDFwdRatePc"
+                                + ", "
+                                + "MT BGF";
+                        if (printReport_)
+                            System.out.println("    " + config);
+
+                        SequenceStatisticsInc stats = simulate(evolver, product);
+
+                        List<Double> results = stats.mean();
+                        List<Double> errors = stats.errorEstimate();
+
+                        // check forwards
+
+                        for (int i = 0; i < accruals.size(); ++i) {
+                            double trueValue = todaysDiscounts.get(i)
+                                    - todaysDiscounts.get(i + 1)
+                                    * (1 + forwardStrikes.get(i) * accruals.get(i));
+                            double error = results.get(i) - trueValue;
+                            double errorSds = error / errors.get(i);
+
+                            if (Math.abs(errorSds) > 3.5)
+                                fail("error in sds: " + errorSds
+                                        + " for forward " + i
+                                        + " in SV LMM test. True value:" + trueValue
+                                        + ", actual value: " + results.get(i)
+                                        + " , standard error " + errors.get(i));
+                        }
+
+                        for (int i = 0; i < accruals.size(); ++i) {
+
+                            double volCoeff = volatilities.get(i);
+                            // sqrt(marketModel->totalCovariance(i)[i][i]/evolution.evolutionTimes()[i]);
+                            double theta = volCoeff * volCoeff * meanLevel;
+                            double kappa = reversionSpeed;
+                            double sigma = volCoeff * volVar;
+                            double rho = 0.0;
+                            double v1 = v0 * volCoeff * volCoeff;
+
+                            StrikedTypePayoff payoff =
+                                    new PlainVanillaPayoff(Option.Type.Call, forwardStrikes.get(i));
+
+                            double trueValue = new AnalyticHestonEngine(
+                                    new HestonModel(
+                                            new HestonProcess(
+                                                    new Handle<>(flatRate(0.0, dayCounter), true),
+                                                    new Handle<>(flatRate(0.0, dayCounter), true),
+                                                    new Handle<>(new SimpleQuote(
+                                                            todaysForwards.get(i) + displacement), true),
+                                                    v1, kappa, theta, sigma, rho)),
+                                    AnalyticHestonEngine.ComplexLogFormula.Gatheral,
+                                    FourierIntegration.gaussLaguerre(128)
+                            ).priceVanillaPayoff(
+                                    new PlainVanillaPayoff(payoff.optionType(),
+                                            todaysForwards.get(i) + displacement),
+                                    rateTimes.get(i));
+
+                            trueValue *= accruals.get(i) * todaysDiscounts.get(i + 1);
+
+                            //        trueValue =
+                            //                              BlackCalculator(displacedPayoffs[i],
+                            //                                                todaysForwards[i]+displacement,
+                            //                                             volatilities[i]*std::sqrt(rateTimes[i]),
+                            //                                              todaysDiscounts[i+1]*accruals[i]).value();
+
+                            double error = results.get(i + accruals.size()) - trueValue;
+                            double errorSds = error / errors.get(i);
+
+                            if (Math.abs(errorSds) > 4)
+                                fail("error in sds: " + errorSds
+                                        + " for caplet " + i
+                                        + " in SV LMM test. True value:" + trueValue
+                                        + ", actual value: " + results.get(i + accruals.size())
+                                        + " , standard error " + errors.get(i));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Official test-suite utilities.flatRate(Rate, DayCounter).
+    private YieldTermStructure flatRate(double forward, DayCounter dc) {
+        return new FlatForward(0, new NullCalendar(),
+                new Handle<>(new SimpleQuote(forward), true), dc);
     }
 
     private static Matrix deepCopyMatrix(final Matrix source) {
