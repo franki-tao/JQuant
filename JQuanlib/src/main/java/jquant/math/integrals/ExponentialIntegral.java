@@ -92,7 +92,8 @@ public class ExponentialIntegral {
         }
 
         if (abs_z > 1.1 * z_asym) {
-            Complex ei = new Complex(0, Math.signum(z.getImaginary() * M_PI)).add(acc);
+            Complex ei = acc.add(new Complex(0.0,
+                    Math.signum(z.getImaginary()) * M_PI));
             Complex s = z.exp().divide(z);
             for (int i = 1; i <= Math.floor(abs_z) + 1; ++i) {
                 if (match(ei.add(s), ei, MAX_ERROR)) {
@@ -109,7 +110,9 @@ public class ExponentialIntegral {
             for (int k = 47; k >= 1; --k) {
                 ei = new Complex(-k * k).divide(ei.add(2.0 * k + 1.0).subtract(z));
             }
-            return new Complex(0, Math.signum(z.getImaginary() * M_PI)).add(acc).subtract(z.exp().divide(ei.subtract(z).add(1)));
+            return new Complex(0.0,
+                    Math.signum(z.getImaginary()) * M_PI).add(acc)
+                    .subtract(z.exp().divide(ei.subtract(z).add(1)));
         }
         Complex s = new Complex(0);
         Complex sn = new Complex(z.getReal(), z.getImaginary());
@@ -156,8 +159,12 @@ public class ExponentialIntegral {
             int k;
             for (k = 2; k < 100 && !s.equals(s.add(nn)); ++k) {
                 s = s.add(nn);
-                nn = nn.multiply(z.multiply(z.negate()).divide(((2.0 * k - 2) * (2 * k - 1) * (2 * k - 1)) * (2.0 * k - 3)));
-                // nn *= -z*z/((2.0*k-2)*(2*k-1)*(2*k-1))*(2.0*k-3);
+                // Official: nn *= -z*z/((2k-2)*(2k-1)*(2k-1))*(2k-3);
+                // multiplication by (2k-3) must not be folded into the
+                // denominator (C++ operators associate left to right).
+                nn = nn.multiply(z.multiply(z.negate())
+                        .multiply(2.0 * k - 3)
+                        .divide((2.0 * k - 2) * (2 * k - 1) * (2 * k - 1)));
             }
             QL_REQUIRE(k < 100, "series conversion issue for Si(z)");
 

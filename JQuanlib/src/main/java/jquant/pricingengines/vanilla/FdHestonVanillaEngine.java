@@ -7,6 +7,7 @@ import jquant.cashflows.Dividend;
 import jquant.math.Point;
 import jquant.methods.finitedifferences.meshers.Fdm1dMesher;
 import jquant.methods.finitedifferences.meshers.FdmBlackScholesMesher;
+import jquant.methods.finitedifferences.meshers.FdmBlackScholesMultiStrikeMesher;
 import jquant.methods.finitedifferences.meshers.FdmHestonLocalVolatilityVarianceMesher;
 import jquant.methods.finitedifferences.meshers.FdmMesher;
 import jquant.methods.finitedifferences.meshers.FdmMesherComposite;
@@ -36,7 +37,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import static jquant.math.CommonUtil.QL_FAIL;
 import static jquant.math.CommonUtil.QL_REQUIRE;
 import static jquant.math.MathUtils.NULL_REAL;
 
@@ -141,6 +141,9 @@ public class FdHestonVanillaEngine implements PricingEngine {
 
             @Override
             public void update() {
+                // Official FdHestonVanillaEngine::update() clears the
+                // multiple-strikes cache before forwarding the notification.
+                cachedArgs2results_.clear();
                 notifyObservers();
             }
         });
@@ -262,9 +265,13 @@ public class FdHestonVanillaEngine implements PricingEngine {
         } else {
             QL_REQUIRE(dividends_.isEmpty(),
                     "multiple strikes engine does not work with discrete dividends");
-            // FdmBlackScholesMultiStrikeMesher is not ported.
-            QL_FAIL("FdmBlackScholesMultiStrikeMesher is not ported");
-            equityMesher = null;
+            equityMesher = new FdmBlackScholesMultiStrikeMesher(
+                    xGrid_,
+                    FdmBlackScholesMesher.processHelper(
+                            process.s0(), process.dividendYield(),
+                            process.riskFreeRate(), avgVolaEstimate),
+                    maturity, strikes_, 0.0001, 1.5,
+                    new Point<>(payoff.strike(), 0.075));
         }
 
         final FdmMesher mesher = new FdmMesherComposite(

@@ -1,5 +1,6 @@
 package jquant.models;
 
+import jquant.impl.HandleImpl;
 import jquant.math.Array;
 import jquant.math.CommonUtil;
 import jquant.math.optimization.*;
@@ -12,7 +13,7 @@ import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
-public abstract class CalibratedModel implements Observer, Observable {
+public abstract class CalibratedModel implements Observer, Observable, HandleImpl {
     //! Constraint imposed on arguments
     private static class PrivateConstraint extends Constraint {
         static class Impl extends ConstraintImpl {
@@ -259,6 +260,19 @@ public abstract class CalibratedModel implements Observer, Observable {
 
     public int functionEvaluation() {
         return functionEvaluation_;
+    }
+
+    // HandleImpl: Java handles require their target to expose a scalar value.
+    // A calibrated model has no such value; mirror TermStructure's adapter so
+    // models can be wrapped in Handle<T> (e.g. Handle<HestonModel>).
+    @Override
+    public double value() {
+        return 0.0;
+    }
+
+    @Override
+    public boolean isValid() {
+        return true;
     }
 
     protected abstract void generateArguments();

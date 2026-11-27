@@ -3,6 +3,8 @@ package jquant.pricingengines.vanilla;
 import jquant.EuropeanOption;
 import jquant.Option;
 import jquant.PricingEngine;
+import jquant.StochasticProcess;
+import jquant.StochasticProcess1D;
 import jquant.TimeGrid;
 import jquant.math.MathUtils;
 import jquant.math.randomnumbers.InverseCumulativeRsg;
@@ -11,8 +13,8 @@ import jquant.patterns.Observable;
 import jquant.patterns.ObservableSettings;
 import jquant.patterns.Observer;
 import jquant.pricingengines.McSimulation;
-import jquant.processes.GeneralizedBlackScholesProcess;
 import jquant.time.Date;
+import jquant.methods.montecarlo.MultiPathGenerator;
 import jquant.methods.montecarlo.PathGenerator;
 
 import java.util.HashMap;
@@ -26,11 +28,16 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * Pricing engine for vanilla options using Monte Carlo simulation.
  *
  * <p>Port of QuantLib
- * {@code ql/pricingengines/vanilla/mcvanillaengine.hpp} for the
- * single-variate case. The RNG policy is selected with {@link RngType}.
+ * {@code ql/pricingengines/vanilla/mcvanillaengine.hpp}. The official
+ * {@code MC} template parameter ({@code SingleVariate} or
+ * {@code MultiVariate}) is represented by the kind of process supplied:
+ * a {@link StochasticProcess1D} uses a single-path
+ * {@link PathGenerator}, any other {@link StochasticProcess} uses a
+ * {@link MultiPathGenerator}. The RNG policy is selected with
+ * {@link RngType}.
  */
 public abstract class McVanillaEngine extends McSimulation implements PricingEngine {
-    protected final GeneralizedBlackScholesProcess process_;
+    protected final StochasticProcess process_;
     protected final Option.arguments arguments_ = new Option.arguments();
     protected final EuropeanOption.results results_ = new EuropeanOption.results();
     private final Set<Observer> observers_ = new HashSet<>();
@@ -44,7 +51,7 @@ public abstract class McVanillaEngine extends McSimulation implements PricingEng
     protected long seed_;
     protected final RngType rngType_;
 
-    protected McVanillaEngine(GeneralizedBlackScholesProcess process,
+    protected McVanillaEngine(StochasticProcess process,
                               int timeSteps,
                               int timeStepsPerYear,
                               boolean brownianBridge,
@@ -124,6 +131,8 @@ public abstract class McVanillaEngine extends McSimulation implements PricingEng
 
     @Override
     protected PathGenerator pathGenerator() {
+        QL_REQUIRE(process_ instanceof StochasticProcess1D,
+                "1-D process required");
         int dimensions = process_.factors();
         TimeGrid grid = timeGrid();
         InverseCumulativeRsg generator = rngType_.makeSequenceGenerator(
@@ -131,7 +140,17 @@ public abstract class McVanillaEngine extends McSimulation implements PricingEng
         return new PathGenerator(process_, grid, generator, brownianBridge_);
     }
 
-    public GeneralizedBlackScholesProcess process() {
+    @Override
+    protected MultiPathGenerator multiPathGenerator() {
+        int dimensions = process_.factors();
+        TimeGrid grid = timeGrid();
+        InverseCumulativeRsg generator = rngType_.makeSequenceGenerator(
+                dimensions * (grid.size() - 1), seed_);
+        return new MultiPathGenerator(process_, grid, generator,
+                brownianBridge_);
+    }
+
+    public StochasticProcess process() {
         return process_;
     }
 
