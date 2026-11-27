@@ -3,6 +3,8 @@ package jquant.pricingengines.swaption;
 import jquant.CashFlow;
 import jquant.Exercise;
 import jquant.Handle;
+import jquant.Instrument;
+import jquant.PricingEngine;
 import jquant.InterestRate;
 import jquant.Option;
 import jquant.Quote;
@@ -12,6 +14,7 @@ import jquant.instruments.FixedVsFloatingSwap;
 import jquant.instruments.Settlement;
 import jquant.instruments.Swaption;
 import jquant.patterns.ObservableSettings;
+import jquant.patterns.Observer;
 import jquant.pricingengines.DiscountingSwapEngine;
 import jquant.quotes.SimpleQuote;
 import jquant.termstructures.YieldTermStructure;
@@ -144,6 +147,7 @@ public abstract class BlackStyleSwaptionEngine extends Swaption.engine {
         // using the discounting curve
         // swap.iborIndex() might be using a different forwarding curve
         DiscountingSwapEngine engine = new DiscountingSwapEngine(discountCurve_);
+        PricingEngine previousEngine = (swap instanceof Instrument inst) ? inst.engine() : null;
         // Drop (not defer) notifications while swapping the engine, as the
         // official ObservableSettings::disableUpdates() default does; deferring
         // them would invalidate the swaption we are currently calculating.
@@ -156,6 +160,11 @@ public abstract class BlackStyleSwaptionEngine extends Swaption.engine {
         } finally {
             ObservableSettings.getInstance().enableUpdates();
         }
+        // Official setPricingEngine drops the previous engine shared_ptr; if
+        // that was the last reference, Observer::~Observer unregisters it from
+        // the discount curve. Java observers are strong, so unregister here.
+        if (previousEngine instanceof Observer previous && previousEngine != engine)
+            previous.unregisterWithAll();
         Date valuationDate = results_.valuationDate = swap.valuationDate();
         double atmForward = swap.fairRate();
 

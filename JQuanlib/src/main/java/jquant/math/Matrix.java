@@ -31,12 +31,21 @@ public class Matrix {
         matrix = matrix.scalarAdd(value);
     }
 
+    /** Official {@code Matrix::empty()}: true for a default-constructed matrix. */
+    public boolean empty() {
+        return matrix == null
+                || matrix.getRowDimension() == 0
+                || matrix.getColumnDimension() == 0;
+    }
+
     public int rows() {
-        return matrix.getRowDimension();
+        // A zero-sized Matrix is represented by a null delegate; official
+        // Matrix reports zero rows/columns for it.
+        return matrix == null ? 0 : matrix.getRowDimension();
     }
 
     public int cols() {
-        return matrix.getColumnDimension();
+        return matrix == null ? 0 : matrix.getColumnDimension();
     }
 
     public double get(int row, int col) {

@@ -91,6 +91,14 @@ public class LiborForwardModelProcess extends StochasticProcess {
             accrualEndTimes_.set(i,
                     dayCounter.yearFraction(settlement, coupon.accrualEndDate(), new Date(), new Date()));
         }
+        // Official constructor keeps `flows` only as a local Leg, destroyed at
+        // the end of the ctor (Observer::~Observer unregisters the coupons from
+        // the index and Settings.evaluationDate()). Java has no destructor, so
+        // unregister the temporary coupons here once their rates and dates have
+        // been copied.
+        for (CashFlow flow : flows) {
+            flow.unregisterWithAll();
+        }
     }
 
     @Override
@@ -202,6 +210,11 @@ public class LiborForwardModelProcess extends StochasticProcess {
         return index_;
     }
 
+    /** Official default {@code amount = 1.0}. */
+    public List<CashFlow> cashFlows() {
+        return cashFlows(1.0);
+    }
+
     // amount = 1.0
     public List<CashFlow> cashFlows(double amount) {
         Date refDate = index_.forwardingTermStructure().currentLink().referenceDate();
@@ -250,5 +263,23 @@ public class LiborForwardModelProcess extends StochasticProcess {
 
     public final List<Double> accrualEndTimes() {
         return accrualEndTimes_;
+    }
+
+    /**
+     * Official {@code LiborForwardModelProcess::discountBond}: discount
+     * factors implied by the given forward rates, normalized so that the
+     * first factor is {@code 1/(1+rates[0]*accrualPeriod_[0])}.
+     */
+    public List<Double> discountBond(final List<Double> rates) {
+        List<Double> discountFactors = CommonUtil.ArrayInit(size_, 0.0);
+        discountFactors.set(0,
+                1.0 / (1.0 + rates.get(0) * accrualPeriod_.get(0)));
+
+        for (int i = 1; i < size_; ++i)
+            discountFactors.set(i,
+                    discountFactors.get(i - 1)
+                            / (1.0 + rates.get(i) * accrualPeriod_.get(i)));
+
+        return discountFactors;
     }
 }

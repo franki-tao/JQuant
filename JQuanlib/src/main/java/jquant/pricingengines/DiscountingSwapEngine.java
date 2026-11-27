@@ -25,12 +25,13 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  *
  * <p>https://github.com/lballabio/QuantLib/blob/master/ql/pricingengines/swap/discountingswapengine.cpp
  */
-public class DiscountingSwapEngine implements PricingEngine {
+public class DiscountingSwapEngine implements PricingEngine, Observer {
     private final YieldTermStructure discountCurve_;
     private final Handle<YieldTermStructure> discountHandle_;
     private final arguments arguments_ = new arguments();
     private final results results_ = new results();
     private final Set<Observer> observers_ = new HashSet<>();
+    private final Set<Observable> registeredObservables_ = new HashSet<>();
 
     public DiscountingSwapEngine(YieldTermStructure discountCurve) {
         this(discountCurve, null);
@@ -54,24 +55,40 @@ public class DiscountingSwapEngine implements PricingEngine {
         discountHandle_ = discountHandle;
         results_.additionalResults = new HashMap<>();
         Observable source = discountHandle != null ? discountHandle.get() : discountCurve;
-        source.registerObserver(new Observer() {
-            @Override
-            public void registerWith(Observable observable) {
-            }
+        // Official DiscountingSwapEngine is a GenericEngine/Observer; register
+        // this (not an anonymous wrapper) so unregisterWithAll can detach from
+        // the process-wide discount curve when the official engine would be
+        // destroyed.
+        registerWith(source);
+    }
 
-            @Override
-            public void unregisterWithAll() {
-            }
+    @Override
+    public void update() {
+        notifyObservers();
+    }
 
-            @Override
-            public void unregisterWith(Observable observable) {
-            }
+    @Override
+    public void registerWith(Observable observable) {
+        if (observable != null) {
+            observable.registerObserver(this);
+            registeredObservables_.add(observable);
+        }
+    }
 
-            @Override
-            public void update() {
-                notifyObservers();
-            }
-        });
+    @Override
+    public void unregisterWith(Observable observable) {
+        if (observable != null) {
+            observable.unregisterObserver(this);
+            registeredObservables_.remove(observable);
+        }
+    }
+
+    @Override
+    public void unregisterWithAll() {
+        for (Observable o : registeredObservables_) {
+            o.unregisterObserver(this);
+        }
+        registeredObservables_.clear();
     }
 
     private YieldTermStructure discountCurve() {
@@ -165,6 +182,7 @@ public class DiscountingSwapEngine implements PricingEngine {
         public double fixedRate;
         public double nominal;
         public double payerSign;
+        public List<Date> fixedResetDates;
         public List<Date> fixedPayDates;
         public List<Double> fixedYearFractions;
         public List<CashFlow> floatingLeg;
@@ -174,6 +192,9 @@ public class DiscountingSwapEngine implements PricingEngine {
         @Override
         public void validate() {
             QL_REQUIRE(fixedPayDates != null && !fixedPayDates.isEmpty(), "no fixed leg");
+            QL_REQUIRE(fixedResetDates == null
+                            || fixedResetDates.size() == fixedPayDates.size(),
+                    "fixed reset dates do not match the fixed pay dates");
             QL_REQUIRE(floatingLeg != null && !floatingLeg.isEmpty(), "no floating leg");
             QL_REQUIRE(fixedYearFractions != null && fixedYearFractions.size() == fixedPayDates.size(),
                     "fixed year fractions do not match the fixed dates");

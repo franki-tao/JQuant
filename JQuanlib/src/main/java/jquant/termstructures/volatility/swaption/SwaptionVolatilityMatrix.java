@@ -145,6 +145,52 @@ public class SwaptionVolatilityMatrix extends SwaptionVolatilityDiscrete {
         interpolate(flatExtrapolation);
     }
 
+    /** fixed reference date, fixed market data, explicit option dates */
+    public SwaptionVolatilityMatrix(Date referenceDate,
+                                    Calendar calendar,
+                                    BusinessDayConvention bdc,
+                                    Date[] optionDates,
+                                    List<Period> swapTenors,
+                                    Matrix volatilities,
+                                    DayCounter dayCounter) {
+        this(referenceDate, calendar, bdc, optionDates, swapTenors,
+                volatilities, dayCounter, false, ShiftedLognormal, null);
+    }
+
+    /** fixed reference date, fixed market data, explicit option dates */
+    public SwaptionVolatilityMatrix(Date referenceDate,
+                                    Calendar calendar,
+                                    BusinessDayConvention bdc,
+                                    Date[] optionDates,
+                                    List<Period> swapTenors,
+                                    Matrix volatilities,
+                                    DayCounter dayCounter,
+                                    boolean flatExtrapolation,
+                                    VolatilityType type,
+                                    Matrix shifts) {
+        super(optionDates, swapTenors, referenceDate, calendar, bdc,
+                dayCounter);
+
+        int volRows = volatilities.rows();
+        int volColumns = volatilities.cols();
+        volatilityType_ = type;
+        checkInputs(volRows, volColumns, shiftRows(shifts), shiftColumns(shifts));
+
+        volHandles_ = new ArrayList<>(volRows);
+        for (int i = 0; i < volRows; ++i) {
+            List<Handle<Quote>> row = new ArrayList<>(volColumns);
+            for (int j = 0; j < volColumns; ++j)
+                row.add(new Handle<Quote>(
+                        new SimpleQuote(volatilities.get(i, j)), true));
+            volHandles_.add(row);
+        }
+
+        volatilities_ = new double[nOptionTenors_][nSwapTenors_];
+        shifts_ = new double[nOptionTenors_][nSwapTenors_];
+        shiftValues_ = shiftValues(shifts);
+        interpolate(flatExtrapolation);
+    }
+
     /** floating reference date, floating market data */
     public SwaptionVolatilityMatrix(Calendar calendar,
                                     BusinessDayConvention bdc,

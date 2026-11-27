@@ -246,6 +246,7 @@ public class VanillaSwap extends Instrument implements FixedVsFloatingSwap {
         arguments.fixedRate = fixedRate_;
         arguments.nominal = nominal_;
         arguments.payerSign = type_ == Type.Payer ? 1.0 : -1.0;
+        arguments.fixedResetDates = new ArrayList<>();
         arguments.fixedPayDates = new ArrayList<>();
         arguments.fixedYearFractions = new ArrayList<>();
         // As in FixedVsFloatingSwap, the fixed leg pays on the fixed calendar
@@ -255,6 +256,7 @@ public class VanillaSwap extends Instrument implements FixedVsFloatingSwap {
         for (int i = 0; i < fixedPeriods; i++) {
             Date start = fixedSchedule_.date(i);
             Date end = fixedSchedule_.date(i + 1);
+            arguments.fixedResetDates.add(start);
             arguments.fixedPayDates.add(fixedSchedule_.calendar().adjust(end, paymentConvention_));
             arguments.fixedYearFractions.add(fixedDayCount_.yearFraction(start, end, new Date(), new Date()));
         }

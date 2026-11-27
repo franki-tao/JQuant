@@ -102,6 +102,11 @@ public abstract class Instrument extends LazyObject {
         update();
     }
 
+    /** The engine currently attached to this instrument, or null. */
+    public PricingEngine engine() {
+        return engine_;
+    }
+
     /*! When a derived argument structure is defined for an
         instrument, this method should be overridden to fill
         it. This is mandatory in case a pricing engine is used.

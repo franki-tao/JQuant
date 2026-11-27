@@ -154,6 +154,19 @@ public abstract class CalibratedModel implements Observer, Observable {
     /*! An additional constraint can be passed which must be
         satisfied in addition to the constraints of the model.
     */
+    /**
+     * Official default overload:
+     * {@code calibrate(instruments, method, endCriteria)} with an empty
+     * additional constraint, empty weights and no fixed parameters.
+     */
+    public void calibrate(
+            final List<CalibrationHelper> instruments,
+            OptimizationMethod method,
+            final EndCriteria endCriteria) {
+        calibrate(instruments, method, endCriteria,
+                new Constraint(null), new ArrayList<>(), new ArrayList<>());
+    }
+
     public void calibrate(
             final List<CalibrationHelper> instruments,
             OptimizationMethod method,
@@ -233,7 +246,10 @@ public abstract class CalibratedModel implements Observer, Observable {
         for (Parameter argument : arguments_) {
             for (int j = 0; j < argument.size(); ++j, ++p) {
                 QL_REQUIRE(p != params.size(), "parameter array too small");
-                argument.setParam(j, params().get(p));
+                // Official model.cpp reads the passed array (params.begin()),
+                // not the model's current parameters; using params() here made
+                // setParams a no-op and broke every calibration.
+                argument.setParam(j, params.get(p));
             }
         }
         QL_REQUIRE(p == params.size(), "parameter array too big!");

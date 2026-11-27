@@ -16,10 +16,11 @@ import java.util.Set;
  */
 public abstract class GenericEngine<
         A extends PricingEngine.arguments,
-        R extends PricingEngine.results> implements PricingEngine {
+        R extends PricingEngine.results> implements PricingEngine, Observer {
     protected final A arguments_;
     protected final R results_;
     private final Set<Observer> observers_ = new HashSet<>();
+    private final Set<Observable> registeredObservables_ = new HashSet<>();
 
     protected GenericEngine(A arguments, R results) {
         arguments_ = arguments;
@@ -63,30 +64,37 @@ public abstract class GenericEngine<
     }
 
     /**
-     * Registers this engine as an observer of {@code observable}, so that a
-     * change in the market data notifies the instruments using this engine.
+     * Official {@code GenericEngine} is an {@code Observer}. Register {@code this}
+     * (not an anonymous wrapper) so the engine destructor / {@code unregisterWithAll}
+     * can detach from process-wide observables such as a discount curve or a
+     * temporary constant-volatility structure.
      */
-    protected void registerWith(Observable observable) {
-        if (observable == null) {
-            return;
+    @Override
+    public void update() {
+        notifyObservers();
+    }
+
+    @Override
+    public void registerWith(Observable observable) {
+        if (observable != null) {
+            observable.registerObserver(this);
+            registeredObservables_.add(observable);
         }
-        observable.registerObserver(new Observer() {
-            @Override
-            public void registerWith(Observable o) {
-            }
+    }
 
-            @Override
-            public void unregisterWithAll() {
-            }
+    @Override
+    public void unregisterWith(Observable o) {
+        if (o != null) {
+            o.unregisterObserver(this);
+            registeredObservables_.remove(o);
+        }
+    }
 
-            @Override
-            public void unregisterWith(Observable o) {
-            }
-
-            @Override
-            public void update() {
-                notifyObservers();
-            }
-        });
+    @Override
+    public void unregisterWithAll() {
+        for (Observable o : registeredObservables_) {
+            o.unregisterObserver(this);
+        }
+        registeredObservables_.clear();
     }
 }
