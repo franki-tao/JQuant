@@ -27,12 +27,18 @@ public class HestonSLVProcess extends StochasticProcess {
 
     //mixingFactor = 1.0
     public HestonSLVProcess(final HestonProcess hestonProcess,
+                            LocalVolTermStructure leverageFct) {
+        this(hestonProcess, leverageFct, 1.0);
+    }
+
+    public HestonSLVProcess(final HestonProcess hestonProcess,
                             LocalVolTermStructure leverageFct,
                             final double mixingFactor) {
         mixingFactor_ = mixingFactor;
         hestonProcess_ = hestonProcess;
         leverageFct_ = leverageFct;
         registerWith(hestonProcess);
+        registerWith(leverageFct_);
         setParameters();
     }
 

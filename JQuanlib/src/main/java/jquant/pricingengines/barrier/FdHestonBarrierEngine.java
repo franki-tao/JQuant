@@ -68,6 +68,15 @@ public class FdHestonBarrierEngine extends jquant.BarrierOption.engine {
     }
 
     public FdHestonBarrierEngine(final HestonModel model,
+                                 int tGrid, int xGrid, int vGrid,
+                                 int dampingSteps,
+                                 FdmSchemeDesc schemeDesc,
+                                 LocalVolTermStructure leverageFct) {
+        this(model, tGrid, xGrid, vGrid, dampingSteps, schemeDesc,
+                leverageFct, 1.0);
+    }
+
+    public FdHestonBarrierEngine(final HestonModel model,
                                  List<Dividend> dividends) {
         this(model, dividends, 100, 100, 50, 0,
                 FdmSchemeDesc.Hundsdorfer(), null, 1.0);

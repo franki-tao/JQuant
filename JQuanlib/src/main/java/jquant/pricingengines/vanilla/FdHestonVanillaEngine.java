@@ -88,6 +88,14 @@ public class FdHestonVanillaEngine implements PricingEngine {
     }
 
     public FdHestonVanillaEngine(final HestonModel model,
+                                 int tGrid, int xGrid, int vGrid, int dampingSteps,
+                                 final FdmSchemeDesc schemeDesc,
+                                 final LocalVolTermStructure leverageFct) {
+        this(model, tGrid, xGrid, vGrid, dampingSteps, schemeDesc,
+                leverageFct, 1.0);
+    }
+
+    public FdHestonVanillaEngine(final HestonModel model,
                                  final List<Dividend> dividends,
                                  int tGrid, int xGrid, int vGrid, int dampingSteps,
                                  final FdmSchemeDesc schemeDesc,

@@ -102,6 +102,14 @@ public class FdBlackScholesVanillaEngine implements PricingEngine {
     public FdBlackScholesVanillaEngine(GeneralizedBlackScholesProcess process,
                                        int tGrid, int xGrid, int dampingSteps,
                                        FdmSchemeDesc schemeDesc,
+                                       boolean localVol) {
+        this(process, tGrid, xGrid, dampingSteps, schemeDesc,
+                localVol, -NULL_REAL);
+    }
+
+    public FdBlackScholesVanillaEngine(GeneralizedBlackScholesProcess process,
+                                       int tGrid, int xGrid, int dampingSteps,
+                                       FdmSchemeDesc schemeDesc,
                                        boolean localVol,
                                        double illegalLocalVolOverwrite) {
         this(process, Collections.emptyList(), tGrid, xGrid, dampingSteps,

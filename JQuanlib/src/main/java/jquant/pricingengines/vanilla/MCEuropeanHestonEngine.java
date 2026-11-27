@@ -1,9 +1,13 @@
 package jquant.pricingengines.vanilla;
 
+import jquant.Handle;
+import jquant.StochasticProcess;
 import jquant.math.randomnumbers.RngType;
 import jquant.methods.montecarlo.MultiPathPricer;
 import jquant.pricingengines.PlainVanillaPayoff;
 import jquant.processes.HestonProcess;
+import jquant.processes.HestonSLVProcess;
+import jquant.termstructures.YieldTermStructure;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
@@ -23,7 +27,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  */
 public class MCEuropeanHestonEngine extends McVanillaEngine {
 
-    public MCEuropeanHestonEngine(HestonProcess process,
+    public MCEuropeanHestonEngine(StochasticProcess process,
                                   int timeSteps,
                                   int timeStepsPerYear,
                                   boolean antitheticVariate,
@@ -52,14 +56,19 @@ public class MCEuropeanHestonEngine extends McVanillaEngine {
         PlainVanillaPayoff payoff =
                 (PlainVanillaPayoff) arguments_.payoff;
 
-        QL_REQUIRE(process_ instanceof HestonProcess,
-                "Heston like process required");
-        HestonProcess process = (HestonProcess) process_;
+        final Handle<YieldTermStructure> rTS;
+        if (process_ instanceof HestonProcess)
+            rTS = ((HestonProcess) process_).riskFreeRate();
+        else if (process_ instanceof HestonSLVProcess)
+            rTS = ((HestonSLVProcess) process_).riskFreeRate();
+        else {
+            QL_REQUIRE(false, "Heston like process required");
+            return null;
+        }
 
         return new EuropeanHestonPathPricer(
                 payoff.optionType(),
                 payoff.strike(),
-                process.riskFreeRate().getValue()
-                        .discount(timeGrid().back(), false));
+                rTS.getValue().discount(timeGrid().back(), false));
     }
 }

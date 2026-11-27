@@ -25,6 +25,32 @@ public class FdmBlackScholesMesher extends Fdm1dMesher {
             int size,
             final GeneralizedBlackScholesProcess process,
             double maturity,
+            double strike) {
+        this(size, process, maturity, strike,
+                NULL_REAL, NULL_REAL, 0.0001, 1.5,
+                new Point<>(Double.NaN, Double.NaN),
+                new ArrayList<>(), null, 0.0);
+    }
+
+    public FdmBlackScholesMesher(
+            int size,
+            final GeneralizedBlackScholesProcess process,
+            double maturity,
+            double strike,
+            double xMinConstraint,
+            double xMaxConstraint,
+            double eps,
+            double scaleFactor,
+            final Point<Double, Double> cPoint) {
+        this(size, process, maturity, strike,
+                xMinConstraint, xMaxConstraint, eps, scaleFactor, cPoint,
+                new ArrayList<>(), null, 0.0);
+    }
+
+    public FdmBlackScholesMesher(
+            int size,
+            final GeneralizedBlackScholesProcess process,
+            double maturity,
             double strike,
             double xMinConstraint,
             double xMaxConstraint,

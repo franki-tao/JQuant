@@ -60,6 +60,15 @@ public class FdHestonDoubleBarrierEngine extends DoubleBarrierOption.engine {
                                        int tGrid, int xGrid, int vGrid,
                                        int dampingSteps,
                                        FdmSchemeDesc schemeDesc,
+                                       LocalVolTermStructure leverageFct) {
+        this(model, tGrid, xGrid, vGrid, dampingSteps, schemeDesc,
+                leverageFct, 1.0);
+    }
+
+    public FdHestonDoubleBarrierEngine(final HestonModel model,
+                                       int tGrid, int xGrid, int vGrid,
+                                       int dampingSteps,
+                                       FdmSchemeDesc schemeDesc,
                                        LocalVolTermStructure leverageFct,
                                        double mixingFactor) {
         model_ = model;
