@@ -83,6 +83,11 @@ public class LfmCovarianceProxy extends LfmCovarianceParameterization {
         return tmp;
     }
 
+    /** Official default argument {@code x = {}}: empty state array. */
+    public double integratedCovariance(int i, int j, double t) {
+        return integratedCovariance(i, j, t, new Array(0));
+    }
+
     public double integratedCovariance(int i, int j, double t, final Array x) {
         if (corrModel_.isTimeIndependent()) {
             try {

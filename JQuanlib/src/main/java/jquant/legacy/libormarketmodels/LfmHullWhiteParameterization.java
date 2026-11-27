@@ -25,6 +25,19 @@ public class LfmHullWhiteParameterization extends LfmCovarianceParameterization 
     protected Matrix diffusion_, covariance_;
     protected List<Double> fixingTimes_;
 
+    /** Official defaults: empty correlation matrix, one factor. */
+    public LfmHullWhiteParameterization(final LiborForwardModelProcess process,
+                                        final OptionletVolatilityStructure capletVol) {
+        this(process, capletVol, new Matrix(0, 0, 0.0), 1);
+    }
+
+    /** Official default: one factor. */
+    public LfmHullWhiteParameterization(final LiborForwardModelProcess process,
+                                        final OptionletVolatilityStructure capletVol,
+                                        final Matrix correlation) {
+        this(process, capletVol, correlation, 1);
+    }
+
     public LfmHullWhiteParameterization(final LiborForwardModelProcess process,
                                         final OptionletVolatilityStructure capletVol,
                                         final Matrix correlation, //= Matrix(),

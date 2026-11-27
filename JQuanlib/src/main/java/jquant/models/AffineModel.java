@@ -10,11 +10,23 @@ import jquant.patterns.Observable;
     \ingroup shortrate
 */
 public interface AffineModel extends Observable {
+    //! Implied discount curve
+    double discount(double t);
+
     double discountBond(double now,
                         double maturity,
                         Array factors);
 
     double discountBondOption(Option.Type type, double strike, double maturity, double bondMaturity);
 
-    double discountBondOption(Option.Type type, double strike, double maturity, double bondStart, double bondMaturity);
+    /**
+     * Official {@code AffineModel::discountBondOption(type, strike, maturity,
+     * bondStart, bondMaturity)} defaults to the four-argument overload,
+     * ignoring {@code bondStart}.
+     */
+    default double discountBondOption(Option.Type type, double strike,
+                                      double maturity, double bondStart,
+                                      double bondMaturity) {
+        return discountBondOption(type, strike, maturity, bondMaturity);
+    }
 }

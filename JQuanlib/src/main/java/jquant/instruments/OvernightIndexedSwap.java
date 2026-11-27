@@ -222,9 +222,11 @@ public class OvernightIndexedSwap extends Instrument implements FixedVsFloatingS
         arguments.fixedRate = fixedRate_;
         arguments.nominal = nominal_;
         arguments.payerSign = type_ == Swap.Type.Payer ? 1.0 : -1.0;
+        arguments.fixedResetDates = new ArrayList<>();
         arguments.fixedPayDates = new ArrayList<>();
         arguments.fixedYearFractions = new ArrayList<>();
         for (CashFlow cashflow : fixedLeg_) {
+            arguments.fixedResetDates.add(((Coupon) cashflow).accrualStartDate());
             arguments.fixedPayDates.add(cashflow.date());
             arguments.fixedYearFractions.add(((Coupon) cashflow).accrualPeriod());
         }
