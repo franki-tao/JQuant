@@ -4,6 +4,7 @@ import jquant.math.Array;
 import jquant.math.CommonUtil;
 import jquant.math.Matrix;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
@@ -15,6 +16,7 @@ public class BasisIncompleteOrdered {
 
     public BasisIncompleteOrdered(int euclideanDimension) {
         euclideanDimension_ = euclideanDimension;
+        currentBasis_ = new ArrayList<>();
     }
 
     //! return value indicates if the vector was linearly independent
@@ -23,7 +25,8 @@ public class BasisIncompleteOrdered {
                 "missized vector passed to " +
                         "BasisIncompleteOrdered::addVector");
 
-        newVector_ = newVector1;
+        // Official Array assignment copies; the vector is then modified in place.
+        newVector_ = new Array(newVector1);
 
         if (currentBasis_.size() == euclideanDimension_)
             return false;
@@ -40,7 +43,7 @@ public class BasisIncompleteOrdered {
                 // newVector_[k] -= innerProd * currentBasi[k];
             }
         }
-        double norm = CommonUtil.DotProduct(newVector_, newVector_);
+        double norm = Math.sqrt(CommonUtil.DotProduct(newVector_, newVector_));
         // Real norm = std::sqrt(std::inner_product(newVector_.begin(), newVector_.end(), newVector_.begin(), Real(0.0)));
 
         if (norm < 1e-12) // maybe this should be a tolerance
@@ -63,7 +66,8 @@ public class BasisIncompleteOrdered {
     }
 
     public Matrix getBasisAsRowsInMatrix() {
-        Matrix basis = new Matrix(currentBasis_.size(), euclideanDimension_, Double.NaN);
+        // Official Matrix zero-fills; every row is overwritten below.
+        Matrix basis = new Matrix(currentBasis_.size(), euclideanDimension_, 0.0);
         for (int i = 0; i < basis.rows(); ++i)
             for (int j = 0; j < basis.cols(); ++j)
                 basis.set(i,j, currentBasis_.get(i).get(j));
