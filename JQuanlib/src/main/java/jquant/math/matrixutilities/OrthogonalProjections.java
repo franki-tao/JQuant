@@ -3,6 +3,7 @@ package jquant.math.matrixutilities;
 import jquant.math.CommonUtil;
 import jquant.math.Matrix;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /*! Given a collection of vectors, w_i, find a collection of vectors x_i such that
@@ -25,7 +26,7 @@ public class OrthogonalProjections {
 
     //!outputs
     private List<Boolean> validVectors_;
-    private List<List<Double>> projectedVectors_;
+    private List<List<Double>> projectedVectors_ = new ArrayList<>();
 
     //!workspace
     private Matrix orthoNormalizedVectors_;
@@ -36,9 +37,11 @@ public class OrthogonalProjections {
         numberVectors_ = originalVectors.rows();
         dimension_ = originalVectors.cols();
         validVectors_ = CommonUtil.ArrayInit(originalVectors.rows(), true); // opposite way round from vector constructor
-        orthoNormalizedVectors_ = new Matrix(originalVectors.rows(), originalVectors.cols(), Double.NaN);
+        // Official Matrix is zero-filled and currentVector is a
+        // zero-initialised std::vector<Real>.
+        orthoNormalizedVectors_ = new Matrix(originalVectors.rows(), originalVectors.cols(), 0.0);
 
-        List<Double> currentVector = CommonUtil.ArrayInit(dimension_);
+        List<Double> currentVector = CommonUtil.ArrayInit(dimension_, 0.0);
         for (int j = 0; j < numberVectors_; ++j) {
             if (validVectors_.get(j)) {
                 for (int k = 0; k < numberVectors_; ++k) // create an orthormal basis not containing j
@@ -101,7 +104,9 @@ public class OrthogonalProjections {
 
             } // end of  if (validVectors_[j])
 
-            projectedVectors_.add(currentVector);
+            // Official push_back copies currentVector; adding the same mutable
+            // list would alias every row.
+            projectedVectors_.add(new ArrayList<>(currentVector));
 
 
         } // end of j loop
