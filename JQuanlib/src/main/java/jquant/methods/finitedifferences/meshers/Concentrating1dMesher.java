@@ -125,7 +125,10 @@ public class Concentrating1dMesher extends Fdm1dMesher {
 
         for (int i = 0; i < points.size(); ++i) {
             if ((cPoints.get(i).f) && points.get(i) > start && points.get(i) < end) {
-                int j = Arrays.binarySearch(y.toArray(), points.get(i));
+                // Official uses std::lower_bound over the (sorted) y grid;
+                // Arrays.binarySearch would return a negative insertion
+                // point when the critical point is not an exact grid node.
+                int j = lowerBound(y.toArray(), points.get(i));
                 // 关键：创建一个局部 final 变量
                 final double targetPoint = points.get(i);
                 final double e = new Brent().solve(x1 -> odeSolution.value(x1, true) - targetPoint, QL_EPSILON, x.get(j), 0.5 / size);
@@ -138,7 +141,7 @@ public class Concentrating1dMesher extends Fdm1dMesher {
             int j = 0;
             for (int i = 1; i < w.size(); i++) {
                 // 如果当前元素的 first 与上一个保留元素的 first 不同
-                if (!w.get(i).getFirst().equals(w.get(j).getFirst())) {
+                if (!close_enough(w.get(i).getFirst(), w.get(j).getFirst(), 1000)) {
                     j++;
                     w.set(j, w.get(i));
                 }
@@ -166,5 +169,17 @@ public class Concentrating1dMesher extends Fdm1dMesher {
         }
         dplus_.set(size() - 1, Double.NaN);
         dminus_.set(0, Double.NaN);
+    }
+
+    private static int lowerBound(double[] sorted, double value) {
+        int lo = 0, hi = sorted.length;
+        while (lo < hi) {
+            final int mid = (lo + hi) >>> 1;
+            if (sorted[mid] < value)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        return lo;
     }
 }

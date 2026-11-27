@@ -54,6 +54,19 @@ public class TripleBandLinearOp implements FdmLinearOp {
     protected TripleBandLinearOp() {
     }
 
+    //! Copy constructor, mirroring the official implicit copy constructor.
+    protected TripleBandLinearOp(final TripleBandLinearOp m) {
+        direction_ = m.direction_;
+        mesher_ = m.mesher_;
+        i0_ = m.i0_;
+        i2_ = m.i2_;
+        reverseIndex_ = m.reverseIndex_;
+        lower_ = m.lower_.clone();
+        diag_ = m.diag_.clone();
+        upper_ = m.upper_.clone();
+        temp_ = new double[m.temp_.length];
+    }
+
     private static void swapElements(int[] a, int i, int j) {
         final int tmp = a[i];
         a[i] = a[j];
@@ -133,6 +146,23 @@ public class TripleBandLinearOp implements FdmLinearOp {
             retVal.lower_[i] = lower_[i] * s;
             retVal.diag_[i] = diag_[i] * s;
             retVal.upper_[i] = upper_[i] * s;
+        }
+
+        return retVal;
+    }
+
+    public TripleBandLinearOp multR(Array u) {
+        QL_REQUIRE(u.size() == mesher_.layout().size(), "inconsistent size of rhs");
+        final TripleBandLinearOp retVal = new TripleBandLinearOp(direction_, mesher_);
+
+        final int size = mesher_.layout().size();
+        for (int i = 0; i < size; ++i) {
+            final double sm1 = i > 0 ? u.get(i - 1) : 1.0;
+            final double s0 = u.get(i);
+            final double sp1 = i < size - 1 ? u.get(i + 1) : 1.0;
+            retVal.lower_[i] = lower_[i] * sm1;
+            retVal.diag_[i] = diag_[i] * s0;
+            retVal.upper_[i] = upper_[i] * sp1;
         }
 
         return retVal;

@@ -6,31 +6,14 @@ import org.apache.commons.math3.util.Precision;
 
 public class ManualNonCentralChiSquared {
     private static final double EPSILON = Precision.EPSILON;
+    private static final long MAX_SERIES_ITERATIONS = 1000000L;
 
     /**
      * 计算非中心卡方分布的 PDF: pdf(x; df, ncp)
      * 对应 C++ 中的 boost::math::pdf
      */
     public static double density(double x, double df, double ncp) {
-        if (x <= 0) return 0.0;
-        if (ncp <= 0) {
-            // 当 ncp 为 0 时，退化为普通卡方分布
-            return FastMath.exp((df / 2.0 - 1.0) * FastMath.log(x) - x / 2.0
-                    - (df / 2.0) * FastMath.log(2.0) - Gamma.logGamma(df / 2.0));
-        }
-
-        double halfDf = df / 2.0;
-        double nu = halfDf - 1.0;
-        double sqrtXNcp = FastMath.sqrt(ncp * x);
-
-        // 使用对数空间计算前面的系数，防止大数值溢出
-        // term = -0.5 * (x + ncp) + (nu / 2.0) * log(x / ncp)
-        double logCoef = -0.5 * (x + ncp) + (nu / 2.0) * FastMath.log(x / ncp);
-
-        // 计算修正贝塞尔函数 I_nu(sqrt(ncp * x))
-        double besselI = modifiedBesselI(nu, sqrtXNcp);
-
-        return 0.5 * FastMath.exp(logCoef) * besselI;
+        return nonCentralChiSquaredPdf(x, df, ncp);
     }
 
     /**
@@ -79,22 +62,105 @@ public class ManualNonCentralChiSquared {
     }
 
     /**
-     * 实现非中心卡方分布的 PDF
+     * 实现非中心卡方分布的 PDF。
+     *
+     * <p>Follows {@code boost::math::pdf(non_central_chi_squared_distribution)},
+     * which for a non-centrality parameter above 50 evaluates the Poisson
+     * weighted central chi-square series instead of the Bessel form.  The
+     * Bessel form is numerically unusable for the very large degrees of
+     * freedom and arguments produced by the CIR tails (the asymptotic series
+     * for {@code I_nu} is outside its convergence region), whereas the series
+     * is centred at its largest term and is stable.</p>
      */
     private static double nonCentralChiSquaredPdf(double x, double df, double ncp) {
         if (x <= 0) return 0.0;
 
-        double nu = (df / 2.0) - 1.0;
-        double sqrtXNcp = FastMath.sqrt(ncp * x);
+        if (ncp <= 0) {
+            // 当 ncp 为 0 时，退化为普通卡方分布
+            return FastMath.exp((df / 2.0 - 1.0) * FastMath.log(x) - x / 2.0
+                    - (df / 2.0) * FastMath.log(2.0) - Gamma.logGamma(df / 2.0));
+        }
+
+        final double nu = (df / 2.0) - 1.0;
+
+        if (ncp > 50.0) {
+            return nonCentralChiSquarePdfSeries(x, df, ncp);
+        }
 
         // 使用对数空间防止中间值溢出 (Log-space calculation)
         // 对应公式: 0.5 * exp(-(x+ncp)/2) * (x/ncp)^(nu/2) * I_nu(sqrt(x*ncp))
-        double logCoef = -0.5 * (x + ncp) + (nu / 2.0) * FastMath.log(x / ncp);
+        final double logCoef = -0.5 * (x + ncp)
+                + (nu / 2.0) * FastMath.log(x / ncp);
 
-        // 调用修正贝塞尔函数
-        double besselI = modifiedBesselI(nu, sqrtXNcp);
+        // Boost falls back to the series when the leading exponential of the
+        // Bessel form would overflow even though the final result would not.
+        if (FastMath.abs(logCoef) >= FastMath.log(Double.MAX_VALUE) / 4.0) {
+            return nonCentralChiSquarePdfSeries(x, df, ncp);
+        }
 
-        return 0.5 * FastMath.exp(logCoef) * besselI;
+        // 调用修正贝塞尔函数（对数空间，避免大参数溢出）
+        return FastMath.exp(FastMath.log(0.5) + logCoef
+                + logModifiedBesselI(nu, FastMath.sqrt(ncp * x)));
+    }
+
+    /**
+     * Boost's {@code non_central_chi_square_pdf}: the Poisson weighted sum of
+     * central chi-square densities, started at the largest term and summed in
+     * both directions.
+     */
+    private static double nonCentralChiSquarePdfSeries(double x, double df,
+                                                       double ncp) {
+        final double x2 = x / 2.0;
+        final double n2 = df / 2.0;
+        final double l2 = ncp / 2.0;
+        final long k = (long) Math.floor(l2);
+
+        double pois = gammaPDerivative(k + 1.0, l2)
+                * gammaPDerivative(n2 + k, x2);
+        if (pois == 0.0) {
+            return 0.0;
+        }
+
+        double sum = 0.0;
+        double poisb = pois;
+        long i = k;
+        for (;; ++i) {
+            sum += pois;
+            if (pois / sum < EPSILON) {
+                break;
+            }
+            if (i - k >= MAX_SERIES_ITERATIONS) {
+                throw new ArithmeticException(
+                        "non-central chi-square pdf series did not converge");
+            }
+            pois *= l2 * x2 / ((i + 1.0) * (n2 + i));
+        }
+        for (i = k - 1; i >= 0; --i) {
+            poisb *= (i + 1.0) * (n2 + i) / (l2 * x2);
+            sum += poisb;
+            if (poisb / sum < EPSILON) {
+                break;
+            }
+        }
+        return sum / 2.0;
+    }
+
+    /** Boost {@code gamma_p_derivative(a, x)}: x^(a-1) exp(-x) / Gamma(a). */
+    private static double gammaPDerivative(double a, double x) {
+        return FastMath.exp((a - 1.0) * FastMath.log(x) - x
+                - Gamma.logGamma(a));
+    }
+
+    /**
+     * Logarithm of the modified Bessel function I_nu(x).
+     */
+    private static double logModifiedBesselI(double nu, double x) {
+        if (x < 13.0) {
+            return FastMath.log(modifiedBesselI(nu, x));
+        } else {
+            return x - 0.5 * FastMath.log(2.0 * Math.PI * x)
+                    + FastMath.log(asymptoticSeries(nu, x));
+        }
     }
 
     /**
@@ -116,18 +182,26 @@ public class ManualNonCentralChiSquared {
             return sum;
         } else {
             // 大值使用渐近展开 (Asymptotic Expansion)
-            double s = 1.0;
-            double na_k = 1.0;
-            double da_k = 1.0;
-            double nu2 = 4.0 * nu * nu;
-            for (int k = 1; k < 30; k++) {
-                na_k *= (nu2 - FastMath.pow(2.0 * k - 1.0, 2));
-                da_k *= (8.0 * k * x);
-                double ak = na_k / da_k;
-                s += ak;
-                if (FastMath.abs(ak) < Precision.EPSILON) break;
-            }
-            return FastMath.exp(x) * s / FastMath.sqrt(2.0 * FastMath.PI * x);
+            return FastMath.exp(x) * asymptoticSeries(nu, x)
+                    / FastMath.sqrt(2.0 * FastMath.PI * x);
         }
+    }
+
+    /**
+     * Asymptotic series factor for I_nu(x), x >= 13.
+     */
+    private static double asymptoticSeries(double nu, double x) {
+        double s = 1.0;
+        double na_k = 1.0;
+        double da_k = 1.0;
+        double nu2 = 4.0 * nu * nu;
+        for (int k = 1; k < 30; k++) {
+            na_k *= (nu2 - FastMath.pow(2.0 * k - 1.0, 2));
+            da_k *= (8.0 * k * x);
+            double ak = na_k / da_k;
+            s += ak;
+            if (FastMath.abs(ak) < Precision.EPSILON) break;
+        }
+        return s;
     }
 }

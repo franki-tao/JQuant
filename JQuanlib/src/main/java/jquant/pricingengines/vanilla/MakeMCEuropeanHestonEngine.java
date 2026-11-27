@@ -1,8 +1,8 @@
 package jquant.pricingengines.vanilla;
 
 import jquant.math.MathUtils;
+import jquant.StochasticProcess;
 import jquant.math.randomnumbers.RngType;
-import jquant.processes.HestonProcess;
 
 import static jquant.math.CommonUtil.QL_REQUIRE;
 
@@ -19,7 +19,7 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  * {@link MakeMCEuropeanEngine}.
  */
 public class MakeMCEuropeanHestonEngine {
-    private final HestonProcess process_;
+    private final StochasticProcess process_;
     private final RngType rngType_;
     private boolean antithetic_ = false;
     private int steps_ = MathUtils.NULL_SIZE;
@@ -29,11 +29,11 @@ public class MakeMCEuropeanHestonEngine {
     private double tolerance_ = MathUtils.NULL_REAL;
     private long seed_ = 0;
 
-    public MakeMCEuropeanHestonEngine(HestonProcess process) {
+    public MakeMCEuropeanHestonEngine(StochasticProcess process) {
         this(process, RngType.PSEUDO_RANDOM);
     }
 
-    public MakeMCEuropeanHestonEngine(HestonProcess process,
+    public MakeMCEuropeanHestonEngine(StochasticProcess process,
                                       RngType rngType) {
         process_ = process;
         rngType_ = rngType;
