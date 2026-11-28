@@ -45,6 +45,21 @@ public abstract class SwaptionVolatilityStructure extends VolatilityTermStructur
         super(settlementDays, calendar, bdc, dc);
     }
 
+    //! returns the volatility for a given option tenor and swap tenor
+    public double volatility(Period optionTenor,
+                             Period swapTenor,
+                             double strike,
+                             boolean extrapolate) {
+        Date optionDate = optionDateFromTenor(optionTenor);
+        return volatility(optionDate, swapTenor, strike, extrapolate);
+    }
+
+    public double volatility(Period optionTenor,
+                             Period swapTenor,
+                             double strike) {
+        return volatility(optionTenor, swapTenor, strike, false);
+    }
+
     //! returns the volatility for a given option date and swap length
     public double volatility(Date optionDate,
                              double swapLength,
@@ -164,6 +179,19 @@ public abstract class SwaptionVolatilityStructure extends VolatilityTermStructur
 
     public double shift(double optionTime, double swapLength) {
         return shift(optionTime, swapLength, false);
+    }
+
+    //! returns the smile for a given option tenor and swap tenor
+    public SmileSection smileSection(Period optionTenor,
+                                     Period swapTenor,
+                                     boolean extrapolate) {
+        Date optionDate = optionDateFromTenor(optionTenor);
+        return smileSection(optionDate, swapTenor, extrapolate);
+    }
+
+    public SmileSection smileSection(Period optionTenor,
+                                     Period swapTenor) {
+        return smileSection(optionTenor, swapTenor, false);
     }
 
     //! returns the smile for a given option date and swap tenor

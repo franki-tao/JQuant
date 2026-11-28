@@ -587,13 +587,17 @@ public class SabrSwaptionVolatilityCube extends SwaptionVolatilityCube {
         if (!marketSpreads)
             createSparseSmiles();
 
+        // Snapshot the cube axes before the loop: setPoint() expands them,
+        // but the official condition is evaluated against the original
+        // grid, so the whole cross-product is filled.
+        double[] cubeOptionTimes = volCubeAtmCalibrated_.optionTimes();
+        double[] cubeSwapLengths = volCubeAtmCalibrated_.swapLengths();
+
         for (int j = 0; j < atmOptionTimes.length; ++j) {
             for (int k = 0; k < atmSwapLengths.length; ++k) {
-                boolean expandOptionTimes = !contains(
-                        volCubeAtmCalibrated_.optionTimes(),
+                boolean expandOptionTimes = !contains(cubeOptionTimes,
                         atmOptionTimes[j]);
-                boolean expandSwapLengths = !contains(
-                        volCubeAtmCalibrated_.swapLengths(),
+                boolean expandSwapLengths = !contains(cubeSwapLengths,
                         atmSwapLengths[k]);
                 if (expandOptionTimes || expandSwapLengths) {
                     double atmForward = atmStrike(atmOptionDates[j],
