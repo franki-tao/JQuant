@@ -22,7 +22,7 @@ import static jquant.processes.HybridHestonHullWhiteProcess.Discretization.Euler
 
     \ingroup processes
 */
-public abstract class HybridHestonHullWhiteProcess extends StochasticProcess {
+public class HybridHestonHullWhiteProcess extends StochasticProcess {
     public enum Discretization {Euler, BSMHullWhite}
 
     protected HestonProcess hestonProcess_;
@@ -36,6 +36,13 @@ public abstract class HybridHestonHullWhiteProcess extends StochasticProcess {
     protected double endDiscount_;
 
     // discretization = BSMHullWhite
+    public HybridHestonHullWhiteProcess(final HestonProcess hestonProcess,
+                                        final HullWhiteForwardProcess hullWhiteProcess,
+                                        double corrEquityShortRate) {
+        this(hestonProcess, hullWhiteProcess, corrEquityShortRate,
+                HybridHestonHullWhiteProcess.Discretization.BSMHullWhite);
+    }
+
     public HybridHestonHullWhiteProcess(final HestonProcess hestonProcess,
                                         final HullWhiteForwardProcess hullWhiteProcess,
                                         double corrEquityShortRate,

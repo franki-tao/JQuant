@@ -66,14 +66,14 @@ public class AnalyticHestonEngine implements PricingEngine {
         OptimalCV
     }
 
-    private final HestonModel model_;
+    protected final HestonModel model_;
     private int evaluations_;
     private final ComplexLogFormula cpxLog_;
     private final FourierIntegration integration_;
     private final double andersenPiterbargEpsilon_;
     private final double alpha_;
 
-    private final Option.arguments arguments_ = new Option.arguments();
+    protected final Option.arguments arguments_ = new Option.arguments();
     private final EuropeanOption.results results_ = new EuropeanOption.results();
     private final Set<Observer> observers_ = new HashSet<>();
 

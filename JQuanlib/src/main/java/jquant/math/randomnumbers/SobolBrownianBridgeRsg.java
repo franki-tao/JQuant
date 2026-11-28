@@ -21,6 +21,11 @@ public class SobolBrownianBridgeRsg implements UsgImpl {
      * @param seed default 0
      * @param directionIntegers default SobolRsg::JoeKuoD7
      */
+    /** Official defaulted overload: {@code SobolBrownianBridgeRsg(factors, steps)}. */
+    public SobolBrownianBridgeRsg(int factors, int steps) {
+        this(factors, steps, Diagonal, 0, JoeKuoD7);
+    }
+
     public SobolBrownianBridgeRsg(int factors,
                                   int steps,
                                   SobolBrownianGenerator.Ordering ordering,
