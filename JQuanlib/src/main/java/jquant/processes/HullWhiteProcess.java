@@ -12,7 +12,7 @@ import static jquant.math.MathUtils.QL_EPSILON;
 
 //! Hull-White stochastic process
 /*! \ingroup processes */
-public abstract class HullWhiteProcess extends StochasticProcess1D {
+public class HullWhiteProcess extends StochasticProcess1D {
     protected OrnsteinUhlenbeckProcess process_;
     protected Handle<YieldTermStructure> h_;
     protected double a_;

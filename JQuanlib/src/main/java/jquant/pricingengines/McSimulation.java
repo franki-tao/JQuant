@@ -53,6 +53,10 @@ public abstract class McSimulation {
         return null;
     }
 
+    protected MultiPathGenerator controlMultiPathGenerator() {
+        return null;
+    }
+
     protected PricingEngine controlPricingEngine() {
         return null;
     }
@@ -157,7 +161,7 @@ public abstract class McSimulation {
                 mcModel_ = new MonteCarloModel(multiPathGenerator(),
                         multiPP, new IncrementalStatistics(),
                         antitheticVariate_, controlPP, controlVariateValue,
-                        null);
+                        controlMultiPathGenerator());
             } else {
                 mcModel_ = new MonteCarloModel(multiPathGenerator(),
                         multiPP, new IncrementalStatistics(),

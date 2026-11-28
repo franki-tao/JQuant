@@ -150,6 +150,28 @@ public abstract class McVanillaEngine extends McSimulation implements PricingEng
                 brownianBridge_);
     }
 
+    @Override
+    protected double controlVariateValue() {
+        final PricingEngine controlPE = controlPricingEngine();
+        QL_REQUIRE(controlPE != null,
+                "engine does not provide control variation pricing engine");
+
+        final PricingEngine.arguments controlArguments = controlPE.getArguments();
+        QL_REQUIRE(controlArguments instanceof Option.arguments,
+                "engine is using inconsistent arguments");
+
+        final Option.arguments optionArguments = (Option.arguments) controlArguments;
+        optionArguments.payoff = arguments_.payoff;
+        optionArguments.exercise = arguments_.exercise;
+        controlPE.calculate();
+
+        final PricingEngine.results controlResults = controlPE.getResults();
+        QL_REQUIRE(controlResults instanceof Option.results,
+                "engine returns an inconsistent result type");
+
+        return ((Option.results) controlResults).value;
+    }
+
     public StochasticProcess process() {
         return process_;
     }
