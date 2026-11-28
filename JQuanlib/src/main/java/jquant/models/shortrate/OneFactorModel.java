@@ -83,6 +83,41 @@ public abstract class OneFactorModel extends ShortRateModel {
             tree_ = tree;
             dynamics_ = dynamics;
             spread_ = 0.0;
+            initImpl();
+        }
+
+        private void initImpl() {
+            setImpl_(new jquant.methods.lattices.impl.TreeLatticeImpl() {
+                @Override
+                public int size(int index) {
+                    return ShortRateTree.this.size(index);
+                }
+
+                @Override
+                public double discount(int i, int j) {
+                    return ShortRateTree.this.discount(i, j);
+                }
+
+                @Override
+                public int descendant(int i, int j, int branch) {
+                    return ShortRateTree.this.descendant(i, j, branch);
+                }
+
+                @Override
+                public double probability(int i, int j, int branch) {
+                    return ShortRateTree.this.probability(i, j, branch);
+                }
+
+                @Override
+                public void stepback(int i, Array values, Array newValues) {
+                    ShortRateTree.this.stepback(i, values, newValues);
+                }
+
+                @Override
+                public double underlying(int i, int j) {
+                    return ShortRateTree.this.underlying(i, j);
+                }
+            });
         }
 
         //! Tree build-up + numerical fitting to term-structure

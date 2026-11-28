@@ -2,7 +2,9 @@ package jquant.instruments;
 
 import jquant.CashFlow;
 import jquant.PricingEngine;
+import jquant.indexes.IborIndex;
 import jquant.patterns.Observable;
+import jquant.time.BusinessDayConvention;
 import jquant.time.DayCounter;
 import jquant.time.Schedule;
 
@@ -35,9 +37,20 @@ public interface FixedVsFloatingSwap extends Observable {
 
     Schedule floatingSchedule();
 
+    IborIndex iborIndex();
+
+    DayCounter floatingDayCount();
+
+    BusinessDayConvention paymentConvention();
+
     List<CashFlow> fixedLeg();
 
     List<CashFlow> floatingLeg();
+
+    /** Official {@code FixedVsFloatingSwap::leg(Size)}. */
+    default List<CashFlow> leg(int j) {
+        return j == 0 ? fixedLeg() : floatingLeg();
+    }
 
     double fairRate();
 

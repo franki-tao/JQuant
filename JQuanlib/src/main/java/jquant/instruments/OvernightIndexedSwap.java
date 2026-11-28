@@ -28,10 +28,9 @@ import static jquant.math.CommonUtil.QL_REQUIRE;
  *
  * <p>Ported from QuantLib
  * {@code ql/instruments/overnightindexedswap.{hpp,cpp}} as far as
- * {@code test-suite/swaption.cpp} needs it. The official constructor also
- * accepts lookback/lockout/observation-shift/rounding options; those default
- * to the official zero/false values in the suite and are not exposed here
- * because the Java {@code OvernightLeg} does not implement them yet.
+ * {@code test-suite/bermudanswaption.cpp} needs it. The official constructor
+ * options beyond the rounding precision (lookback days, lockout days,
+ * observation shift) are exposed and forwarded to {@link OvernightLeg}.
  */
 public class OvernightIndexedSwap extends Instrument implements FixedVsFloatingSwap {
     private final Swap.Type type_;
@@ -42,6 +41,14 @@ public class OvernightIndexedSwap extends Instrument implements FixedVsFloatingS
     private final Schedule overnightSchedule_;
     private final OvernightIndex overnightIndex_;
     private final double spread_;
+    private final BusinessDayConvention paymentConvention_;
+    private final int paymentLag_;
+    private final Calendar paymentCalendar_;
+    private final boolean telescopicValueDates_;
+    private final RateAveraging averagingMethod_;
+    private final Integer lookbackDays_;
+    private final int lockoutDays_;
+    private final boolean applyObservationShift_;
     private final List<CashFlow> fixedLeg_;
     private final List<CashFlow> floatingLeg_;
     private double fairRate_ = Double.NaN;
@@ -63,6 +70,29 @@ public class OvernightIndexedSwap extends Instrument implements FixedVsFloatingS
                                 Calendar paymentCalendar,
                                 boolean telescopicValueDates,
                                 RateAveraging averagingMethod) {
+        this(type, nominal, fixedSchedule, fixedRate, fixedDC,
+                overnightSchedule, overnightIndex, spread, paymentLag,
+                paymentAdjustment, paymentCalendar, telescopicValueDates,
+                averagingMethod, null, 0, false);
+    }
+
+    /** Official constructor, including lookback/lockout/observation shift. */
+    public OvernightIndexedSwap(Swap.Type type,
+                                double nominal,
+                                Schedule fixedSchedule,
+                                double fixedRate,
+                                DayCounter fixedDC,
+                                Schedule overnightSchedule,
+                                OvernightIndex overnightIndex,
+                                double spread,
+                                int paymentLag,
+                                BusinessDayConvention paymentAdjustment,
+                                Calendar paymentCalendar,
+                                boolean telescopicValueDates,
+                                RateAveraging averagingMethod,
+                                Integer lookbackDays,
+                                int lockoutDays,
+                                boolean applyObservationShift) {
         type_ = type;
         nominal_ = nominal;
         fixedSchedule_ = fixedSchedule;
@@ -71,6 +101,14 @@ public class OvernightIndexedSwap extends Instrument implements FixedVsFloatingS
         overnightSchedule_ = overnightSchedule;
         overnightIndex_ = overnightIndex;
         spread_ = spread;
+        paymentConvention_ = paymentAdjustment;
+        paymentLag_ = paymentLag;
+        paymentCalendar_ = paymentCalendar;
+        telescopicValueDates_ = telescopicValueDates;
+        averagingMethod_ = averagingMethod;
+        lookbackDays_ = lookbackDays;
+        lockoutDays_ = lockoutDays;
+        applyObservationShift_ = applyObservationShift;
 
         Calendar fixedPaymentCalendar = (paymentCalendar == null || paymentCalendar.empty())
                 ? fixedSchedule.calendar() : paymentCalendar;
@@ -92,6 +130,9 @@ public class OvernightIndexedSwap extends Instrument implements FixedVsFloatingS
                 .withPaymentAdjustment(paymentAdjustment)
                 .withPaymentCalendar(floatingPaymentCalendar)
                 .withAveragingMethod(averagingMethod)
+                .withLookbackDays(lookbackDays)
+                .withLockoutDays(lockoutDays)
+                .withObservationShift(applyObservationShift)
                 .build();
 
         registerWith(overnightIndex_);
@@ -112,6 +153,49 @@ public class OvernightIndexedSwap extends Instrument implements FixedVsFloatingS
         this(type, nominal, schedule, fixedRate, fixedDC, schedule, overnightIndex,
                 spread, 0, BusinessDayConvention.FOLLOWING, null, false,
                 RateAveraging.Simple);
+    }
+
+    /** Convenience constructor with the official default arguments. */
+    public OvernightIndexedSwap(Swap.Type type,
+                                double nominal,
+                                Schedule fixedSchedule,
+                                double fixedRate,
+                                DayCounter fixedDC,
+                                Schedule overnightSchedule,
+                                OvernightIndex overnightIndex,
+                                double spread) {
+        this(type, nominal, fixedSchedule, fixedRate, fixedDC,
+                overnightSchedule, overnightIndex, spread, 0,
+                BusinessDayConvention.FOLLOWING, null, false,
+                RateAveraging.Compound, null, 0, false);
+    }
+
+    public int paymentLag() {
+        return paymentLag_;
+    }
+
+    public Calendar paymentCalendar() {
+        return paymentCalendar_;
+    }
+
+    public boolean telescopicValueDates() {
+        return telescopicValueDates_;
+    }
+
+    public RateAveraging averagingMethod() {
+        return averagingMethod_;
+    }
+
+    public Integer lookbackDays() {
+        return lookbackDays_;
+    }
+
+    public int lockoutDays() {
+        return lockoutDays_;
+    }
+
+    public boolean applyObservationShift() {
+        return applyObservationShift_;
     }
 
     @Override
@@ -147,6 +231,21 @@ public class OvernightIndexedSwap extends Instrument implements FixedVsFloatingS
     @Override
     public Schedule floatingSchedule() {
         return overnightSchedule_;
+    }
+
+    @Override
+    public OvernightIndex iborIndex() {
+        return overnightIndex_;
+    }
+
+    @Override
+    public DayCounter floatingDayCount() {
+        return overnightIndex_.dayCounter();
+    }
+
+    @Override
+    public BusinessDayConvention paymentConvention() {
+        return paymentConvention_;
     }
 
     @Override

@@ -161,14 +161,27 @@ public class VanillaSwap extends Instrument implements FixedVsFloatingSwap {
         return nominal_;
     }
 
+    @Override
     public IborIndex iborIndex() {
         return iborIndex_;
     }
 
+    @Override
+    public DayCounter floatingDayCount() {
+        return floatingDayCount_;
+    }
+
+    @Override
+    public BusinessDayConvention paymentConvention() {
+        return paymentConvention_;
+    }
+
+    @Override
     public Schedule fixedSchedule() {
         return fixedSchedule_;
     }
 
+    @Override
     public Schedule floatingSchedule() {
         return floatSchedule_;
     }

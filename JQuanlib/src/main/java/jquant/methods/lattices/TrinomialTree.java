@@ -28,6 +28,7 @@ public class TrinomialTree {
     // isPositive = false
     public TrinomialTree(StochasticProcess1D process, TimeGrid timeGrid, boolean isPositive) {
         columns_ = timeGrid.size();
+        branchings_ = new java.util.ArrayList<>();
         dx_ = CommonUtil.ArrayInit(1, 0.0);
         timeGrid_ = timeGrid;
         x0_ = process.x0();
