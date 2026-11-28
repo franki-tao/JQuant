@@ -96,7 +96,7 @@ public abstract class SmileSection implements Observer, Observable {
 
     public abstract double atmLevel();
 
-    public final Date exerciseDate() {
+    public Date exerciseDate() {
         return exerciseDate_;
     }
 
@@ -108,7 +108,7 @@ public abstract class SmileSection implements Observer, Observable {
         return shift_;
     }
 
-    public final Date referenceDate() {
+    public Date referenceDate() {
         QL_REQUIRE(TimeUtils.neq(referenceDate_, new Date()),
                 "referenceDate not available for this instance");
         return referenceDate_;
@@ -118,7 +118,7 @@ public abstract class SmileSection implements Observer, Observable {
         return exerciseTime_;
     }
 
-    public final DayCounter dayCounter() {
+    public DayCounter dayCounter() {
         return dc_;
     }
 
