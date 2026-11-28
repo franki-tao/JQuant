@@ -16,6 +16,7 @@ public class Branching {
     private int kMin_, jMin_, kMax_, jMax_;
 
     public Branching() {
+        k_ = new ArrayList<>();
         probs_ = Arrays.asList(new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
 
         kMin_ = Integer.MAX_VALUE;

@@ -110,6 +110,10 @@ public class HullWhite extends Vasicek implements TermStructureConsistentModel {
     private final Set<Observer> observers = new HashSet<>();
 
     // a = 0.1, sigma = 0.01
+    public HullWhite(final Handle<YieldTermStructure> termStructure) {
+        this(termStructure, 0.1, 0.01);
+    }
+
     public HullWhite(final Handle<YieldTermStructure> termStructure, double a, double sigma) {
         super(termStructure.currentLink().forwardRate(0.0, 0.0, Continuous, Frequency.NO_FREQUENCY, false).rate(),
                 a, 0d, sigma, 0d);

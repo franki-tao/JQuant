@@ -65,6 +65,14 @@ public class FdmSimpleProcess1dMesher extends Fdm1dMesher {
     public FdmSimpleProcess1dMesher(int size,
                                     final StochasticProcess1D process,
                                     double maturity,
+                                    int tAvgSteps,
+                                    double epsilon) {
+        this(size, process, maturity, tAvgSteps, epsilon, NULL_REAL);
+    }
+
+    public FdmSimpleProcess1dMesher(int size,
+                                    final StochasticProcess1D process,
+                                    double maturity,
                                     int tAvgSteps) {
         this(size, process, maturity, tAvgSteps, 0.0001, NULL_REAL);
     }

@@ -21,7 +21,7 @@ public class TreeLattice2D extends TreeLattice {
         tree1_ = tree1;
         tree2_ = tree2;
         m_ = new Matrix(3, 3);
-        rho_ = correlation;
+        rho_ = Math.abs(correlation);
 
         if (correlation < 0.0) {
             m_.set(0, 0, -1.0);

@@ -74,6 +74,11 @@ public class Swaption extends Instrument {
     private final Settlement.Method settlementMethod_;
 
     public Swaption(FixedVsFloatingSwap swap,
+                    Exercise exercise) {
+        this(swap, exercise, Settlement.Type.Physical, Settlement.Method.PhysicalOTC);
+    }
+
+    public Swaption(FixedVsFloatingSwap swap,
                     Exercise exercise,
                     Settlement.Type delivery,
                     Settlement.Method settlementMethod) {
